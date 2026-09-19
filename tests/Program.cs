@@ -9,6 +9,9 @@ using LateGamePerformance;
 // that each one landed. Usage: dotnet run --project tests -- "<GameDir>\Timberborn_Data\Managed"
 internal static class Program
 {
+    private const string ModSettingsDirectory =
+        @"C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3283831040\version-1.1\Scripts";
+
     private static int _failures;
     private static string _managed;
 
@@ -20,8 +23,15 @@ internal static class Program
         _managed = managed;
         AppDomain.CurrentDomain.AssemblyResolve += (_, e) =>
         {
-            string path = Path.Combine(managed, new AssemblyName(e.Name).Name + ".dll");
-            return File.Exists(path) ? Assembly.LoadFrom(path) : null;
+            foreach (string directory in new[] { managed, ModSettingsDirectory })
+            {
+                string path = Path.Combine(directory, new AssemblyName(e.Name).Name + ".dll");
+                if (File.Exists(path))
+                {
+                    return Assembly.LoadFrom(path);
+                }
+            }
+            return null;
         };
         // AccessTools.TypeByName only sees loaded assemblies; in the game they all are.
         foreach (string name in new[] { "Timberborn.Metrics", "Timberborn.Hauling", "Timberborn.InventorySystem", "Timberborn.TickSystem",
@@ -63,7 +73,8 @@ internal static class Program
                 Console.WriteLine("     " + problem);
             }
         }
-        Check(patchCount == 31, $"31 patches declared (found {patchCount})");
+        Check(patchCount == 32, $"32 patches declared (found {patchCount})");
+        TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
         Check(warnings.Count == 1 && warnings[0].Contains("RouteMaps failed"),
@@ -87,6 +98,46 @@ internal static class Program
         Check(config.StatsEveryTicks == 0, "config: negative clamped to 0");
         Check(config.GcReport, "config: unparsable value keeps default");
         Check(!config.RouteMaps && config.RouteMapsMinFields == 1, "config: route map settings parsed and clamped");
+    }
+
+    // The settings page cannot be shown outside the game, but what Mod Settings needs from it can be checked:
+    // the type loads against the installed Mod Settings, it exposes exactly one setting property (Mod Settings
+    // finds settings by reflecting over public properties), and its id matches the manifest.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void TestSettingsPage()
+    {
+        Type page = typeof(PerformanceSettings);
+        Type modSetting = page.BaseType.Assembly.GetType("ModSettings.Core.ModSetting", true);
+        int settings = 0;
+        foreach (PropertyInfo property in page.GetProperties(BindingFlags.Instance | BindingFlags.Public))
+        {
+            if (modSetting.IsAssignableFrom(property.PropertyType))
+            {
+                settings++;
+            }
+        }
+        Check(settings == 1, "settings page: one setting property is discoverable by Mod Settings");
+        string manifest = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "packaging", "manifest.json"));
+        Check(manifest.Contains("\"Id\": \"" + Plugin.ModId + "\""), "settings page: mod id matches manifest.json");
+        Check(manifest.Contains("eMka.ModSettings"), "settings page: manifest requires Mod Settings");
+
+        // The menu flag switches the game's timers on when a scene's metrics service is created and loaded.
+        Type serviceType = Type.GetType("Timberborn.Metrics.MetricsService, Timberborn.Metrics", true);
+        object service = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(serviceType);
+        PropertyInfo enabled = serviceType.GetProperty("MetricsEnabled");
+        MetricsDump.CreateFeature(new Config()).Patches.ForEach(patch => patch.Target());
+        MetricsDump.UserDataFolderPath = () => Path.GetTempPath();
+        MetricsDump.RequestedFromMenu = false;
+        MetricsDump.MetricsServiceCreatedPostfix(service);
+        MetricsDump.MetricsServiceLoadedPostfix(service);
+        Check(!(bool)enabled.GetValue(service), "metrics: stay off when the menu setting is off");
+        MetricsDump.RequestedFromMenu = true;
+        MetricsDump.MetricsServiceCreatedPostfix(service);
+        Check((bool)enabled.GetValue(service), "metrics: switched on as the service is created");
+        enabled.SetValue(service, false);   // what the game's own Load does without -metrics
+        MetricsDump.MetricsServiceLoadedPostfix(service);
+        Check((bool)enabled.GetValue(service), "metrics: switched on again after the game's Load reset it");
+        MetricsDump.RequestedFromMenu = false;
     }
 
     private static void TestTimingStats()

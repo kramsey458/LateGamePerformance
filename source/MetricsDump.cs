@@ -1,21 +1,33 @@
 using System;
 using System.IO;
+using System.Reflection;
 using Timberborn.Metrics;
 using Timberborn.PlatformUtilities;
 
 namespace LateGamePerformance
 {
     // The game can time every tickable component, every once-per-tick system and every root behaviour (needs,
-    // work, carrying, wandering...). It does so when launched with -metrics, but only writes the result at the
-    // end of a benchmark run. This writes the same report during normal play, multiplayer included, every
-    // MetricsEveryTicks ticks, then resets the timers so each file covers one interval.
+    // work, carrying, wandering...). It only does so when launched with -metrics, and only writes the result at
+    // the end of a benchmark run. This:
     //
-    // Nothing here runs unless the game was launched with -metrics. The timers themselves (two stopwatch calls
-    // around every component tick) are the game's and do slow it a little, so use it for a profiling session,
-    // not all the time.
+    //  - switches those timers on when "Record per-component timings" is ticked in the mod's settings page, so no
+    //    launch option is needed (-metrics still works too);
+    //  - writes the same report during normal play, multiplayer included, every MetricsEveryTicks ticks, then
+    //    resets the timers so each file covers one interval.
+    //
+    // Every building and beaver decides whether to time itself when it is created, from the metrics service's
+    // flag. So the flag is set as the service is created and again after it loads (its Load resets it from the
+    // command line), before anything is created, and a change to the setting applies from the next save load.
+    //
+    // The timers (two stopwatch calls around every component tick) are the game's and slow it a little, so this
+    // is for a profiling session, not for all the time.
     internal static class MetricsDump
     {
+        // Written by the settings page. A plain field so this class never touches Mod Settings types.
+        public static bool RequestedFromMenu;
+
         private static IMetricsService _metricsService;
+        private static MethodInfo _setMetricsEnabled;
         private static int _everyTicks;
         private static long _ticks;
         private static long _intervalStartTick;
@@ -24,18 +36,39 @@ namespace LateGamePerformance
         public static Feature CreateFeature(Config config)
         {
             _everyTicks = config.MetricsEveryTicks;
+            Type self = typeof(MetricsDump);
             Feature feature = new Feature { Name = "MetricsDump" };
             feature.Patches.Add(new PatchSpec
             {
                 Name = "MetricsService.Load",
                 Required = true,
-                Target = () => Reflect.Method("Timberborn.Metrics.MetricsService", "Load"),
-                Postfix = Reflect.Own(typeof(MetricsDump), nameof(MetricsServiceLoadedPostfix))
+                Target = () =>
+                {
+                    Type service = Reflect.GameType("Timberborn.Metrics.MetricsService");
+                    _setMetricsEnabled = Reflect.Setter(service, "MetricsEnabled");
+                    if (_setMetricsEnabled == null)
+                    {
+                        throw new MissingMethodException("MetricsService.MetricsEnabled setter");
+                    }
+                    return Reflect.Method("Timberborn.Metrics.MetricsService", "Load");
+                },
+                Postfix = Reflect.Own(self, nameof(MetricsServiceLoadedPostfix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "MetricsService..ctor",
+                // Covers anything that reads the flag before the service's own Load has run.
+                Required = false,
+                Target = () => Reflect.FirstConstructor("Timberborn.Metrics.MetricsService"),
+                Postfix = Reflect.Own(self, nameof(MetricsServiceCreatedPostfix))
             });
             return feature;
         }
 
-        public static string Folder => Path.Combine(UserDataFolder.Folder, "LateGamePerformance");
+        // Replaced by the test harness, where the game's folder lookup (a Unity call) is not available.
+        public static Func<string> UserDataFolderPath = () => UserDataFolder.Folder;
+
+        public static string Folder => Path.Combine(UserDataFolderPath(), "LateGamePerformance");
 
         public static void OnTickStarted()
         {
@@ -64,24 +97,69 @@ namespace LateGamePerformance
             _intervalStartTick = _ticks;
         }
 
-        // ReSharper disable once InconsistentNaming
-        private static void MetricsServiceLoadedPostfix(object __instance)
+        // ReSharper disable InconsistentNaming
+        internal static void MetricsServiceCreatedPostfix(object __instance)
+        {
+            if (RequestedFromMenu && _everyTicks > 0)
+            {
+                TryForceOn(__instance);
+            }
+        }
+
+        internal static void MetricsServiceLoadedPostfix(object __instance)
+        {
+            try
+            {
+                OnMetricsServiceLoaded(__instance);
+            }
+            catch (Exception exception)
+            {
+                // This runs while a save is loading; nothing here may interrupt that.
+                _metricsService = null;
+                Log.Warning("Metrics: setup failed and is off for this session: " + exception.Message);
+            }
+        }
+
+        private static void OnMetricsServiceLoaded(object __instance)
         {
             // A new game or map editor scene.
             _ticks = _intervalStartTick = 0;
             _failed = false;
+            _metricsService = null;
             IMetricsService service = __instance as IMetricsService;
-            if (service != null && service.MetricsEnabled && _everyTicks > 0)
+            if (service == null || _everyTicks <= 0)
+            {
+                return;
+            }
+            bool fromLaunchOption = service.MetricsEnabled;
+            if (!fromLaunchOption && RequestedFromMenu)
+            {
+                TryForceOn(__instance);
+            }
+            if (service.MetricsEnabled)
             {
                 _metricsService = service;
-                Log.Info($"Metrics: on. Per-component timings are written every {_everyTicks} ticks to {Folder}. " +
-                         "The game's timers slow it a little; remove -metrics from the launch options when done.");
+                Log.Info($"Metrics: on ({(fromLaunchOption ? "-metrics launch option" : "mod setting")}). Per-component " +
+                         $"timings are written every {_everyTicks} ticks to {Folder}. The game's timers slow it a " +
+                         "little; turn this off again when done.");
             }
             else
             {
-                _metricsService = null;
-                Log.Info("Metrics: off. To record what each part of a tick costs, add -metrics to the game's Steam " +
-                         "launch options (Library > Timberborn > Properties > General) and restart.");
+                Log.Info("Metrics: off. To record what each part of a tick costs, tick 'Record per-component timings' " +
+                         "in this mod's settings (Mods > Late Game Performance), then load a save.");
+            }
+        }
+        // ReSharper restore InconsistentNaming
+
+        private static void TryForceOn(object metricsService)
+        {
+            try
+            {
+                _setMetricsEnabled.Invoke(metricsService, new object[] { true });
+            }
+            catch (Exception exception)
+            {
+                Log.Warning("Metrics: could not switch the game's timers on: " + exception.Message);
             }
         }
     }

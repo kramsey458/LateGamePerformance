@@ -1,7 +1,7 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.4.0** is a preview. 0.3.0 has been played in multiplayer; the measurement tools 0.4.0 adds have been
+Version **0.4.1** is a preview. 0.3.0 has been played in multiplayer; the measurement tools 0.4.0 adds have been
 tested against the game's assemblies but **not yet played in-game**.
 Test on a copy of a save first.
 
@@ -9,7 +9,7 @@ Test on a copy of a save first.
 
 1. Close Timberborn. Extract the release ZIP into `Documents/Timberborn/Mods`. It contains one
    `LateGamePerformance` folder.
-2. Requires the **Harmony** mod (2.4.1 or newer) from the Steam Workshop.
+2. Requires the **Harmony** (2.4.1 or newer) and **Mod Settings** mods from the Steam Workshop.
 3. Launch Timberborn, enable **Late Game Performance**, and restart.
 4. Look for `[LateGamePerformance]` lines in `Player.log`
    (`%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log`).
@@ -101,16 +101,23 @@ everything else 5.6 ms per frame = 31%; longest frame 96 ms, longest simulation 
 - If "everything else" is a large share, a frame rate cap gives the simulation more of each second, because the
   per-frame cost is paid less often.
 
-### Per-component timings (only with `-metrics`, new in 0.4.0)
+### Per-component timings (menu setting, new in 0.4.x)
 
-The game can time every tickable component, every once-per-tick system and every root behaviour, but only writes
-the result at the end of a benchmark run. With this mod, launching the game with `-metrics` (Steam: Library >
-Timberborn > Properties > General > Launch options) writes that report during normal play, multiplayer included,
-to `Documents\Timberborn\LateGamePerformance` every `MetricsEveryTicks` ticks (default 3000), then resets the
-timers so each file covers one interval. Each group lists its total seconds and every entry's share of it.
+The game can time every tickable component, every once-per-tick system and every root behaviour, but only when
+launched with a `-metrics` option, and it only writes the result at the end of a benchmark run.
 
-The game's timers add two stopwatch calls around every component tick, so expect it to run a little slower while
-`-metrics` is on, and remove the option afterwards. Without `-metrics` this feature does nothing.
+Tick **Record per-component timings** in this mod's settings page (**Mods > Late Game Performance**, from the main
+menu or in-game) and **load a save**. The mod switches the game's timers on for that session and writes the report
+during normal play, multiplayer included, to `Documents\Timberborn\LateGamePerformance` every `MetricsEveryTicks`
+ticks (default 3000), then resets the timers so each file covers one interval. Each group lists its total seconds
+and every entry's share of it.
+
+- It applies from the **next save load**, not immediately: every building and beaver decides whether to time
+  itself at the moment it is created.
+- The game's timers add two stopwatch calls around every component tick, so expect it to run a little slower
+  while this is on. Untick it after a profiling session.
+- It does not affect the simulation, so multiplayer peers may have it set differently.
+- Launching the game with `-metrics` still works and has the same effect.
 
 ### Garbage collector report (on by default)
 
@@ -159,7 +166,7 @@ alongside the game; 0 road changes left to the game (fewer than 16 maps)
 | `RouteMapsMinFields` (simulation) | `16` | Smaller changes are left to the game. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
 | `Timing` | `true` | The timing stats line. |
-| `MetricsEveryTicks` | `3000` | With `-metrics`: write per-component timings every N ticks. `0` = never. |
+| `MetricsEveryTicks` | `3000` | While per-component timings are on: write them every N ticks. `0` = never (disables the menu setting too). |
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
@@ -184,7 +191,7 @@ alongside the game; 0 road changes left to the game (fewer than 16 maps)
 
 ## Build and test
 
-Requires .NET SDK 8, a local Timberborn installation, and the Harmony Workshop mod. No NuGet packages and no
+Requires .NET SDK 8, a local Timberborn installation, and the Harmony and Mod Settings Workshop mods. No NuGet packages and no
 redistributed game DLLs.
 
 ```powershell

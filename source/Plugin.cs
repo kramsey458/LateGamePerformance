@@ -6,7 +6,10 @@ namespace LateGamePerformance
 {
     public class Plugin : IModStarter
     {
-        public const string HarmonyId = "kyler.lategameperformance";
+        // Must equal the Id in manifest.json; the settings page is registered under it.
+        public const string ModId = "kyler.lategameperformance";
+
+        public const string HarmonyId = ModId;
 
         private static Config _config = new Config();
         private static bool _diagnosticsActive;

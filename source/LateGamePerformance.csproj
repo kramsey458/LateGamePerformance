@@ -5,18 +5,21 @@
     <RootNamespace>LateGamePerformance</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <DebugType>none</DebugType>
     <GameDir Condition="'$(GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Timberborn</GameDir>
     <Managed>$(GameDir)\Timberborn_Data\Managed</Managed>
     <HarmonyPath Condition="'$(HarmonyPath)' == ''">C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3284904751\0Harmony.dll</HarmonyPath>
+    <ModSettingsPath Condition="'$(ModSettingsPath)' == ''">C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3283831040\version-1.1\Scripts\ModSettings.Core.dll</ModSettingsPath>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="LateGamePerformance.Tests" />
     <Reference Include="$(Managed)\Timberborn.*.dll" Private="false" />
     <Reference Include="$(Managed)\UnityEngine.dll" Private="false" />
     <Reference Include="$(Managed)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="$(Managed)\Bindito.Core.dll" Private="false" />
     <Reference Include="$(HarmonyPath)" Private="false" />
+    <Reference Include="$(ModSettingsPath)" Private="false" />
   </ItemGroup>
 </Project>
