@@ -15,24 +15,34 @@ namespace LateGamePerformance
     // map that contains a changed tile, which in a connected district is nearly all of them, and rebuilds each
     // one on the main thread the next time something asks for it.
     //
-    // Here: the maps that were in use and just got thrown away are rebuilt straight away, spread over worker
-    // threads. This file decides which maps and can wait for the whole batch (the 0.2.0 behaviour, kept as the
-    // fallback). RouteMapsBackground.cs lets the tick carry on while workers rebuild.
+    // Here: at the end of every navigation tick, every cached map that is not built gets built, spread over
+    // worker threads. This file decides which maps and can wait for the whole batch (kept as the fallback).
+    // RouteMapsBackground.cs lets the tick carry on while workers build.
     //
-    // Why this is safe:
+    // Which maps: a map is cached exactly while its building is finished (BuildingCachingFlowField), so the set
+    // of cached maps is simulation state and identical on every multiplayer peer. After this runs, all of them
+    // that can be built are built, on every peer.
+    //
+    // Up to 0.4.4 this rebuilt "the maps that were filled before the road change". That was wrong for
+    // multiplayer: a map also gets filled when a player's range overlay asks for a route, on that player's
+    // computer only, so two peers could rebuild different sets and then disagree about which maps are filled.
+    // Whether a map is filled can matter, because a few code paths use a map only "if it is already filled".
+    // Building everything that is cached removes the dependence on what anyone looked at: whatever a player's
+    // overlays filled, both peers end every navigation tick with the same maps filled.
+    //
+    // Why building them on other threads is safe:
     //  - Regular road changes are only applied inside NavigationSynchronizer.Tick. This runs in that method's
-    //    postfix, so nothing changes the road graph or the district maps while workers read them, and every map
-    //    is complete before any other game code runs.
+    //    postfix, so nothing changes the road graph or the district maps while workers read them.
     //  - A map depends only on the road graph, its start tile and its district's map. Each worker runs the
     //    game's own RoadFlowFieldGenerator (a private instance per worker, because the generator keeps scratch
-    //    state), so a rebuilt map has exactly the contents and node order the game would have produced.
-    //  - Each map is written by exactly one worker. The road graph and district maps are only read.
-    //  - Which maps get rebuilt is decided from game state alone, never from timing or thread count, so every
-    //    multiplayer peer ends up with the same maps filled.
+    //    state), so a map has exactly the contents and node order the game would have produced.
+    //  - Each map is written by exactly one thread. The road graph and district maps are only read.
+    //  - How the work is split (worker count, background or not, the small-batch limit) changes who builds a
+    //    map and when, never which maps end up built, so those settings may differ between peers.
     //
-    // Difference from the unmodded game: a map is now filled earlier than the first request for it. A few code
-    // paths only use a map "if it is already filled", so they can take the cached route where the unmodded game
-    // would have searched again. Every peer therefore needs the same RouteMaps settings.
+    // Difference from the unmodded game: maps are filled before the first request instead of on it, so the
+    // "if it is already filled" paths take the cached route more often. Every peer needs RouteMaps on or off
+    // alike.
     internal static partial class RouteMaps
     {
         public struct Work
@@ -46,8 +56,6 @@ namespace LateGamePerformance
 
         private const string Namespace = "Timberborn.Navigation.";
 
-        private static readonly List<KeyValuePair<int, object>> FilledBeforeUpdate = new List<KeyValuePair<int, object>>();
-        private static readonly List<KeyValuePair<int, object>> Pending = new List<KeyValuePair<int, object>>();
         private static readonly List<Work> WorkScratch = new List<Work>();
 
         private static Func<object, object> _roadFlowFieldCacheOf;
@@ -59,7 +67,8 @@ namespace LateGamePerformance
         private static Func<object, object> _entriesOf;
         private static Func<object, int, object> _districtFieldAt;
         private static Func<object, bool> _isFilled;
-        private static Func<object, int, object> _cachedFieldAt;
+        private static Func<object, int, bool> _hasNode;
+        private static Func<object, int, bool> _isOnNavMesh;
         private static Func<object, object> _fieldOfEntry;
         private static PropertyInfo _entryKeys;
         private static PropertyInfo _entryValues;
@@ -75,7 +84,7 @@ namespace LateGamePerformance
 
         private static long _batches;
         private static long _fieldsFilled;
-        private static long _skippedSmall;
+        private static long _builtDirectly;
         private static long _wallStopwatchTicks;
 
         public static int WorkerCount => _workerCount;
@@ -105,14 +114,6 @@ namespace LateGamePerformance
             });
             feature.Patches.Add(new PatchSpec
             {
-                Name = "RoadFlowFieldCache.OnNavMeshUpdated",
-                Required = true,
-                Target = () => Reflect.Method(Namespace + "RoadFlowFieldCache", "OnNavMeshUpdated"),
-                Prefix = Reflect.Own(self, nameof(RoadsChangingPrefix)),
-                Postfix = Reflect.Own(self, nameof(RoadsChangedPostfix))
-            });
-            feature.Patches.Add(new PatchSpec
-            {
                 Name = "NavigationSynchronizer.Tick",
                 Required = true,
                 Target = () => Reflect.Method(Namespace + "NavigationSynchronizer", "Tick"),
@@ -133,7 +134,7 @@ namespace LateGamePerformance
                 return null;
             }
             double msPerTick = 1000.0 / Stopwatch.Frequency;
-            string left = $"; {_skippedSmall} road changes left to the game (fewer than {_minFields} maps)";
+            string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}";
             string line = _background
                 ? $"RouteMaps: {_batches} background rebuilds of {_fieldsFilled} route maps; main thread spent " +
                   $"{_mainStopwatchTicks * msPerTick:0.0} ms on them, longest single pause " +
@@ -141,7 +142,7 @@ namespace LateGamePerformance
                   $"workers were busy {_backgroundStopwatchTicks * msPerTick:0.0} ms alongside the game" + left
                 : $"RouteMaps: {_batches} parallel rebuilds of {_fieldsFilled} route maps in " +
                   $"{_wallStopwatchTicks * msPerTick:0.0} ms on {_workerCount} workers" + left;
-            _batches = _fieldsFilled = _skippedSmall = _wallStopwatchTicks = 0;
+            _batches = _fieldsFilled = _builtDirectly = _wallStopwatchTicks = 0;
             _mainStopwatchTicks = _backgroundStopwatchTicks = _builtOnMain = _waitedOnMain = 0;
             _longestPauseStopwatchTicks = 0;
             return line;
@@ -170,8 +171,10 @@ namespace LateGamePerformance
             _districtFieldAt = Reflect.InstanceCall<Func<object, int, object>>(
                 AccessTools.Method(districtMap, "GetDistrictRoadFlowFieldByRoadNodeId"));
             _fill = Reflect.InstanceCall<FillCall>(AccessTools.Method(generator, "FillFlowField"));
+            _hasNode = Reflect.InstanceCall<Func<object, int, bool>>(AccessTools.Method(accessFlowField, "HasNode"));
+            _isOnNavMesh = Reflect.InstanceCall<Func<object, int, bool>>(
+                AccessTools.Method(RequireType("RoadNavMeshGraph"), "IsOnNavMesh"));
 
-            _cachedFieldAt = CompileCachedFieldAt(roadFlowFieldCache, accessFlowField);
             Type cacheEntry = flowFieldCache.GetNestedType("CacheEntry", BindingFlags.NonPublic | BindingFlags.Public);
             if (cacheEntry == null)
             {
@@ -235,74 +238,17 @@ namespace LateGamePerformance
             Land();
             _pathfindingService = __instance;
             _workerGenerators = null;
-            FilledBeforeUpdate.Clear();
-            Pending.Clear();
-        }
-
-        internal static void RoadsChangingPrefix(object __instance)
-        {
-            if (!_active)
-            {
-                return;
-            }
-            try
-            {
-                // The game is about to throw maps away; no worker may still be writing one.
-                Land();
-                FilledBeforeUpdate.Clear();
-                // Keys and Values of a Dictionary enumerate in the same order, so walking them together pairs
-                // each start tile with its map without boxing an entry per map.
-                object entries = _entriesOf(_innerCacheOf(__instance));
-                IEnumerator<int> keys = ((IEnumerable<int>)_entryKeys.GetValue(entries)).GetEnumerator();
-                IEnumerator values = ((IEnumerable)_entryValues.GetValue(entries)).GetEnumerator();
-                while (keys.MoveNext() && values.MoveNext())
-                {
-                    object field = _fieldOfEntry(values.Current);
-                    if (_isFilled(field))
-                    {
-                        FilledBeforeUpdate.Add(new KeyValuePair<int, object>(keys.Current, field));
-                    }
-                }
-            }
-            catch (Exception exception)
-            {
-                Disable(exception);
-            }
-        }
-
-        internal static void RoadsChangedPostfix()
-        {
-            if (!_active)
-            {
-                return;
-            }
-            try
-            {
-                // In use before the change and thrown away by it: these are the maps worth rebuilding now.
-                for (int i = 0; i < FilledBeforeUpdate.Count; i++)
-                {
-                    if (!_isFilled(FilledBeforeUpdate[i].Value))
-                    {
-                        Pending.Add(FilledBeforeUpdate[i]);
-                    }
-                }
-                FilledBeforeUpdate.Clear();
-            }
-            catch (Exception exception)
-            {
-                Disable(exception);
-            }
         }
 
         internal static void NavigationTickedPostfix()
         {
-            if (!_active || Pending.Count == 0)
+            if (!_active || _pathfindingService == null)
             {
                 return;
             }
             try
             {
-                RebuildPending();
+                BuildUnbuiltMaps();
             }
             catch (Exception exception)
             {
@@ -310,48 +256,44 @@ namespace LateGamePerformance
             }
             finally
             {
-                Pending.Clear();
                 WorkScratch.Clear();
             }
         }
         // ReSharper restore InconsistentNaming
 
-        private static void RebuildPending()
+        private static void BuildUnbuiltMaps()
         {
-            if (_pathfindingService == null)
-            {
-                return;
-            }
-            if (Pending.Count < _minFields)
-            {
-                _skippedSmall++;
-                return;
-            }
             object roadCache = _roadFlowFieldCacheOf(_pathfindingService);
             object districtMap = _districtMapOf(_pathfindingService);
             object graph = _roadNavMeshGraphOf(_pathfindingService);
 
+            // Every cached map that is not built and can be. Keys and Values of a Dictionary enumerate in the same
+            // order, so walking them together pairs each start tile with its map without boxing an entry per map.
             // Main thread only: the district lookup recalculates district maps on demand.
             WorkScratch.Clear();
-            for (int i = 0; i < Pending.Count; i++)
+            object entries = _entriesOf(_innerCacheOf(roadCache));
+            IEnumerator<int> keys = ((IEnumerable<int>)_entryKeys.GetValue(entries)).GetEnumerator();
+            IEnumerator values = ((IEnumerable)_entryValues.GetValue(entries)).GetEnumerator();
+            while (keys.MoveNext() && values.MoveNext())
             {
-                int nodeId = Pending[i].Key;
-                object field = Pending[i].Value;
-                // Skip maps that were dropped from the cache or already rebuilt since the change.
-                if (!ReferenceEquals(_cachedFieldAt(roadCache, nodeId), field) || _isFilled(field))
+                object field = _fieldOfEntry(values.Current);
+                if (_isFilled(field))
                 {
                     continue;
                 }
+                int nodeId = keys.Current;
                 object limitingField = _districtFieldAt(districtMap, nodeId);
-                // Same condition the game uses before filling on demand (PathfindingService.TryFillRoadFlowField).
-                if (limitingField != null && _isFilled(limitingField))
+                // The conditions under which the game's generator fills a map at all. A map that fails them (its
+                // building is not on a road, or not in a district) stays unbuilt in the unmodded game too, and
+                // checking here keeps it from being retried as a batch on every tick.
+                if (limitingField != null && _isFilled(limitingField) && _hasNode(limitingField, nodeId) &&
+                    _isOnNavMesh(graph, nodeId))
                 {
                     WorkScratch.Add(new Work { Field = field, LimitingField = limitingField, StartNodeId = nodeId });
                 }
             }
-            if (WorkScratch.Count < _minFields)
+            if (WorkScratch.Count == 0)
             {
-                _skippedSmall++;
                 return;
             }
             if (_workerGenerators == null)
@@ -359,6 +301,19 @@ namespace LateGamePerformance
                 object binaryHeapFactory = _binaryHeapFactoryOf(_roadFlowFieldGeneratorOf(_pathfindingService));
                 // One per worker, plus one for the main thread when it builds a map itself.
                 _workerGenerators = CreateWorkerGenerators(binaryHeapFactory, _workerCount + 1);
+            }
+            if (WorkScratch.Count < _minFields)
+            {
+                // A new building or two: starting workers costs more than building these here. They are still
+                // built now, not left for later, so every peer ends the tick with the same maps built.
+                object mainGenerator = _workerGenerators[_workerGenerators.Length - 1];
+                for (int i = 0; i < WorkScratch.Count; i++)
+                {
+                    Work item = WorkScratch[i];
+                    _fill(mainGenerator, graph, item.Field, item.LimitingField, item.StartNodeId);
+                }
+                _builtDirectly += WorkScratch.Count;
+                return;
             }
             if (_background)
             {
@@ -373,27 +328,9 @@ namespace LateGamePerformance
             _fieldsFilled += WorkScratch.Count;
             if (failure != null)
             {
-                // A map that was not finished is simply not marked as filled; the game rebuilds it on demand.
+                // A map that was not finished is simply not marked as filled; the game builds it on demand.
                 Disable(failure);
             }
-        }
-
-        // (cache, nodeId) => cache.TryGetFlowFieldAtNode(nodeId, out field) ? field : null
-        private static Func<object, int, object> CompileCachedFieldAt(Type roadFlowFieldCache, Type accessFlowField)
-        {
-            MethodInfo tryGet = AccessTools.Method(roadFlowFieldCache, "TryGetFlowFieldAtNode");
-            if (tryGet == null)
-            {
-                throw new MissingMethodException("RoadFlowFieldCache.TryGetFlowFieldAtNode");
-            }
-            ParameterExpression cache = Expression.Parameter(typeof(object), "cache");
-            ParameterExpression nodeId = Expression.Parameter(typeof(int), "nodeId");
-            ParameterExpression field = Expression.Variable(accessFlowField, "field");
-            Expression body = Expression.Block(
-                new[] { field },
-                Expression.Call(Expression.Convert(cache, roadFlowFieldCache), tryGet, nodeId, field),
-                Expression.Convert(field, typeof(object)));
-            return Expression.Lambda<Func<object, int, object>>(body, cache, nodeId).Compile();
         }
 
         private static Type RequireType(string name)
@@ -424,8 +361,6 @@ namespace LateGamePerformance
                     // Workers never throw; nothing more can be done here either way.
                 }
             }
-            FilledBeforeUpdate.Clear();
-            Pending.Clear();
             Log.Warning("RouteMaps failed and turned itself off for this session: " + exception);
         }
     }

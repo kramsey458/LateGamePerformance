@@ -16,7 +16,7 @@ namespace LateGamePerformance
         public bool HaulCacheVerify = false;
         public bool RouteMaps = true;
         public bool RouteMapsBackground = true;
-        public int RouteMapsMinFields = 16;
+        public int RouteMapsMinFields = 4;
         public int RouteMapsWorkers = 0;
         public bool Timing = true;
         public bool SaveTiming = true;

@@ -1,9 +1,9 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.4.4** is a preview. 0.4.2 has been played in multiplayer; the save timing added since has been
-tested against the game's assemblies but **not yet played in-game**. Do not use 0.4.3: it crashes the game while
-loading.
+Version **0.4.5** is a preview. 0.4.2 has been played in multiplayer; the save timing (0.4.4) and the change to
+which route maps are built (0.4.5) have been tested against the game's assemblies but **not yet played
+in-game**. Do not use 0.4.3: it crashes the game while loading.
 Test on a copy of a save first.
 
 ## Installation
@@ -45,21 +45,29 @@ can reach. When any road changes, the game throws away every map containing a ch
 district is nearly all of them, and rebuilds each one on the main thread the next time something asks for it.
 In a large colony that is hundreds of rebuilds right after every finished path, stair or platform.
 
-This mod rebuilds the maps that were in use and just got thrown away straight away, spread over worker threads
-(up to 7), and the main thread waits for them before the tick continues.
+At the end of every navigation tick, this mod builds every cached route map that is not built, spread over
+worker threads (up to 7).
 
 - Road changes are only applied at one point in the tick (`NavigationSynchronizer.Tick`). The rebuild runs right
   after it, so nothing modifies the road network while workers read it.
 - Each worker runs the game's own map generator on a private copy, so a rebuilt map has exactly the contents
   the game would have produced. The tests check this node for node against the installed game's code.
-- Which maps are rebuilt depends only on game state, never on timing or thread count, so multiplayer peers stay
-  in step. The thread count itself may differ between peers.
-- Maps that were never used are not rebuilt, and changes that throw away fewer than `RouteMapsMinFields` maps
-  are left to the game.
+- **Which maps:** a map is cached exactly while its building is finished, so the set of cached maps is part of
+  the simulation and identical on every multiplayer peer. After each navigation tick all of them that can be
+  built are built, on every peer. How the work is split (thread count, background or not, the small-batch
+  limit) changes who builds a map and when, never which maps end up built, so those settings may differ
+  between peers.
+- Fewer than `RouteMapsMinFields` unbuilt maps (a new building or two) are built directly on the main thread,
+  because starting workers would cost more. They are still built straight away, not left for later.
+- **Changed in 0.4.5.** Earlier versions rebuilt "the maps that were filled before the road change". That was
+  wrong for multiplayer: a map also gets filled when a player's range overlay asks for a route, on that
+  player's computer only, so two peers could rebuild different sets and then disagree about which maps are
+  filled. Building everything that is cached removes the dependence on what anyone looked at. It does more work
+  (never-used maps are built too), but on worker threads in the background.
 
 One behaviour difference from the unmodded game: maps are now filled before the first request instead of on it.
 A few code paths use a map only "if it is already filled", so they can take the cached route where the unmodded
-game would have searched again. That is why every multiplayer peer needs the same `RouteMaps` settings.
+game would have searched again. That is why every multiplayer peer needs `RouteMaps` on or off alike.
 
 In the test harness, 420 maps on a 22,600-tile road network took about 1.8 s one by one and about 0.23 s on
 7 workers.
@@ -185,7 +193,7 @@ A second line reports route map rebuilds:
 ```
 [LateGamePerformance] Last 1000 ticks. RouteMaps: 4 background rebuilds of 1435 route maps; main thread spent
 61.0 ms on them, longest single pause 1.9 ms (built 70 itself, waited for 12), workers were busy 180.4 ms
-alongside the game; 0 road changes left to the game (fewer than 16 maps)
+alongside the game; 6 more built directly on the main thread in batches of fewer than 4
 ```
 
 "longest single pause" is the figure to watch for hitching.
@@ -199,9 +207,9 @@ alongside the game; 0 road changes left to the game (fewer than 16 maps)
 | `HaulCache` (simulation) | `true` | The hauling job list cache. |
 | `HaulCacheFlushEveryTicks` (simulation) | `1` | Drop everything cached every N ticks. `0` = never. |
 | `HaulCacheVerify` | `false` | Recompute the game's list on every request and compare; logs mismatches and uses the game's list. Slower than no mod. For testing. |
-| `RouteMaps` (simulation) | `true` | Parallel route map rebuild after road changes. |
+| `RouteMaps` (simulation) | `true` | Build every cached route map on worker threads after each navigation tick. |
 | `RouteMapsBackground` | `true` | Rebuild in the background; `false` = main thread waits for the whole batch. May differ between peers. |
-| `RouteMapsMinFields` (simulation) | `16` | Smaller changes are left to the game. |
+| `RouteMapsMinFields` | `4` | Fewer unbuilt maps than this are built directly on the main thread instead of on workers. May differ between peers. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
 | `Timing` | `true` | The timing stats line. |
 | `SaveTiming` | `true` | One line per save with the time of each stage; also lets the timing line report saves separately. Measurement only. |

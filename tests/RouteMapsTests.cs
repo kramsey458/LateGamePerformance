@@ -102,9 +102,9 @@ internal static class RouteMapsTests
                           $"({(double)sequentialTimer.ElapsedMilliseconds / Math.Max(1, parallelTimer.ElapsedMilliseconds):0.0}x)");
     }
 
-    // Drives the hooks in the order the game does: snapshot before a road change, the game throws maps away,
-    // detect which ones, rebuild at the end of NavigationSynchronizer.Tick. Uses a real RoadFlowFieldCache and
-    // DistrictMap; only PathfindingService is a bare object holding the four fields the mod reads.
+    // Drives the navigation tick hook against a real RoadFlowFieldCache and DistrictMap; only PathfindingService
+    // is a bare object holding the four fields the mod reads. The rule under test: after the hook has run, every
+    // cached map that can be built is built, whatever was or was not filled beforehand.
     private static void RunOrchestration(object graph, object heapFactory, object limiting, int[] starts,
         List<RouteMaps.Work> expected, Action<bool, string> check)
     {
@@ -131,8 +131,10 @@ internal static class RouteMapsTests
         SetField(service, "_districtMap", districtMap);
 
         RouteMaps.CreateFeature(new Config { RouteMapsMinFields = 16, RouteMapsWorkers = 4 });
+        RouteMaps.SetBackground(false);
         RouteMaps.Activate();
         RouteMaps.PathfindingServiceCreatedPostfix(service);
+        RouteMaps.TakeStatsLine();
 
         // Distinct start tiles only: the cache holds one map per tile.
         Dictionary<int, int> indexOfStart = new Dictionary<int, int>();
@@ -144,66 +146,90 @@ internal static class RouteMapsTests
         object[] lookup = { 0, null };
         MethodInfo tryGet = roadCache.GetType().GetMethod("TryGetFlowFieldAtNode", Any);
         Dictionary<int, object> fieldAt = new Dictionary<int, object>();
+        object FieldAt(int node)
+        {
+            lookup[0] = node; lookup[1] = null;
+            tryGet.Invoke(roadCache, lookup);
+            return lookup[1];
+        }
         foreach (int start in cached)
         {
             Call(roadCache, "StartCachingAtNode", start);
-            lookup[0] = start;
-            tryGet.Invoke(roadCache, lookup);
-            fieldAt[start] = lookup[1];
+            fieldAt[start] = FieldAt(start);
         }
-        // In use: the first 300 are filled. Never used: the rest stay empty and must be left alone.
-        int inUse = Math.Min(300, cached.Count);
-        for (int i = 0; i < inUse; i++)
+        // A building that is not on any road: the game never fills its map, and neither may the mod.
+        int offRoad = 0;
+        while ((bool)Call(graph, "IsOnNavMesh", offRoad))
+        {
+            offRoad++;
+        }
+        Call(roadCache, "StartCachingAtNode", offRoad);
+        object offRoadField = FieldAt(offRoad);
+
+        // One player's range overlay filled a handful of maps on this computer only. The other peer has none
+        // filled. Both must end up in the same state, so this must not change which maps are built.
+        for (int i = 0; i < 25; i++)
         {
             Call(generator, "FillFlowField", graph, fieldAt[cached[i]], limiting, cached[i]);
         }
 
-        RouteMaps.RoadsChangingPrefix(roadCache);
-        // The road change: the game throws away the in-use maps, except 20 it did not touch.
-        for (int i = 0; i < inUse - 20; i++)
-        {
-            Call(fieldAt[cached[i]], "Clear");
-        }
-        // One thrown-away map is dropped from the cache before the rebuild (its building was removed).
-        Call(roadCache, "StopCachingAtNode", cached[0]);
-        RouteMaps.RoadsChangedPostfix();
         RouteMaps.NavigationTickedPostfix();
 
-        check(RouteMaps.IsActive, "orchestration: feature still active after a rebuild");
-        check(RouteMaps.FieldsFilledSinceReport == inUse - 20 - 1,
-            $"orchestration: rebuilt exactly the thrown-away, still cached maps ({RouteMaps.FieldsFilledSinceReport})");
         long nodesCompared = 0;
-        int wrong = 0, neverUsedTouched = 0;
-        for (int i = 1; i < inUse; i++)
+        int wrong = 0;
+        foreach (int start in cached)
         {
-            object field = fieldAt[cached[i]];
-            if (!(bool)Get(field, "IsFilled") || !SameMap(expected[indexOfStart[cached[i]]].Field, field, ref nodesCompared))
+            object field = fieldAt[start];
+            if (!(bool)Get(field, "IsFilled") || !SameMap(expected[indexOfStart[start]].Field, field, ref nodesCompared))
             {
                 wrong++;
             }
         }
-        for (int i = inUse; i < cached.Count; i++)
+        check(RouteMaps.IsActive, "orchestration: feature still active after building");
+        check(wrong == 0, $"orchestration: all {cached.Count} cached maps are built and identical to the game's, whatever was filled before");
+        check(RouteMaps.FieldsFilledSinceReport == cached.Count - 25,
+            $"orchestration: only the unbuilt ones were built ({RouteMaps.FieldsFilledSinceReport} of {cached.Count})");
+        check(!(bool)Get(offRoadField, "IsFilled"), "orchestration: a map whose building is not on a road is left alone");
+
+        // Nothing to do on the next tick, and it must not retry the map that cannot be built as a batch.
+        long before = RouteMaps.FieldsFilledSinceReport;
+        RouteMaps.NavigationTickedPostfix();
+        check(RouteMaps.FieldsFilledSinceReport == before, "orchestration: a second tick builds nothing");
+
+        // A road change throws most maps away: all of them come back.
+        for (int i = 0; i < cached.Count - 20; i++)
         {
-            if ((bool)Get(fieldAt[cached[i]], "IsFilled"))
+            Call(fieldAt[cached[i]], "Clear");
+        }
+        // One building is removed before the tick: its map leaves the cache and is not built.
+        Call(roadCache, "StopCachingAtNode", cached[0]);
+        RouteMaps.NavigationTickedPostfix();
+        int unbuilt = 0;
+        for (int i = 1; i < cached.Count; i++)
+        {
+            if (!(bool)Get(fieldAt[cached[i]], "IsFilled"))
             {
-                neverUsedTouched++;
+                unbuilt++;
             }
         }
-        check(wrong == 0, "orchestration: every in-use map is filled and identical to the game's");
-        check(!(bool)Get(fieldAt[cached[0]], "IsFilled"), "orchestration: a map dropped from the cache is not rebuilt");
-        check(neverUsedTouched == 0, $"orchestration: {cached.Count - inUse} never-used maps left alone");
+        check(unbuilt == 0, "orchestration: after a road change every cached map is built again");
+        check(!(bool)Get(fieldAt[cached[0]], "IsFilled"), "orchestration: a map dropped from the cache is not built");
 
-        // Below the threshold the game's own on-demand rebuild is left to handle it.
-        long before = RouteMaps.FieldsFilledSinceReport;
-        RouteMaps.RoadsChangingPrefix(roadCache);
+        // A new building or two: built now, directly, not left for later.
         for (int i = 1; i <= 5; i++)
         {
             Call(fieldAt[cached[i]], "Clear");
         }
-        RouteMaps.RoadsChangedPostfix();
+        long batchesBefore = RouteMaps.FieldsFilledSinceReport;
         RouteMaps.NavigationTickedPostfix();
-        check(RouteMaps.FieldsFilledSinceReport == before && !(bool)Get(fieldAt[cached[1]], "IsFilled"),
-            "orchestration: a small change (5 maps) is left to the game");
+        bool smallBuilt = true;
+        for (int i = 1; i <= 5; i++)
+        {
+            smallBuilt &= (bool)Get(fieldAt[cached[i]], "IsFilled")
+                          && SameMap(expected[indexOfStart[cached[i]]].Field, fieldAt[cached[i]], ref nodesCompared);
+        }
+        check(smallBuilt && RouteMaps.FieldsFilledSinceReport == batchesBefore,
+            "orchestration: a small batch (5 maps) is built directly on the main thread, identical to the game's");
     }
 
     // Background rebuild: workers fill while this thread plays the game's part, asking for maps in a shuffled
