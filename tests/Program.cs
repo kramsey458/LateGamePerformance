@@ -144,27 +144,42 @@ internal static class Program
     {
         // A clock of 1000 ticks per second, so stamps read as milliseconds.
         TimingStats stats = new TimingStats(1000);
-        for (int frame = 0; frame < 50; frame++)
+        long stamp = 1000;
+        for (int frame = 0; frame < 30; frame++, stamp += 20)
         {
-            stats.Frame(1000 + frame * 20, 12, 7f);
+            stats.Frame(stamp, 12, 7f, 5);
         }
-        stats.Frame(2000 + 5000, 900, 7f);   // a 5 s gap: loading or the window in the background
-        stats.Frame(7020, 3, 0f);            // paused
-        stats.Frame(7040, 3, 0f);
-        string line = stats.TakeLine(10, 0.6f, 4);
+        stamp += 280;                          // the 30th frame ran 300 ms and the collection counter moved in it
+        stats.Frame(stamp, 12, 7f, 6);
+        for (int frame = 0; frame < 19; frame++)
+        {
+            stamp += 20;
+            stats.Frame(stamp, 12, 7f, 6);
+        }
+        stamp += 5000;                         // loading or the window in the background: not counted
+        stats.Frame(stamp, 900, 7f, 6);
+        stamp += 500;                          // paused, for instance silently by a multiplayer mod
+        stats.Frame(stamp, 3, 0f, 6);
+        stamp += 500;
+        stats.Frame(stamp, 3, 0f, 6);
+        string line = stats.TakeLine(10, 0.6f, 1);
         Console.WriteLine("     " + line);
-        // 49 counted frames of 20 ms = 0.98 s; 49 x 12 ms of simulation = 588 ms.
-        Check(line.Contains("10 ticks in 1.0 s unpaused = 10.2 ticks/s"), "timing: tick rate over unpaused time");
+        // 49 counted frames: 29 x 20 + 300 + 19 x 20 = 1260 ms; 49 x 12 ms of simulation = 588 ms.
+        Check(line.Contains("10 ticks in 1.3 s unpaused = 7.9 ticks/s"), "timing: tick rate over unpaused time");
         Check(line.Contains("average speed setting 7.0 asks for 11.7"), "timing: what the speed setting asks for");
-        Check(line.Contains("49 frames = 50 fps"), "timing: frames exclude the long gap and paused frames");
-        Check(line.Contains("simulation 58.8 ms per tick = 60% of the main thread"), "timing: simulation share");
-        Check(line.Contains("everything else 8.0 ms per frame = 40%"), "timing: everything else per frame");
-        Check(line.Contains("longest frame 20 ms, longest simulation slice 12 ms"), "timing: longest frame ignores the gap");
-        Check(line.Contains("4 garbage collections"), "timing: garbage collections reported");
+        Check(line.Contains("wall clock 7.3 s, of which paused 1.0 s and not counted 5.0 s"), "timing: wall clock, paused and uncounted time");
+        Check(line.Contains("49 frames = 39 fps"), "timing: frames exclude the long gap and paused frames");
+        Check(line.Contains("simulation 58.8 ms per tick = 47% of the main thread"), "timing: simulation share");
+        Check(line.Contains("everything else 13.7 ms per frame = 53%"), "timing: everything else per frame");
+        Check(line.Contains("longest frame 300 ms, longest simulation slice 12 ms"), "timing: longest frame ignores the gap");
+        Check(line.Contains("1 garbage collection(s): the 1 frame(s) containing one took 300 ms in total, longest 300 ms (an average frame is 25.7 ms)"),
+            "timing: the frame containing a collection is identified and timed");
         Check(stats.TakeLine(10, 0.6f, 0) == null, "timing: nothing to report after a reset");
-        stats.Frame(9000, 5, 3f);
-        stats.Frame(9010, 5, 3f);
-        Check(!stats.TakeLine(1, -1f, 0).Contains("asks for"), "timing: unknown tick length omits the comparison");
+        stats.Frame(20000, 5, 3f, 6);
+        stats.Frame(20010, 5, 3f, 6);
+        string quiet = stats.TakeLine(1, -1f, 0);
+        Check(!quiet.Contains("asks for"), "timing: unknown tick length omits the comparison");
+        Check(quiet.Contains("0 garbage collection(s), none during counted frames"), "timing: no collections reported plainly");
     }
 
     private static void Check(bool condition, string what)

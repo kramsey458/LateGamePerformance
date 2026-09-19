@@ -1,7 +1,7 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.4.1** is a preview. 0.3.0 has been played in multiplayer; the measurement tools 0.4.0 adds have been
+Version **0.4.2** is a preview. 0.3.0 has been played in multiplayer; the measurement tools 0.4.0 adds have been
 tested against the game's assemblies but **not yet played in-game**.
 Test on a copy of a save first.
 
@@ -90,14 +90,20 @@ longest single pause went from about 230 ms to about 16 ms. `RouteMapsBackground
 One hook on the game's per-frame simulation call shows where the main thread's time goes:
 
 ```
-[LateGamePerformance] Last 1000 ticks. Timing: 1000 ticks in 171.2 s unpaused = 5.8 ticks/s (average speed
-setting 7.0 asks for 11.7); 9480 frames = 55 fps; simulation 118.0 ms per tick = 69% of the main thread,
-everything else 5.6 ms per frame = 31%; longest frame 96 ms, longest simulation slice 41 ms; 12 garbage collections
+[LateGamePerformance] Last 1000 ticks. Timing: 1000 ticks in 176.9 s unpaused = 5.7 ticks/s (average speed
+setting 3.4 asks for 5.7); wall clock 214.0 s, of which paused 11.2 s and not counted 25.9 s (loading, saving,
+window in the background); 20637 frames = 117 fps; simulation 29.1 ms per tick = 16% of the main thread,
+everything else 7.2 ms per frame = 84%; longest frame 997 ms, longest simulation slice 980 ms;
+4 garbage collection(s): the 4 frame(s) containing one took 2310 ms in total, longest 980 ms (an average frame is 8.6 ms)
 ```
 
 - **ticks/s against what the speed setting asks for** shows whether the game is keeping up at all.
 - **simulation** is time inside the game's tick call; **everything else** is the rest of each frame (rendering,
   animation, UI, other mods' per-frame work). Paused frames are left out.
+- **wall clock, paused, not counted** make pauses visible that nothing logs, such as a multiplayer mod setting the
+  speed to zero while it waits.
+- **garbage collections** shows how long the frames containing a collection were. With incremental collection off
+  (see the startup `GC:` line) a collection stops every thread until it is done, so these are hitches.
 - If "everything else" is a large share, a frame rate cap gives the simulation more of each second, because the
   per-frame cost is paid less often.
 
