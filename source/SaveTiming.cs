@@ -76,7 +76,7 @@ namespace LateGamePerformance
     // Where the time of a save goes. Measurement only: the hooks read a clock before and after the game's own
     // methods and change nothing about how or when the game saves. They only run during a save.
     //
-    //   GameSaver.Save                           the whole save (autosave, manual save, save on exit)
+    //   GameSaver.SaveQueued / SaveInstantly...  the whole save (autosave, manual save, save on exit)
     //     Ticker.FinishFullTick                  finishing the tick
     //     SerializedWorldFactory.Create          snapshot of every entity and singleton
     //     WorldSerializer.WriteToSaveEntryStream world JSON and compression
@@ -84,10 +84,20 @@ namespace LateGamePerformance
     //     the rest                               small entries, copying to the file, the completion callback
     //
     // An exception here could break a save, so every hook swallows its own.
+    //
+    // GameSaver.Save itself must NOT be patched: it has a catch with an exception filter ("when"), which Harmony
+    // cannot regenerate under Mono. The attempt fails and leaves a half-built dynamic type behind, and the game
+    // then crashes while it scans the loaded assemblies (that was 0.4.3). Its callers are hooked instead, and
+    // the tests refuse any patch target with an exception filter.
     internal static class SaveTiming
     {
         private static readonly SaveBreakdown Breakdown = new SaveBreakdown(Stopwatch.Frequency);
         private static bool _finishingTheTick;
+        private static Func<object, object> _queuedSaveOf;
+        private static long _openedStamp;
+
+        // A save still open after this long was abandoned by an exception, not nested.
+        private const double AbandonedAfterSeconds = 60;
 
         public static Feature CreateFeature()
         {
@@ -95,10 +105,35 @@ namespace LateGamePerformance
             Feature feature = new Feature { Name = "SaveTiming" };
             feature.Patches.Add(new PatchSpec
             {
-                Name = "GameSaver.Save",
+                // Called every frame; it saves only when a save is queued (autosave, manual save).
+                Name = "GameSaver.SaveQueued",
                 Required = true,
-                Target = () => Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save"),
+                Target = () =>
+                {
+                    Type saver = Reflect.GameType("Timberborn.GameSaveRuntimeSystem.GameSaver");
+                    // A nullable struct: boxed it is null while nothing is queued, so looking costs no allocation.
+                    _queuedSaveOf = Reflect.FieldGetter<object>(saver, "_queuedSave");
+                    return HarmonyLib.AccessTools.Method(saver, "SaveQueued");
+                },
+                Prefix = Reflect.Own(self, nameof(SaveQueuedPrefix)),
+                Postfix = Reflect.Own(self, nameof(SavePostfix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "GameSaver.SaveInstantlySkippingNameValidation",
+                Required = false,
+                Target = () => Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "SaveInstantlySkippingNameValidation"),
                 Prefix = Reflect.Own(self, nameof(SavePrefix)),
+                Postfix = Reflect.Own(self, nameof(SavePostfix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                // Inside every save. On its own only if something saves without going through the methods above
+                // (the map editor, or a mod calling the game's private Save directly).
+                Name = "SaveWriter.WriteToSaveStream",
+                Required = false,
+                Target = () => Reflect.Method("Timberborn.SaveSystem.SaveWriter", "WriteToSaveStream"),
+                Prefix = Reflect.Own(self, nameof(WriteOnlyPrefix)),
                 Postfix = Reflect.Own(self, nameof(SavePostfix))
             });
             feature.Patches.Add(new PatchSpec
@@ -150,9 +185,30 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        private static void SaveQueuedPrefix(object __instance, out long __state)
+        {
+            __state = 0;
+            try
+            {
+                if (_queuedSaveOf(__instance) != null)
+                {
+                    __state = Begin("Save");
+                }
+            }
+            catch (Exception)
+            {
+                // Never let a measurement break a save.
+            }
+        }
+
         private static void SavePrefix(out long __state)
         {
             __state = Begin("Save");
+        }
+
+        private static void WriteOnlyPrefix(out long __state)
+        {
+            __state = Begin("Save (writing only; the caller is not one this mod knows)");
         }
 
         private static void SaveToStreamPrefix(out long __state)
@@ -237,9 +293,16 @@ namespace LateGamePerformance
         {
             try
             {
+                // The outermost hook owns the save; the ones nested inside it get 0 and do nothing.
+                long now = Stopwatch.GetTimestamp();
+                if (Breakdown.IsOpen && now - _openedStamp < AbandonedAfterSeconds * Stopwatch.Frequency)
+                {
+                    return 0;
+                }
                 Breakdown.Open(what);
                 _finishingTheTick = false;
-                return Stopwatch.GetTimestamp();
+                _openedStamp = now;
+                return now;
             }
             catch (Exception)
             {

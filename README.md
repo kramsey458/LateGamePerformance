@@ -1,8 +1,9 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.4.3** is a preview. 0.4.2 has been played in multiplayer; the save timing 0.4.3 adds has been
-tested against the game's assemblies but **not yet played in-game**.
+Version **0.4.4** is a preview. 0.4.2 has been played in multiplayer; the save timing added since has been
+tested against the game's assemblies but **not yet played in-game**. Do not use 0.4.3: it crashes the game while
+loading.
 Test on a copy of a save first.
 
 ## Installation
@@ -102,8 +103,8 @@ total, longest 105 ms (an average frame is 8.6 ms); 1 save(s): 812 ms, in frame(
 - **ticks/s against what the time scale asks for** shows whether the game is keeping up at all. The time scale is
   not the speed button: above speed 1 the game itself slows large colonies down (button speed 7 came out as 3.4
   in a colony of about 350 beavers), and the figure here is the speed after that.
-- **saves** (new in 0.4.3, needs `SaveTiming`) are reported on their own. A save freezes the game for most of a
-  second and usually contains a garbage collection, so before 0.4.3 it showed up as the longest frame and as a
+- **saves** (new in 0.4.4, needs `SaveTiming`) are reported on their own. A save freezes the game for most of a
+  second and usually contains a garbage collection, so before 0.4.4 it showed up as the longest frame and as a
   very long collection. The frame a save ran in is now left out of every other figure; its time is part of
   "not counted".
 - **simulation** is time inside the game's tick call; **everything else** is the rest of each frame (rendering,
@@ -115,7 +116,7 @@ total, longest 105 ms (an average frame is 8.6 ms); 1 save(s): 812 ms, in frame(
 - If "everything else" is a large share, a frame rate cap gives the simulation more of each second, because the
   per-frame cost is paid less often.
 
-### Save timing line (on by default, new in 0.4.3)
+### Save timing line (on by default, new in 0.4.4)
 
 One line per save (autosave, manual save, save on exit) shows which stage of it costs the time:
 
@@ -134,7 +135,8 @@ compression 520 ms + thumbnail 60 ms + everything else 28 ms
 This is measurement only. The hooks read a clock around the game's own methods, run only during a save, and do
 not change how or when the game saves. The game's own `Saved game in 0.80s` line starts its clock after the tick
 is finished, so it can be a little lower than the total here. A line starting `Save to a stream` is a save that
-is not written to a file, which a multiplayer mod uses for a joining player. The numbers are there to decide
+is not written to a file, which a multiplayer mod uses for a joining player; `Save (writing only...)` is one
+started in a way the mod does not know, so only the writing part is covered. The numbers are there to decide
 whether part of a save is worth moving off the main thread.
 
 ### Per-component timings (menu setting, new in 0.4.x)
@@ -238,7 +240,9 @@ dotnet run --project tests -c Release
 ```
 
 The tests load the installed game's assemblies and check that every patch target, private field and property
-the mod relies on still exists with a compatible signature, plus settings parsing. They also build a road
+the mod relies on still exists with a compatible signature, plus settings parsing. A patch target containing
+an exception filter (`catch ... when`) is refused: Harmony cannot patch those under the game's Mono runtime, and
+the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). They also build a road
 network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
 contained. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers

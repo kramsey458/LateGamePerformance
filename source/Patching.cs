@@ -88,10 +88,33 @@ namespace LateGamePerformance
                     problems.Add($"{feature.Name}/{patch.Name}: target not found");
                     continue;
                 }
+                if (HasExceptionFilter(target))
+                {
+                    // Harmony cannot regenerate these under Mono ("Incorrect code generation for exception block"),
+                    // and the failed attempt leaves an unfinished dynamic type that crashes the game later.
+                    problems.Add($"{feature.Name}/{patch.Name}: target has an exception filter (catch ... when)");
+                }
                 CheckParameters(feature, patch, target, patch.Prefix, problems);
                 CheckParameters(feature, patch, target, patch.Postfix, problems);
             }
             return problems;
+        }
+
+        public static bool HasExceptionFilter(MethodBase method)
+        {
+            MethodBody body = method.GetMethodBody();
+            if (body == null)
+            {
+                return false;
+            }
+            foreach (ExceptionHandlingClause clause in body.ExceptionHandlingClauses)
+            {
+                if (clause.Flags == ExceptionHandlingClauseOptions.Filter)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static void CheckParameters(Feature feature, PatchSpec patch, MethodBase target, MethodInfo patchMethod,
