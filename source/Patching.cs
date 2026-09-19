@@ -1,0 +1,202 @@
+using System;
+using System.Collections.Generic;
+using System.Linq.Expressions;
+using System.Reflection;
+using HarmonyLib;
+
+namespace LateGamePerformance
+{
+    internal sealed class PatchSpec
+    {
+        public string Name;
+        // A feature whose required patch fails is rolled back entirely, so it can never run half-hooked.
+        public bool Required;
+        public Func<MethodBase> Target;
+        public MethodInfo Prefix;
+        public MethodInfo Postfix;
+    }
+
+    internal sealed class Feature
+    {
+        public string Name;
+        public List<PatchSpec> Patches = new List<PatchSpec>();
+
+        public bool Apply(string harmonyIdBase)
+        {
+            string harmonyId = harmonyIdBase + "." + Name;
+            Harmony harmony = new Harmony(harmonyId);
+            int optionalFailures = 0;
+            foreach (PatchSpec patch in Patches)
+            {
+                try
+                {
+                    MethodBase target = patch.Target();
+                    if (target == null)
+                    {
+                        throw new MissingMethodException("target not found");
+                    }
+                    harmony.Patch(target,
+                        patch.Prefix != null ? new HarmonyMethod(patch.Prefix) : null,
+                        patch.Postfix != null ? new HarmonyMethod(patch.Postfix) : null);
+                }
+                catch (Exception exception)
+                {
+                    if (patch.Required)
+                    {
+                        Log.Warning($"{Name}: required patch '{patch.Name}' failed ({exception.Message}). " +
+                                    "Feature disabled; the game runs unmodified for this part.");
+                        try
+                        {
+                            harmony.UnpatchAll(harmonyId);
+                        }
+                        catch (Exception unpatchException)
+                        {
+                            Log.Warning($"{Name}: rollback failed ({unpatchException.Message}).");
+                        }
+                        return false;
+                    }
+                    optionalFailures++;
+                    Log.Warning($"{Name}: optional patch '{patch.Name}' failed ({exception.Message}).");
+                }
+            }
+            Log.Info($"{Name}: enabled ({Patches.Count - optionalFailures}/{Patches.Count} patches).");
+            return true;
+        }
+    }
+
+    internal static class PatchValidator
+    {
+        // Dry run used by the test harness: resolves every target against the loaded game assemblies and
+        // checks the patch methods only ask for parameters Harmony can supply. Returns problems found.
+        public static List<string> Validate(Feature feature)
+        {
+            List<string> problems = new List<string>();
+            foreach (PatchSpec patch in feature.Patches)
+            {
+                MethodBase target;
+                try
+                {
+                    target = patch.Target();
+                }
+                catch (Exception exception)
+                {
+                    problems.Add($"{feature.Name}/{patch.Name}: {exception.Message}");
+                    continue;
+                }
+                if (target == null)
+                {
+                    problems.Add($"{feature.Name}/{patch.Name}: target not found");
+                    continue;
+                }
+                CheckParameters(feature, patch, target, patch.Prefix, problems);
+                CheckParameters(feature, patch, target, patch.Postfix, problems);
+            }
+            return problems;
+        }
+
+        private static void CheckParameters(Feature feature, PatchSpec patch, MethodBase target, MethodInfo patchMethod,
+            List<string> problems)
+        {
+            if (patchMethod == null)
+            {
+                return;
+            }
+            ParameterInfo[] targetParameters = target.GetParameters();
+            foreach (ParameterInfo parameter in patchMethod.GetParameters())
+            {
+                if (parameter.Name == "__instance")
+                {
+                    if (target.IsStatic)
+                    {
+                        problems.Add($"{feature.Name}/{patch.Name}: __instance on a static target");
+                    }
+                    else if (!parameter.ParameterType.IsAssignableFrom(target.DeclaringType))
+                    {
+                        problems.Add($"{feature.Name}/{patch.Name}: __instance type mismatch");
+                    }
+                    continue;
+                }
+                if (parameter.Name == "__state")
+                {
+                    continue;
+                }
+                ParameterInfo match = Array.Find(targetParameters, candidate => candidate.Name == parameter.Name);
+                if (match == null)
+                {
+                    problems.Add($"{feature.Name}/{patch.Name}: target has no parameter '{parameter.Name}'");
+                }
+                else if (!parameter.ParameterType.IsAssignableFrom(match.ParameterType))
+                {
+                    problems.Add($"{feature.Name}/{patch.Name}: parameter '{parameter.Name}' type mismatch");
+                }
+            }
+        }
+    }
+
+    internal static class Reflect
+    {
+        public static Type GameType(string fullName)
+        {
+            return AccessTools.TypeByName(fullName);
+        }
+
+        public static MethodInfo Method(string typeName, string methodName)
+        {
+            Type type = GameType(typeName);
+            return type == null ? null : AccessTools.Method(type, methodName);
+        }
+
+        public static MethodInfo Setter(Type type, string propertyName)
+        {
+            return AccessTools.PropertySetter(type, propertyName);
+        }
+
+        public static ConstructorInfo FirstConstructor(string typeName)
+        {
+            Type type = GameType(typeName);
+            if (type == null)
+            {
+                return null;
+            }
+            List<ConstructorInfo> constructors = AccessTools.GetDeclaredConstructors(type, false);
+            return constructors.Count > 0 ? constructors[0] : null;
+        }
+
+        public static MethodInfo Own(Type type, string name)
+        {
+            MethodInfo method = type.GetMethod(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            if (method == null)
+            {
+                throw new MissingMethodException(type.Name, name);
+            }
+            return method;
+        }
+
+        // Compiled accessor for a private field on a type we cannot name at compile time.
+        public static Func<object, TField> FieldGetter<TField>(Type declaringType, string fieldName)
+        {
+            FieldInfo field = AccessTools.Field(declaringType, fieldName);
+            if (field == null)
+            {
+                throw new MissingFieldException(declaringType.Name, fieldName);
+            }
+            ParameterExpression instance = Expression.Parameter(typeof(object), "instance");
+            Expression body = Expression.Convert(
+                Expression.Field(Expression.Convert(instance, declaringType), field), typeof(TField));
+            return Expression.Lambda<Func<object, TField>>(body, instance).Compile();
+        }
+
+        public static Func<object, TProperty> PropertyGetter<TProperty>(Type declaringType, string propertyName)
+        {
+            PropertyInfo property = AccessTools.Property(declaringType, propertyName);
+            if (property == null)
+            {
+                throw new MissingMemberException(declaringType.Name, propertyName);
+            }
+            ParameterExpression instance = Expression.Parameter(typeof(object), "instance");
+            Expression body = Expression.Convert(
+                Expression.Property(Expression.Convert(instance, declaringType), property), typeof(TProperty));
+            return Expression.Lambda<Func<object, TProperty>>(body, instance).Compile();
+        }
+    }
+}
