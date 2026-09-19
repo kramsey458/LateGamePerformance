@@ -1,7 +1,7 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.4.2** is a preview. 0.3.0 has been played in multiplayer; the measurement tools 0.4.0 adds have been
+Version **0.4.3** is a preview. 0.4.2 has been played in multiplayer; the save timing 0.4.3 adds has been
 tested against the game's assemblies but **not yet played in-game**.
 Test on a copy of a save first.
 
@@ -90,14 +90,22 @@ longest single pause went from about 230 ms to about 16 ms. `RouteMapsBackground
 One hook on the game's per-frame simulation call shows where the main thread's time goes:
 
 ```
-[LateGamePerformance] Last 1000 ticks. Timing: 1000 ticks in 176.9 s unpaused = 5.7 ticks/s (average speed
-setting 3.4 asks for 5.7); wall clock 214.0 s, of which paused 11.2 s and not counted 25.9 s (loading, saving,
-window in the background); 20637 frames = 117 fps; simulation 29.1 ms per tick = 16% of the main thread,
-everything else 7.2 ms per frame = 84%; longest frame 997 ms, longest simulation slice 980 ms;
-4 garbage collection(s): the 4 frame(s) containing one took 2310 ms in total, longest 980 ms (an average frame is 8.6 ms)
+[LateGamePerformance] Last 1000 ticks. Timing: 1000 ticks in 176.9 s unpaused = 5.7 ticks/s (game time scale
+3.4, which is the speed buttons after the game's large-colony throttle, asks for 5.7); wall clock 214.0 s, of
+which paused 11.2 s and not counted 25.9 s (loading, saving, window in the background); 20637 frames = 117 fps;
+simulation 29.1 ms per tick = 16% of the main thread, everything else 7.2 ms per frame = 84%; longest frame
+105 ms, longest simulation slice 98 ms; 3 garbage collection(s): the 3 frame(s) containing one took 240 ms in
+total, longest 105 ms (an average frame is 8.6 ms); 1 save(s): 812 ms, in frame(s) of 830 ms with
+1 garbage collection(s), all left out of the other figures
 ```
 
-- **ticks/s against what the speed setting asks for** shows whether the game is keeping up at all.
+- **ticks/s against what the time scale asks for** shows whether the game is keeping up at all. The time scale is
+  not the speed button: above speed 1 the game itself slows large colonies down (button speed 7 came out as 3.4
+  in a colony of about 350 beavers), and the figure here is the speed after that.
+- **saves** (new in 0.4.3, needs `SaveTiming`) are reported on their own. A save freezes the game for most of a
+  second and usually contains a garbage collection, so before 0.4.3 it showed up as the longest frame and as a
+  very long collection. The frame a save ran in is now left out of every other figure; its time is part of
+  "not counted".
 - **simulation** is time inside the game's tick call; **everything else** is the rest of each frame (rendering,
   animation, UI, other mods' per-frame work). Paused frames are left out.
 - **wall clock, paused, not counted** make pauses visible that nothing logs, such as a multiplayer mod setting the
@@ -106,6 +114,28 @@ everything else 7.2 ms per frame = 84%; longest frame 997 ms, longest simulation
   (see the startup `GC:` line) a collection stops every thread until it is done, so these are hitches.
 - If "everything else" is a large share, a frame rate cap gives the simulation more of each second, because the
   per-frame cost is paid less often.
+
+### Save timing line (on by default, new in 0.4.3)
+
+One line per save (autosave, manual save, save on exit) shows which stage of it costs the time:
+
+```
+[LateGamePerformance] Save: 812 ms total = finishing the tick 14 ms + snapshot 190 ms + world JSON and
+compression 520 ms + thumbnail 60 ms + everything else 28 ms
+```
+
+- **finishing the tick**: the game completes the current tick before it saves.
+- **snapshot**: copying the state of every beaver, building and system into a save structure. It reads live game
+  objects, so it can only happen on the main thread.
+- **world JSON and compression**: turning that structure into `world.json` and compressing it into the save.
+- **thumbnail**: rendering and encoding the save's picture.
+- **everything else**: the small entries, writing the file, and whatever runs when the save completes.
+
+This is measurement only. The hooks read a clock around the game's own methods, run only during a save, and do
+not change how or when the game saves. The game's own `Saved game in 0.80s` line starts its clock after the tick
+is finished, so it can be a little lower than the total here. A line starting `Save to a stream` is a save that
+is not written to a file, which a multiplayer mod uses for a joining player. The numbers are there to decide
+whether part of a save is worth moving off the main thread.
 
 ### Per-component timings (menu setting, new in 0.4.x)
 
@@ -172,6 +202,7 @@ alongside the game; 0 road changes left to the game (fewer than 16 maps)
 | `RouteMapsMinFields` (simulation) | `16` | Smaller changes are left to the game. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
 | `Timing` | `true` | The timing stats line. |
+| `SaveTiming` | `true` | One line per save with the time of each stage; also lets the timing line report saves separately. Measurement only. |
 | `MetricsEveryTicks` | `3000` | While per-component timings are on: write them every N ticks. `0` = never (disables the menu setting too). |
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |

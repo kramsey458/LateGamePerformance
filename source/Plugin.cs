@@ -69,6 +69,10 @@ namespace LateGamePerformance
             {
                 Timing.Activate();
             }
+            if (config.SaveTiming)
+            {
+                SaveTiming.CreateFeature().Apply(HarmonyId);
+            }
             if (config.MetricsEveryTicks > 0)
             {
                 MetricsDump.CreateFeature(config).Apply(HarmonyId);

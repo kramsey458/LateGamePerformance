@@ -36,7 +36,9 @@ internal static class Program
         // AccessTools.TypeByName only sees loaded assemblies; in the game they all are.
         foreach (string name in new[] { "Timberborn.Metrics", "Timberborn.Hauling", "Timberborn.InventorySystem", "Timberborn.TickSystem",
                      "Timberborn.Navigation", "Timberborn.NeedBehaviorSystem", "Timberborn.BlockingSystem",
-                     "Timberborn.Emptying", "Timberborn.StockpilePrioritySystem", "Timberborn.Workshops" })
+                     "Timberborn.Emptying", "Timberborn.StockpilePrioritySystem", "Timberborn.Workshops",
+                     "Timberborn.GameSaveRuntimeSystem", "Timberborn.WorldPersistence", "Timberborn.WorldSerialization",
+                     "Timberborn.ThumbnailCapturing" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -54,12 +56,13 @@ internal static class Program
 
         TestConfigParsing();
         TestTimingStats();
+        TestSaveBreakdown();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
         {
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
-            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), MetricsDump.CreateFeature(new Config()),
+            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -73,7 +76,7 @@ internal static class Program
                 Console.WriteLine("     " + problem);
             }
         }
-        Check(patchCount == 32, $"32 patches declared (found {patchCount})");
+        Check(patchCount == 39, $"39 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -166,7 +169,8 @@ internal static class Program
         Console.WriteLine("     " + line);
         // 49 counted frames: 29 x 20 + 300 + 19 x 20 = 1260 ms; 49 x 12 ms of simulation = 588 ms.
         Check(line.Contains("10 ticks in 1.3 s unpaused = 7.9 ticks/s"), "timing: tick rate over unpaused time");
-        Check(line.Contains("average speed setting 7.0 asks for 11.7"), "timing: what the speed setting asks for");
+        Check(line.Contains("(game time scale 7.0, which is the speed buttons after the game's large-colony throttle, asks for 11.7)"),
+            "timing: what the time scale asks for, not readable as the button speed");
         Check(line.Contains("wall clock 7.3 s, of which paused 1.0 s and not counted 5.0 s"), "timing: wall clock, paused and uncounted time");
         Check(line.Contains("49 frames = 39 fps"), "timing: frames exclude the long gap and paused frames");
         Check(line.Contains("simulation 58.8 ms per tick = 47% of the main thread"), "timing: simulation share");
@@ -180,6 +184,65 @@ internal static class Program
         string quiet = stats.TakeLine(1, -1f, 0);
         Check(!quiet.Contains("asks for"), "timing: unknown tick length omits the comparison");
         Check(quiet.Contains("0 garbage collection(s), none during counted frames"), "timing: no collections reported plainly");
+        Check(!quiet.Contains("save(s)"), "timing: no saves, nothing said about saves");
+
+        // A save inside the simulation call of a frame (how a multiplayer mod runs it): the call at stamp 1040
+        // took 812 ms, the frame it started lasted 830 ms and a collection ran in it.
+        stats = new TimingStats(1000);
+        stats.Frame(1000, 12, 7f, 5);
+        stats.Frame(1020, 12, 7f, 5);
+        stats.Save(1041, 800);
+        stats.Frame(1040, 812, 7f, 5);         // accounts for the frame before the save; the save stays pending
+        stats.Frame(1870, 12, 7f, 6);          // the save's frame: 830 ms, with a collection
+        stats.Frame(1890, 12, 7f, 6);
+        stats.Frame(1990, 12, 7f, 7);          // an ordinary 100 ms frame containing a collection
+        string saved = stats.TakeLine(10, 0.6f, 2);
+        Console.WriteLine("     " + saved);
+        Check(saved.Contains("longest frame 100 ms, longest simulation slice 12 ms"), "timing: a save is not the longest frame or slice");
+        Check(saved.Contains("1 garbage collection(s): the 1 frame(s) containing one took 100 ms in total, longest 100 ms"),
+            "timing: a collection during a save is not counted as a collection frame");
+        Check(saved.Contains("; 1 save(s): 800 ms, in frame(s) of 830 ms with 1 garbage collection(s), all left out of the other figures"),
+            "timing: the save is reported on its own");
+        Check(saved.Contains("4 frames = 25 fps") && saved.Contains("not counted 0.8 s"), "timing: the save's frame is not a counted frame");
+
+        // A save between two simulation calls (the unmodded game saves in LateUpdate), in a frame over the 2 s limit.
+        stats = new TimingStats(1000);
+        stats.Frame(1000, 12, 7f, 5);
+        stats.Frame(1020, 12, 7f, 5);
+        stats.Save(1030, 2500);
+        stats.Frame(3540, 12, 7f, 5);
+        stats.Frame(3560, 12, 7f, 5);
+        Check(stats.TakeLine(10, 0.6f, 0).Contains("; 1 save(s): 2500 ms, in frame(s) of 2520 ms with 0 garbage collection(s)"),
+            "timing: a save between simulation calls, in a very long frame, is still reported");
+    }
+
+    private static void TestSaveBreakdown()
+    {
+        SaveBreakdown save = new SaveBreakdown(1000);
+        save.Add(SaveStage.Snapshot, 50);
+        Check(!save.IsOpen && save.Close(100) == null, "save: a stage outside a save is ignored and nothing is reported");
+        save.Open("Save");
+        save.Add(SaveStage.FinishingTheTick, 14);
+        save.Add(SaveStage.Snapshot, 190);
+        save.Add(SaveStage.WorldJson, 520);
+        save.Add(SaveStage.Thumbnail, 40);
+        save.Add(SaveStage.Thumbnail, 20);
+        string line = save.Close(812);
+        Console.WriteLine("     " + line);
+        Check(line == "Save: 812 ms total = finishing the tick 14 ms + snapshot 190 ms + world JSON and compression 520 ms + " +
+              "thumbnail 60 ms + everything else 28 ms", "save: stages and the remainder add up to the total");
+        Check(!save.IsOpen && save.Close(812) == null, "save: closed after reporting; an outer nested save reports nothing");
+        save.Open("Save");
+        save.Add(SaveStage.Snapshot, 300);
+        save.Open("Save");                     // the first save threw, so it was never closed
+        save.Add(SaveStage.WorldJson, 90);
+        line = save.Close(80);
+        Check(line.Contains("snapshot 0 ms") && line.Contains("world JSON and compression 90 ms"), "save: an abandoned save does not leak into the next");
+        Check(line.EndsWith("everything else 0 ms"), "save: the remainder is never negative");
+        SaveBreakdown fine = new SaveBreakdown(10000000);
+        fine.Open("Save");
+        fine.Add(SaveStage.Snapshot, 1234567);
+        Check(fine.Close(2500000).Contains("250 ms total") , "save: stopwatch ticks converted with the clock's frequency");
     }
 
     private static void Check(bool condition, string what)

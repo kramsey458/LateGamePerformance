@@ -1,6 +1,6 @@
 {
   "Name": "Late Game Performance",
-  "Version": "0.4.2",
+  "Version": "0.4.3",
   "Id": "kyler.lategameperformance",
   "MinimumGameVersion": "1.1.2.4",
   "Description": "Preview. Reduces per-hauler CPU work in large colonies by reusing each district's sorted hauling job list until a building's stock or settings change, instead of rebuilding it for every hauler decision. After a road change, rebuilds the route maps that were in use on worker threads instead of one by one on the main thread. Also reports the garbage collector mode, and can log timings for route map rebuilds and need selection. Install the same version and settings on every multiplayer peer.",
