@@ -1,7 +1,8 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.2.0** is a preview: it has been tested against the game's assemblies but **not yet played in-game**.
+Version **0.3.0** is a preview. 0.2.0 has been played in multiplayer; what 0.3.0 adds has been tested against
+the game's assemblies but **not yet played in-game**.
 Test on a copy of a save first.
 
 ## Installation
@@ -59,11 +60,30 @@ One behaviour difference from the unmodded game: maps are now filled before the 
 A few code paths use a map only "if it is already filled", so they can take the cached route where the unmodded
 game would have searched again. That is why every multiplayer peer needs the same `RouteMaps` settings.
 
-The trade-off is that the rebuild happens inside one tick instead of being spread over the following ones: less
-total main-thread time, but concentrated. The stats line shows how long each rebuild took.
-
-In the test harness, 420 maps on a 22,600-tile road network took about 1.4 s one by one and about 0.22 s on
+In the test harness, 420 maps on a 22,600-tile road network took about 1.8 s one by one and about 0.23 s on
 7 workers.
+
+#### Background rebuild (on by default, new in 0.3.0)
+
+In 0.2.0 the main thread waited for the whole batch: one pause per road change (about 43 ms for 360 maps in the
+colony it was measured in). Now the workers rebuild in the background and the tick carries on. The main thread
+only ever waits for the single map it is about to use:
+
+- already rebuilt: no wait
+- not started yet: the main thread builds that one map itself, right there
+- a worker is on it: it waits for that one map
+
+The game reaches a cached route map only through two methods on `RoadFlowFieldCache`, and both are gated, so
+whenever the game looks at a map from the batch it is complete. That is exactly what it would see if the whole
+batch had been waited for, so results are identical to 0.2.0: timing decides who builds a map and when, never
+what the game observes. Anything that changes what the workers read (the road graph, the district maps) first
+finishes the rebuild, as does the start of the next navigation tick. If any gate cannot be installed, the mod
+falls back to waiting for the whole batch.
+
+What to expect: the total main-thread time does not drop much, because a map the game needs right now has to be
+built by someone. What changes is its shape: many short pauses of at most about one map build, spread over the
+frames of that tick, instead of one long freeze. In the harness (a heavier road network than a real colony) the
+longest single pause went from about 230 ms to about 16 ms. `RouteMapsBackground = false` restores 0.2.0.
 
 ### Garbage collector report (on by default)
 
@@ -91,9 +111,12 @@ that figure is the time saved.
 A second line reports route map rebuilds:
 
 ```
-[LateGamePerformance] Last 1000 ticks. RouteMaps: 6 parallel rebuilds of 3120 route maps in 410.2 ms
-on 7 workers; 2 road changes left to the game (fewer than 16 maps)
+[LateGamePerformance] Last 1000 ticks. RouteMaps: 4 background rebuilds of 1435 route maps; main thread spent
+61.0 ms on them, longest single pause 1.9 ms (built 70 itself, waited for 12), workers were busy 180.4 ms
+alongside the game; 0 road changes left to the game (fewer than 16 maps)
 ```
+
+"longest single pause" is the figure to watch for hitching.
 
 ## Settings
 
@@ -105,6 +128,7 @@ on 7 workers; 2 road changes left to the game (fewer than 16 maps)
 | `HaulCacheFlushEveryTicks` (simulation) | `1` | Drop everything cached every N ticks. `0` = never. |
 | `HaulCacheVerify` | `false` | Recompute the game's list on every request and compare; logs mismatches and uses the game's list. Slower than no mod. For testing. |
 | `RouteMaps` (simulation) | `true` | Parallel route map rebuild after road changes. |
+| `RouteMapsBackground` | `true` | Rebuild in the background; `false` = main thread waits for the whole batch. May differ between peers. |
 | `RouteMapsMinFields` (simulation) | `16` | Smaller changes are left to the game. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
 | `GcReport` | `true` | Startup garbage collector report. |
@@ -144,7 +168,8 @@ The tests load the installed game's assemblies and check that every patch target
 the mod relies on still exists with a compatible signature, plus settings parsing. They also build a road
 network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
-contained. They do not run the game.
+contained. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers
+are busy: every map must be complete and correct at the moment it is asked for. They do not run the game.
 
 `tools/benchmark-timberborn.ps1` runs the game's built-in benchmark on a save with per-component tick timings
 (`-metrics`), for before/after comparisons.

@@ -48,6 +48,7 @@ internal static class Program
         Feature[] features =
         {
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
+            RouteMaps.CreateBackgroundFeature(),
             Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -61,10 +62,11 @@ internal static class Program
                 Console.WriteLine("     " + problem);
             }
         }
-        Check(patchCount == 20, $"20 patches declared (found {patchCount})");
+        Check(patchCount == 29, $"29 patches declared (found {patchCount})");
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
-        Check(warnings.Count == 0, "no warnings logged");
+        Check(warnings.Count == 1 && warnings[0].Contains("RouteMaps failed"),
+            $"only the expected warning from the forced failure was logged ({warnings.Count})");
 
         Console.WriteLine(_failures == 0 ? "ALL PASSED" : _failures + " FAILED");
         return _failures == 0 ? 0 : 1;

@@ -16,7 +16,8 @@ namespace LateGamePerformance
     // one on the main thread the next time something asks for it.
     //
     // Here: the maps that were in use and just got thrown away are rebuilt straight away, spread over worker
-    // threads, and the main thread waits for all of them before the tick continues.
+    // threads. This file decides which maps and can wait for the whole batch (the 0.2.0 behaviour, kept as the
+    // fallback). RouteMapsBackground.cs lets the tick carry on while workers rebuild.
     //
     // Why this is safe:
     //  - Regular road changes are only applied inside NavigationSynchronizer.Tick. This runs in that method's
@@ -32,7 +33,7 @@ namespace LateGamePerformance
     // Difference from the unmodded game: a map is now filled earlier than the first request for it. A few code
     // paths only use a map "if it is already filled", so they can take the cached route where the unmodded game
     // would have searched again. Every peer therefore needs the same RouteMaps settings.
-    internal static class RouteMaps
+    internal static partial class RouteMaps
     {
         public struct Work
         {
@@ -131,11 +132,18 @@ namespace LateGamePerformance
             {
                 return null;
             }
-            double wallMs = _wallStopwatchTicks * 1000.0 / Stopwatch.Frequency;
-            string line =
-                $"RouteMaps: {_batches} parallel rebuilds of {_fieldsFilled} route maps in {wallMs:0.0} ms " +
-                $"on {_workerCount} workers; {_skippedSmall} road changes left to the game (fewer than {_minFields} maps)";
+            double msPerTick = 1000.0 / Stopwatch.Frequency;
+            string left = $"; {_skippedSmall} road changes left to the game (fewer than {_minFields} maps)";
+            string line = _background
+                ? $"RouteMaps: {_batches} background rebuilds of {_fieldsFilled} route maps; main thread spent " +
+                  $"{_mainStopwatchTicks * msPerTick:0.0} ms on them, longest single pause " +
+                  $"{_longestPauseStopwatchTicks * msPerTick:0.0} ms (built {_builtOnMain} itself, waited for {_waitedOnMain}), " +
+                  $"workers were busy {_backgroundStopwatchTicks * msPerTick:0.0} ms alongside the game" + left
+                : $"RouteMaps: {_batches} parallel rebuilds of {_fieldsFilled} route maps in " +
+                  $"{_wallStopwatchTicks * msPerTick:0.0} ms on {_workerCount} workers" + left;
             _batches = _fieldsFilled = _skippedSmall = _wallStopwatchTicks = 0;
+            _mainStopwatchTicks = _backgroundStopwatchTicks = _builtOnMain = _waitedOnMain = 0;
+            _longestPauseStopwatchTicks = 0;
             return line;
         }
 
@@ -224,6 +232,7 @@ namespace LateGamePerformance
         internal static void PathfindingServiceCreatedPostfix(object __instance)
         {
             // A new game scene: forget everything tied to the previous one.
+            Land();
             _pathfindingService = __instance;
             _workerGenerators = null;
             FilledBeforeUpdate.Clear();
@@ -238,6 +247,8 @@ namespace LateGamePerformance
             }
             try
             {
+                // The game is about to throw maps away; no worker may still be writing one.
+                Land();
                 FilledBeforeUpdate.Clear();
                 // Keys and Values of a Dictionary enumerate in the same order, so walking them together pairs
                 // each start tile with its map without boxing an entry per map.
@@ -346,7 +357,13 @@ namespace LateGamePerformance
             if (_workerGenerators == null)
             {
                 object binaryHeapFactory = _binaryHeapFactoryOf(_roadFlowFieldGeneratorOf(_pathfindingService));
-                _workerGenerators = CreateWorkerGenerators(binaryHeapFactory, _workerCount);
+                // One per worker, plus one for the main thread when it builds a map itself.
+                _workerGenerators = CreateWorkerGenerators(binaryHeapFactory, _workerCount + 1);
+            }
+            if (_background)
+            {
+                BeginBackground(graph, districtMap, WorkScratch, _workerGenerators);
+                return;
             }
 
             long started = Stopwatch.GetTimestamp();
@@ -392,6 +409,21 @@ namespace LateGamePerformance
         private static void Disable(Exception exception)
         {
             _active = false;
+            if (_inFlight)
+            {
+                // Let the workers finish what they hold so nothing is written after this point.
+                Flight flight = _flight;
+                _inFlight = false;
+                _flight = null;
+                try
+                {
+                    Task.WaitAll(flight.Tasks);
+                }
+                catch (Exception)
+                {
+                    // Workers never throw; nothing more can be done here either way.
+                }
+            }
             FilledBeforeUpdate.Clear();
             Pending.Clear();
             Log.Warning("RouteMaps failed and turned itself off for this session: " + exception);

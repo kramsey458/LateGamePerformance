@@ -95,6 +95,7 @@ internal static class RouteMapsTests
         check(!(bool)Get(brokenWork[1].Field, "IsFilled"), "the failed map stays unfilled");
 
         RunOrchestration(graph, heapFactory, limiting, starts, sequentialWork, check);
+        RunBackground(graph, heapFactory, limiting, starts, sequentialWork, workers, parallelTimer.ElapsedMilliseconds, check);
 
         Console.WriteLine($"     timing: {maps} maps sequential {sequentialTimer.ElapsedMilliseconds} ms, " +
                           $"{workers} workers {parallelTimer.ElapsedMilliseconds} ms " +
@@ -203,6 +204,120 @@ internal static class RouteMapsTests
         RouteMaps.NavigationTickedPostfix();
         check(RouteMaps.FieldsFilledSinceReport == before && !(bool)Get(fieldAt[cached[1]], "IsFilled"),
             "orchestration: a small change (5 maps) is left to the game");
+    }
+
+    // Background rebuild: workers fill while this thread plays the game's part, asking for maps in a shuffled
+    // order through the same gate the game goes through. Every map must be complete and correct at the moment it
+    // is asked for, whoever ended up building it. Repeated to give races a chance to show.
+    private static void RunBackground(object graph, object heapFactory, object limiting, int[] starts,
+        List<RouteMaps.Work> expected, int workers, long waitForAllMs, Action<bool, string> check)
+    {
+        Dictionary<int, int> indexOfStart = new Dictionary<int, int>();
+        for (int i = 0; i < starts.Length; i++)
+        {
+            indexOfStart[starts[i]] = i;
+        }
+        int[] distinct = new int[indexOfStart.Count];
+        indexOfStart.Keys.CopyTo(distinct, 0);
+        object[] generators = RouteMaps.CreateWorkerGenerators(heapFactory, workers + 1);
+        object districtMapStandIn = new object();
+        Random random = new Random(777);
+        RouteMaps.TakeStatsLine();
+
+        const int rounds = 25;
+        int notReadyWhenAsked = 0, wrong = 0, leftInFlight = 0;
+        long nodesCompared = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            List<RouteMaps.Work> work = CreateWork(distinct, limiting);
+            Dictionary<int, object> fieldAt = new Dictionary<int, object>();
+            foreach (RouteMaps.Work item in work)
+            {
+                fieldAt[item.StartNodeId] = item.Field;
+            }
+            int[] order = (int[])distinct.Clone();
+            for (int i = order.Length - 1; i > 0; i--)
+            {
+                int j = random.Next(i + 1);
+                (order[i], order[j]) = (order[j], order[i]);
+            }
+            RouteMaps.BeginBackground(graph, districtMapStandIn, work, generators);
+            // Odd rounds ask for everything; even rounds ask for a third and then land, like a new navigation tick.
+            int asked = round % 2 == 1 ? order.Length : order.Length / 3;
+            for (int i = 0; i < asked; i++)
+            {
+                RouteMaps.MapRequestedPrefix(order[i]);
+                if (!(bool)Get(fieldAt[order[i]], "IsFilled"))
+                {
+                    notReadyWhenAsked++;
+                }
+            }
+            // A change to something workers do not read must not land the flight; a change to the graph must.
+            RouteMaps.SharedStateChangingPrefix(new object());
+            RouteMaps.SharedStateChangingPrefix(graph);
+            if (RouteMaps.IsInFlight)
+            {
+                leftInFlight++;
+            }
+            // Full comparison is slow through reflection, so check a rotating sixth of the maps each round.
+            for (int i = round % 6; i < distinct.Length; i += 6)
+            {
+                object field = fieldAt[distinct[i]];
+                if (!(bool)Get(field, "IsFilled") || !SameMap(expected[indexOfStart[distinct[i]]].Field, field, ref nodesCompared))
+                {
+                    wrong++;
+                }
+            }
+        }
+        check(notReadyWhenAsked == 0, $"background: every map was complete at the moment it was asked for ({rounds} rounds)");
+        check(wrong == 0, $"background: maps identical to the game's, whoever built them ({nodesCompared} nodes compared)");
+        check(leftInFlight == 0, "background: a road graph change lands the rebuild first");
+        check(RouteMaps.IsActive, "background: feature still active");
+        Console.WriteLine($"     background: main thread spent {RouteMaps.MainThreadMsSinceReport / rounds:0.0} ms per rebuild of " +
+                          $"{distinct.Length} maps and built {RouteMaps.BuiltOnMainSinceReport / rounds} of them itself " +
+                          "(worst case: this test asks for maps back to back with no game work in between)");
+
+        // Closer to the game: other work happens between map requests (here 0.25 ms of spinning per request),
+        // which is the time the workers use to get ahead of the main thread.
+        RouteMaps.TakeStatsLine();
+        const int pacedRounds = 5;
+        for (int round = 0; round < pacedRounds; round++)
+        {
+            List<RouteMaps.Work> work = CreateWork(distinct, limiting);
+            int[] pacedOrder = (int[])distinct.Clone();
+            for (int i = pacedOrder.Length - 1; i > 0; i--)
+            {
+                int j = random.Next(i + 1);
+                (pacedOrder[i], pacedOrder[j]) = (pacedOrder[j], pacedOrder[i]);
+            }
+            RouteMaps.BeginBackground(graph, districtMapStandIn, work, generators);
+            foreach (int node in pacedOrder)
+            {
+                long until = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 4000;
+                while (Stopwatch.GetTimestamp() < until)
+                {
+                }
+                RouteMaps.MapRequestedPrefix(node);
+            }
+            RouteMaps.Land();
+        }
+        Console.WriteLine($"     background, paced: main thread spent {RouteMaps.MainThreadMsSinceReport / pacedRounds:0.0} ms per rebuild of " +
+                          $"{distinct.Length} maps and built {RouteMaps.BuiltOnMainSinceReport / pacedRounds} of them itself; " +
+                          $"longest single pause {RouteMaps.LongestPauseMsSinceReport:0.0} ms (waiting for the whole batch: about {waitForAllMs} ms)");
+
+        // A worker that fails must be contained: nobody waits forever, and the feature switches itself off.
+        List<RouteMaps.Work> broken = CreateWork(distinct, limiting);
+        for (int i = 0; i < broken.Count; i += 9)
+        {
+            broken[i] = new RouteMaps.Work { Field = broken[i].Field, LimitingField = null, StartNodeId = broken[i].StartNodeId };
+        }
+        RouteMaps.BeginBackground(graph, districtMapStandIn, broken, generators);
+        foreach (int node in distinct)
+        {
+            RouteMaps.MapRequestedPrefix(node);
+        }
+        RouteMaps.Land();
+        check(!RouteMaps.IsInFlight && !RouteMaps.IsActive, "background: failing maps end the rebuild and switch the feature off");
     }
 
     private static object GetField(object target, string name)

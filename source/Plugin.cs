@@ -56,7 +56,11 @@ namespace LateGamePerformance
             if (config.RouteMaps && RouteMaps.CreateFeature(config).Apply(HarmonyId))
             {
                 RouteMaps.Activate();
-                Log.Info($"RouteMaps: {RouteMaps.WorkerCount} worker threads.");
+                // If any gate cannot be installed, fall back to waiting for the whole batch, which needs none.
+                bool background = config.RouteMapsBackground && RouteMaps.CreateBackgroundFeature().Apply(HarmonyId);
+                RouteMaps.SetBackground(background);
+                Log.Info($"RouteMaps: {RouteMaps.WorkerCount} worker threads, " +
+                         (background ? "rebuilding in the background." : "main thread waits for each rebuild."));
             }
             if (config.Diagnostics)
             {
