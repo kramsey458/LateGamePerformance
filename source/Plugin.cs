@@ -53,6 +53,11 @@ namespace LateGamePerformance
             {
                 HaulCache.Activate();
             }
+            if (config.RouteMaps && RouteMaps.CreateFeature(config).Apply(HarmonyId))
+            {
+                RouteMaps.Activate();
+                Log.Info($"RouteMaps: {RouteMaps.WorkerCount} worker threads.");
+            }
             if (config.Diagnostics)
             {
                 _diagnosticsActive = Diagnostics.CreateFeature().Apply(HarmonyId);
@@ -96,6 +101,11 @@ namespace LateGamePerformance
                 if (haulLine != null)
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {haulLine}");
+                }
+                string routeLine = RouteMaps.TakeStatsLine();
+                if (routeLine != null)
+                {
+                    Log.Info($"Last {_config.StatsEveryTicks} ticks. {routeLine}");
                 }
                 if (_diagnosticsActive)
                 {

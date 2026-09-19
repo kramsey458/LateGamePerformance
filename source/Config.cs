@@ -14,6 +14,9 @@ namespace LateGamePerformance
         public bool HaulCache = true;
         public int HaulCacheFlushEveryTicks = 1;
         public bool HaulCacheVerify = false;
+        public bool RouteMaps = true;
+        public int RouteMapsMinFields = 16;
+        public int RouteMapsWorkers = 0;
         public bool GcReport = true;
         public bool Diagnostics = false;
         public int StatsEveryTicks = 1000;
@@ -65,6 +68,9 @@ namespace LateGamePerformance
             HaulCache = Bool(values, nameof(HaulCache), HaulCache);
             HaulCacheFlushEveryTicks = Math.Max(0, Int(values, nameof(HaulCacheFlushEveryTicks), HaulCacheFlushEveryTicks));
             HaulCacheVerify = Bool(values, nameof(HaulCacheVerify), HaulCacheVerify);
+            RouteMaps = Bool(values, nameof(RouteMaps), RouteMaps);
+            RouteMapsMinFields = Math.Max(1, Int(values, nameof(RouteMapsMinFields), RouteMapsMinFields));
+            RouteMapsWorkers = Math.Max(0, Int(values, nameof(RouteMapsWorkers), RouteMapsWorkers));
             GcReport = Bool(values, nameof(GcReport), GcReport);
             Diagnostics = Bool(values, nameof(Diagnostics), Diagnostics);
             StatsEveryTicks = Math.Max(0, Int(values, nameof(StatsEveryTicks), StatsEveryTicks));
@@ -73,7 +79,8 @@ namespace LateGamePerformance
         public override string ToString()
         {
             return $"HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
-                   $"HaulCacheVerify={HaulCacheVerify}, GcReport={GcReport}, Diagnostics={Diagnostics}, " +
+                   $"HaulCacheVerify={HaulCacheVerify}, RouteMaps={RouteMaps}, RouteMapsMinFields={RouteMapsMinFields}, " +
+                   $"RouteMapsWorkers={RouteMapsWorkers}, GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }
 

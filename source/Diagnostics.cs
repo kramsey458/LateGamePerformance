@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 using Timberborn.NeedBehaviorSystem;
 
 namespace LateGamePerformance
@@ -57,7 +58,7 @@ namespace LateGamePerformance
             double fillMs = _fillStopwatchTicks * 1000.0 / Stopwatch.Frequency;
             double needMs = _needPickStopwatchTicks * 1000.0 / Stopwatch.Frequency;
             string line =
-                $"Diagnostics: road flow field fills {_fills} ({_fillNodes} nodes) in {fillMs:0.0} ms; " +
+                $"Diagnostics: road flow field fills {_fills} ({_fillNodes} nodes) in {fillMs:0.0} ms summed over threads; " +
                 $"need picks {_needPicks} in {needMs:0.0} ms";
             _fills = _fillNodes = _fillStopwatchTicks = _needPicks = _needPickStopwatchTicks = 0;
             return line;
@@ -74,9 +75,10 @@ namespace LateGamePerformance
         {
             if (__state != 0)
             {
-                _fillStopwatchTicks += Stopwatch.GetTimestamp() - __state;
-                _fillNodes += _numberOfNodes(flowField);
-                _fills++;
+                // Fills also run on RouteMaps worker threads.
+                Interlocked.Add(ref _fillStopwatchTicks, Stopwatch.GetTimestamp() - __state);
+                Interlocked.Add(ref _fillNodes, _numberOfNodes(flowField));
+                Interlocked.Increment(ref _fills);
             }
         }
 

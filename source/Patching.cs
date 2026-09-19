@@ -186,6 +186,35 @@ namespace LateGamePerformance
             return Expression.Lambda<Func<object, TField>>(body, instance).Compile();
         }
 
+        // Compiled call to an instance method on a type we cannot name at compile time. Arguments arrive as
+        // objects (or exact value types) and are cast to the real parameter types.
+        public static TDelegate InstanceCall<TDelegate>(MethodInfo method) where TDelegate : Delegate
+        {
+            if (method == null)
+            {
+                throw new MissingMethodException("method not found");
+            }
+            MethodInfo invoke = typeof(TDelegate).GetMethod("Invoke");
+            ParameterInfo[] delegateParameters = invoke.GetParameters();
+            ParameterInfo[] methodParameters = method.GetParameters();
+            ParameterExpression[] parameters = new ParameterExpression[delegateParameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                parameters[i] = Expression.Parameter(delegateParameters[i].ParameterType, "p" + i);
+            }
+            Expression[] arguments = new Expression[methodParameters.Length];
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                arguments[i] = Expression.Convert(parameters[i + 1], methodParameters[i].ParameterType);
+            }
+            Expression call = Expression.Call(Expression.Convert(parameters[0], method.DeclaringType), method, arguments);
+            if (invoke.ReturnType != typeof(void))
+            {
+                call = Expression.Convert(call, invoke.ReturnType);
+            }
+            return Expression.Lambda<TDelegate>(call, parameters).Compile();
+        }
+
         public static Func<object, TProperty> PropertyGetter<TProperty>(Type declaringType, string propertyName)
         {
             PropertyInfo property = AccessTools.Property(declaringType, propertyName);

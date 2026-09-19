@@ -1,7 +1,7 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.1.0** is a preview: it has been checked against the game's assemblies but **not yet played in-game**.
+Version **0.2.0** is a preview: it has been tested against the game's assemblies but **not yet played in-game**.
 Test on a copy of a save first.
 
 ## Installation
@@ -36,6 +36,35 @@ Setting it to `0` keeps lists across ticks and relies on change tracking alone: 
 If anything throws inside the cache, it switches itself off for the session and the game's own code runs.
 If a required game method is missing (for example after a game update), the feature does not enable at all.
 
+### Parallel route map rebuild (on by default, new in 0.2.0)
+
+Every building with an entrance keeps a route map: the road distance from its entrance to every road tile it
+can reach. When any road changes, the game throws away every map containing a changed tile, which in a connected
+district is nearly all of them, and rebuilds each one on the main thread the next time something asks for it.
+In a large colony that is hundreds of rebuilds right after every finished path, stair or platform.
+
+This mod rebuilds the maps that were in use and just got thrown away straight away, spread over worker threads
+(up to 7), and the main thread waits for them before the tick continues.
+
+- Road changes are only applied at one point in the tick (`NavigationSynchronizer.Tick`). The rebuild runs right
+  after it, so nothing modifies the road network while workers read it.
+- Each worker runs the game's own map generator on a private copy, so a rebuilt map has exactly the contents
+  the game would have produced. The tests check this node for node against the installed game's code.
+- Which maps are rebuilt depends only on game state, never on timing or thread count, so multiplayer peers stay
+  in step. The thread count itself may differ between peers.
+- Maps that were never used are not rebuilt, and changes that throw away fewer than `RouteMapsMinFields` maps
+  are left to the game.
+
+One behaviour difference from the unmodded game: maps are now filled before the first request instead of on it.
+A few code paths use a map only "if it is already filled", so they can take the cached route where the unmodded
+game would have searched again. That is why every multiplayer peer needs the same `RouteMaps` settings.
+
+The trade-off is that the rebuild happens inside one tick instead of being spread over the following ones: less
+total main-thread time, but concentrated. The stats line shows how long each rebuild took.
+
+In the test harness, 420 maps on a 22,600-tile road network took about 1.4 s one by one and about 0.22 s on
+7 workers.
+
 ### Garbage collector report (on by default)
 
 Logs at startup whether incremental garbage collection is on. It is decided by `boot.config` before mods load,
@@ -43,8 +72,8 @@ so the mod cannot change it; when it is off, the log line says which line to add
 
 ### Diagnostics (off by default)
 
-`Diagnostics = true` times two other suspects without changing them, to decide what the next version should
-target: route map (road flow field) rebuilds after road changes, and need selection. It adds overhead to hot
+`Diagnostics = true` times route map (road flow field) fills, including the ones the game still does on
+demand, and need selection, which this mod does not change. It adds overhead to hot
 code, so switch it off again after collecting numbers.
 
 ### Stats
@@ -59,6 +88,13 @@ Every `StatsEveryTicks` ticks (default 1000) one line is logged, for example:
 "ms each" is roughly what the game pays on every request without the mod, so requests served from cache times
 that figure is the time saved.
 
+A second line reports route map rebuilds:
+
+```
+[LateGamePerformance] Last 1000 ticks. RouteMaps: 6 parallel rebuilds of 3120 route maps in 410.2 ms
+on 7 workers; 2 road changes left to the game (fewer than 16 maps)
+```
+
 ## Settings
 
 `version-1.1/LateGamePerformance.cfg`, plain `key = value`. Restart after editing.
@@ -68,6 +104,9 @@ that figure is the time saved.
 | `HaulCache` (simulation) | `true` | The hauling job list cache. |
 | `HaulCacheFlushEveryTicks` (simulation) | `1` | Drop everything cached every N ticks. `0` = never. |
 | `HaulCacheVerify` | `false` | Recompute the game's list on every request and compare; logs mismatches and uses the game's list. Slower than no mod. For testing. |
+| `RouteMaps` (simulation) | `true` | Parallel route map rebuild after road changes. |
+| `RouteMapsMinFields` (simulation) | `16` | Smaller changes are left to the game. |
+| `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
@@ -84,8 +123,11 @@ that figure is the time saved.
 - **Pruning need selection by straight-line distance.** Ziplines have their own cost per distance, so a straight
   line is not a lower bound on route cost and pruning with it would change what beavers choose.
 - **Array-backed route maps.** The game's flow field objects cannot be given extra fields from a mod, and looking
-  up side storage on every access costs about what the dictionary lookup it replaces does. The diagnostics above
-  measure whether rebuilds matter enough to justify a deeper change.
+  up side storage on every access costs about what the dictionary lookup it replaces does. 0.2.0 rebuilds the
+  maps in parallel instead.
+- **Ticking beavers on several threads.** A beaver's tick decides and acts in one step (finding stock and
+  reserving it), touches Unity objects that are main-thread only, and multiplayer needs identical results on
+  every machine. Only self-contained, read-only calculations can move to other threads.
 
 ## Build and test
 
@@ -99,7 +141,10 @@ dotnet run --project tests -c Release
 ```
 
 The tests load the installed game's assemblies and check that every patch target, private field and property
-the mod relies on still exists with a compatible signature, plus settings parsing. They do not run the game.
+the mod relies on still exists with a compatible signature, plus settings parsing. They also build a road
+network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
+game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
+contained. They do not run the game.
 
 `tools/benchmark-timberborn.ps1` runs the game's built-in benchmark on a save with per-component tick timings
 (`-metrics`), for before/after comparisons.
