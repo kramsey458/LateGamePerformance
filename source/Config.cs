@@ -18,6 +18,8 @@ namespace LateGamePerformance
         public bool RouteMapsBackground = true;
         public int RouteMapsMinFields = 16;
         public int RouteMapsWorkers = 0;
+        public bool Timing = true;
+        public int MetricsEveryTicks = 3000;
         public bool GcReport = true;
         public bool Diagnostics = false;
         public int StatsEveryTicks = 1000;
@@ -73,6 +75,8 @@ namespace LateGamePerformance
             RouteMapsBackground = Bool(values, nameof(RouteMapsBackground), RouteMapsBackground);
             RouteMapsMinFields = Math.Max(1, Int(values, nameof(RouteMapsMinFields), RouteMapsMinFields));
             RouteMapsWorkers = Math.Max(0, Int(values, nameof(RouteMapsWorkers), RouteMapsWorkers));
+            Timing = Bool(values, nameof(Timing), Timing);
+            MetricsEveryTicks = Math.Max(0, Int(values, nameof(MetricsEveryTicks), MetricsEveryTicks));
             GcReport = Bool(values, nameof(GcReport), GcReport);
             Diagnostics = Bool(values, nameof(Diagnostics), Diagnostics);
             StatsEveryTicks = Math.Max(0, Int(values, nameof(StatsEveryTicks), StatsEveryTicks));
@@ -82,7 +86,8 @@ namespace LateGamePerformance
         {
             return $"HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMaps={RouteMaps}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
-                   $"RouteMapsWorkers={RouteMapsWorkers}, GcReport={GcReport}, Diagnostics={Diagnostics}, " +
+                   $"RouteMapsWorkers={RouteMapsWorkers}, Timing={Timing}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }
 

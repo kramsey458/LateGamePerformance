@@ -23,7 +23,10 @@ Copy-Item "$root\README.md", "$root\LICENSE" $modDir
 
 $version = (Get-Content "$root\packaging\manifest.json" -Raw | ConvertFrom-Json).Version
 $zip = "$dist\$modName-$version.zip"
-Compress-Archive -Path $modDir -DestinationPath $zip
+# Not Compress-Archive: in Windows PowerShell it writes backslash paths into the zip, which some tools extract
+# wrongly. ZipFile writes standard forward slashes.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory($modDir, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
 "Packaged: $zip"
 
 if ($Install) {

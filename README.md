@@ -1,8 +1,8 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.3.0** is a preview. 0.2.0 has been played in multiplayer; what 0.3.0 adds has been tested against
-the game's assemblies but **not yet played in-game**.
+Version **0.4.0** is a preview. 0.3.0 has been played in multiplayer; the measurement tools 0.4.0 adds have been
+tested against the game's assemblies but **not yet played in-game**.
 Test on a copy of a save first.
 
 ## Installation
@@ -85,6 +85,33 @@ built by someone. What changes is its shape: many short pauses of at most about 
 frames of that tick, instead of one long freeze. In the harness (a heavier road network than a real colony) the
 longest single pause went from about 230 ms to about 16 ms. `RouteMapsBackground = false` restores 0.2.0.
 
+### Timing line (on by default, new in 0.4.0)
+
+One hook on the game's per-frame simulation call shows where the main thread's time goes:
+
+```
+[LateGamePerformance] Last 1000 ticks. Timing: 1000 ticks in 171.2 s unpaused = 5.8 ticks/s (average speed
+setting 7.0 asks for 11.7); 9480 frames = 55 fps; simulation 118.0 ms per tick = 69% of the main thread,
+everything else 5.6 ms per frame = 31%; longest frame 96 ms, longest simulation slice 41 ms; 12 garbage collections
+```
+
+- **ticks/s against what the speed setting asks for** shows whether the game is keeping up at all.
+- **simulation** is time inside the game's tick call; **everything else** is the rest of each frame (rendering,
+  animation, UI, other mods' per-frame work). Paused frames are left out.
+- If "everything else" is a large share, a frame rate cap gives the simulation more of each second, because the
+  per-frame cost is paid less often.
+
+### Per-component timings (only with `-metrics`, new in 0.4.0)
+
+The game can time every tickable component, every once-per-tick system and every root behaviour, but only writes
+the result at the end of a benchmark run. With this mod, launching the game with `-metrics` (Steam: Library >
+Timberborn > Properties > General > Launch options) writes that report during normal play, multiplayer included,
+to `Documents\Timberborn\LateGamePerformance` every `MetricsEveryTicks` ticks (default 3000), then resets the
+timers so each file covers one interval. Each group lists its total seconds and every entry's share of it.
+
+The game's timers add two stopwatch calls around every component tick, so expect it to run a little slower while
+`-metrics` is on, and remove the option afterwards. Without `-metrics` this feature does nothing.
+
 ### Garbage collector report (on by default)
 
 Logs at startup whether incremental garbage collection is on. It is decided by `boot.config` before mods load,
@@ -131,6 +158,8 @@ alongside the game; 0 road changes left to the game (fewer than 16 maps)
 | `RouteMapsBackground` | `true` | Rebuild in the background; `false` = main thread waits for the whole batch. May differ between peers. |
 | `RouteMapsMinFields` (simulation) | `16` | Smaller changes are left to the game. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
+| `Timing` | `true` | The timing stats line. |
+| `MetricsEveryTicks` | `3000` | With `-metrics`: write per-component timings every N ticks. `0` = never. |
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |

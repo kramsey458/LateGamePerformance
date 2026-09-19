@@ -62,6 +62,14 @@ namespace LateGamePerformance
                 Log.Info($"RouteMaps: {RouteMaps.WorkerCount} worker threads, " +
                          (background ? "rebuilding in the background." : "main thread waits for each rebuild."));
             }
+            if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
+            {
+                Timing.Activate();
+            }
+            if (config.MetricsEveryTicks > 0)
+            {
+                MetricsDump.CreateFeature(config).Apply(HarmonyId);
+            }
             if (config.Diagnostics)
             {
                 _diagnosticsActive = Diagnostics.CreateFeature().Apply(HarmonyId);
@@ -98,9 +106,15 @@ namespace LateGamePerformance
         private static void TickStartedPrefix()
         {
             HaulCache.OnTickStarted();
+            MetricsDump.OnTickStarted();
             if (_config.StatsEveryTicks > 0 && ++_ticksSinceReport >= _config.StatsEveryTicks)
             {
                 _ticksSinceReport = 0;
+                string timingLine = Timing.TakeStatsLine(_config.StatsEveryTicks);
+                if (timingLine != null)
+                {
+                    Log.Info($"Last {_config.StatsEveryTicks} ticks. {timingLine}");
+                }
                 string haulLine = HaulCache.TakeStatsLine();
                 if (haulLine != null)
                 {
