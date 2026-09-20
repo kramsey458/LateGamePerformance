@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ: Late Game Performance</title>
+<meta name="description" content="Frequently asked questions about the Late Game Performance Timberborn mod: what it changes, how much it helps, BeaverBuddies co-op, incremental garbage collection, settings and compatibility.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>try{var t=localStorage.getItem('lgp-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><img src="favicon.svg" alt="" width="32" height="32"> Late Game Performance</a>
+    <nav class="nav" aria-label="Main">
+      <a href="index.html">Home</a>
+      <a href="index.html#features">Features</a>
+      <a href="install.html">Install</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="faq.html" aria-current="page">FAQ</a>
+      <a href="https://github.com/timbermods/LateGamePerformance">GitHub</a>
+      <button class="theme-btn" id="theme-toggle" type="button">Dark mode</button>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="doc">
+<div class="wrap narrow faq">
+  <span class="eyebrow">Guide</span>
+  <h1>Frequently asked questions</h1>
+  <p class="lead">Straight answers, including the ones that aren't flattering. If yours isn't here, <a href="https://github.com/timbermods/LateGamePerformance/issues/new">ask on GitHub</a>.</p>
+
+  <h2 id="basics">The basics</h2>
+
+  <details id="what">
+    <summary>What does it do, in one sentence?</summary>
+    <div class="answer"><p>It removes work the game repeats in large colonies (rebuilding hauling job lists, rebuilding route maps after road changes, measuring paths to trees that cannot matter, and optionally the memory clean-up freezes) so the game stutters less, without changing what the game decides.</p></div>
+  </details>
+
+  <details id="who">
+    <summary>Who is it for?</summary>
+    <div class="answer"><p>Players whose colony has grown big enough that the game hitches, typically hundreds of beavers late in a game. A small colony has little repeated work to remove, so you are unlikely to notice much there.</p></div>
+  </details>
+
+  <details id="how-much">
+    <summary>How much faster will my game be?</summary>
+    <div class="answer">
+      <p>There is no single figure, because it depends on your colony and your computer. What has been reported so far:</p>
+      <ul>
+        <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.9 runs the same code).</li>
+        <li>On a computer that had memory clean-up freezes of most of a second about once a minute, incremental garbage collection removed them and made the frame rate much steadier at high tick rates.</li>
+      </ul>
+      <p>There is no controlled frame rate benchmark yet. The mod logs its own <a href="#timing">timing line</a> so you can see your colony's numbers.</p>
+    </div>
+  </details>
+
+  <details id="same-results">
+    <summary>Does it change how my colony plays?</summary>
+    <div class="answer">
+      <p>It is built not to. The hauling list is assembled in the same order and sorted with the same comparison as the game's, the tree and plant search returns the game's own answer, and rebuilt route maps have exactly the game's contents. Tests check each of these against the game's own code, and the mod can be run in a mode that compares against the game's code while you play.</p>
+      <p>There is one known difference. Route maps are now filled <em>before</em> the game first asks for them instead of when it does. A few code paths in the game use a route map only if it is already filled, so they can take the cached route where the unmodded game would have searched again. That is why route maps are always on instead of a setting: every player on the same version runs them alike.</p>
+    </div>
+  </details>
+
+  <details id="settings">
+    <summary>Does it have settings?</summary>
+    <div class="answer">
+      <p>Yes, but none of them change what the game simulates.</p>
+      <ul>
+        <li><strong>In the game</strong> (<strong>Mods &gt; Late Game Performance</strong>): <strong>Incremental garbage collection</strong>, <strong>Warn when garbage collection is not incremental</strong>, <strong>Record per-component timings</strong> and <strong>Adaptive garbage collection pacing (experimental)</strong>.</li>
+        <li><strong>In <code>version-1.1\LateGamePerformance.cfg</code></strong>: testing switches, how the work is split over threads, and which log lines are written. Restart after editing.</li>
+      </ul>
+      <p>The hauling cache, the route maps and the tree and plant search are always on, the same for everyone. To run without one of them, disable the mod.</p>
+    </div>
+  </details>
+
+  <details id="saves">
+    <summary>Will it affect my saves?</summary>
+    <div class="answer"><p>It stores nothing in saves. To uninstall, disable it and restart. It is still a young mod, so try it on a copy of a save first.</p></div>
+  </details>
+
+  <details id="get">
+    <summary>Where do I get it?</summary>
+    <div class="answer"><p>From the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest">GitHub releases page</a>, as a ZIP you extract into your Mods folder. It also needs Harmony and Mod Settings from the Steam Workshop. See the <a href="install.html">install guide</a>.</p></div>
+  </details>
+
+  <h2 id="co-op-section">Multiplayer and BeaverBuddies</h2>
+
+  <details id="co-op">
+    <summary>Is it compatible with BeaverBuddies?</summary>
+    <div class="answer">
+      <p>Yes, and keeping BeaverBuddies games in step has been the top priority throughout its development. In multiplayer every player's game must calculate exactly the same thing, so a speed-up is only worth having if it gives the game's own answer.</p>
+      <ul>
+        <li>Hauling lists, tree searches and route maps are checked against the game's own code, including node for node for route maps.</li>
+        <li>Nothing that affects the simulation is a setting, so the same version behaves the same for every player.</li>
+        <li>Which route maps get built never depends on what any single player's screen asked for.</li>
+        <li>The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on</code> is the same in every player's log.</li>
+      </ul>
+      <p>See <a href="index.html#status">what is tested, and what isn't</a>.</p>
+    </div>
+  </details>
+
+  <details id="all-players">
+    <summary>Do all players need it?</summary>
+    <div class="answer"><p>Yes. Every player installs the same version. The mod changes which code runs during the simulation, so all players have to run the same code. A multiplayer mod's own version check covers it, and there is nothing else to match.</p></div>
+  </details>
+
+  <details id="co-op-settings">
+    <summary>Do the players' settings have to match?</summary>
+    <div class="answer"><p>No. Incremental garbage collection, adaptive pacing, thread counts and the timing options do not affect the simulation, so each player can set them differently, and each player benefits separately.</p></div>
+  </details>
+
+  <details id="co-op-tested">
+    <summary>Has it been played in co-op?</summary>
+    <div class="answer"><p>Yes, in multiplayer sessions on two computers, including a 35-minute session logged on both. That is two-player play; bigger groups have not been reported. If you try it, please <a href="https://github.com/timbermods/LateGamePerformance/issues/new">tell us how it went</a>.</p></div>
+  </details>
+
+  <h2 id="how">How it works</h2>
+
+  <details id="haul">
+    <summary>What is the hauling job list cache?</summary>
+    <div class="answer"><p>Every time a hauler looks for work, the game asks every building with an inventory in the district for its hauling jobs and their weights, sorts the whole list, and tries the jobs in order. It repeats that for every hauler decision, even when nothing changed in between. The mod keeps each building's jobs until something that feeds them changes (stock, reservations, allowed goods, enabled inventories, blocked state, emptying mark, obtain or supply setting, recipe or priority), and keeps the district's sorted list until a building in it changes. As a safety net everything cached is dropped every tick, so an input the mod does not track, such as one added by another mod, can be out of date for at most a single tick.</p></div>
+  </details>
+
+  <details id="routes">
+    <summary>What are route maps, and why rebuild them on worker threads?</summary>
+    <div class="answer"><p>Every building with an entrance keeps a route map: the road distance from its entrance to every road tile it can reach. When a road changes, the game throws away every map that contains a changed tile, which in a connected district is nearly all of them, and rebuilds each one on the main thread when something next asks for it. The mod rebuilds them at the end of the navigation tick on up to 7 worker threads, in the background, using the game's own map generator on a private copy. The main thread only ever waits for the single map it is about to use.</p></div>
+  </details>
+
+  <details id="trees">
+    <summary>What does the tree and plant search change?</summary>
+    <div class="answer"><p>When a lumberjack looks for a tree (or a gatherer or farmer for a plant), the game measures the path distance from the building to every candidate and only then asks whether the plant has anything to take. For lumberjacks the candidates are every unreserved marked tree on the map, and most of them are still growing. A plant with nothing to take matters only for whether it can be reached, and only until the search has found something reachable that is grown or alive. After that its distance cannot change the answer, so the mod leaves that lookup out. Plants that have something to take are looked up exactly as before, in the same order.</p></div>
+  </details>
+
+  <details id="safety">
+    <summary>What if something goes wrong?</summary>
+    <div class="answer"><p>If anything throws inside a feature, that feature switches itself off for the rest of the session and the game's own code runs. If a game method a feature needs is missing (for example after a game update), the feature does not start at all and the startup line says <code>OFF</code>. Patches on methods that Harmony cannot patch safely are refused. See <a href="troubleshooting.html#off">Troubleshooting</a>.</p></div>
+  </details>
+
+  <details id="verify">
+    <summary>Can I check it against the game?</summary>
+    <div class="answer"><p>Yes. <code>HaulCacheVerify = true</code> and <code>YielderSearchVerify = true</code> in <code>LateGamePerformance.cfg</code> run the game's own code as well, compare, log any difference, and use the game's result. They are slower than no mod, so use them for a test session and switch them off afterwards. In the stats lines look for <code>verify mismatches 0</code>. Any mismatch is a bug worth reporting.</p></div>
+  </details>
+
+  <h2 id="gc-section">Memory clean-up (garbage collection)</h2>
+
+  <details id="gc">
+    <summary>What is incremental garbage collection?</summary>
+    <div class="answer"><p>The game cleans up memory with every thread stopped, and each time it goes over everything still in use. In a late-game colony that is 1.6 GB and more. Incremental collection does the same work a few milliseconds at a time across many frames. In one 35-minute multiplayer session the computer without it had 39 collections with a median of 675 ms each, about 30 seconds frozen in total; the computer with it had one collection frame over 50 ms outside of saves. Those were two different computers, so hardware counts as well as the setting.</p></div>
+  </details>
+
+  <details id="boot-config">
+    <summary>Why does it edit <code>boot.config</code>, and is that safe?</summary>
+    <div class="answer">
+      <p>Unity reads the incremental collection choice from <code>Timberborn_Data\boot.config</code> before any mod loads, so a mod cannot switch it while the game runs. Ticking the box adds one line, <code>gc-max-time-slice=3</code>, and unticking removes it. Nothing else in the file is touched, a backup (<code>boot.config.before-incremental-gc.bak</code>) is written beside it before the first change and never overwritten, and the file is only ever written because you clicked the box, never at startup for a player who never ticked it. Steam's "verify integrity of game files" and game updates restore the original; if the box is still ticked, the mod puts the line back at the next start.</p>
+    </div>
+  </details>
+
+  <details id="pacing">
+    <summary>What is adaptive garbage collection pacing?</summary>
+    <div class="answer"><p>With incremental collection on, Unity does up to a fixed 3 ms of clean-up per frame while a cycle is running. The experimental pacing setting picks the slice each frame from recent frame times: 3 ms when frames are slow, 6 ms when they are fast, 8 ms while paused. One session each way showed no difference that could be told from noise, so it is off by default and marked experimental. It only changes the length of a slice, never what is collected, and it does not affect the simulation.</p></div>
+  </details>
+
+  <h2 id="measuring">Measuring it</h2>
+
+  <details id="timing">
+    <summary>What does the <code>Timing:</code> line show?</summary>
+    <div class="answer">
+      <p>One line every 1,000 ticks in <code>Player.log</code>. It shows:</p>
+      <ul>
+        <li><strong>Ticks per second</strong> against what the game's time scale asks for, which says whether the game is keeping up at all. Above speed 1 the game itself slows large colonies down, and the figure is the speed after that.</li>
+        <li><strong>Simulation</strong> time per tick against <strong>everything else</strong> per frame (rendering, animation, the game's and other mods' per-frame systems, and Unity itself), as shares of the main thread.</li>
+        <li>The <strong>longest frame</strong> and the longest simulation slice.</li>
+        <li><strong>Garbage collections</strong>: how long the frames containing one took, and whether collection is incremental.</li>
+        <li><strong>Saves</strong>, reported on their own, since a save freezes the game for most of a second.</li>
+        <li><strong>Managed memory</strong> in use and the allocation rate.</li>
+      </ul>
+      <p>The <code>RouteMaps:</code> line's "longest single pause" is the figure to watch for hitching.</p>
+    </div>
+  </details>
+
+  <details id="metrics">
+    <summary>Can I see where a tick's time goes, part by part?</summary>
+    <div class="answer"><p>Yes. Tick <strong>Record per-component timings</strong> on the settings page and load a save. The mod switches on the game's own per-component timers and writes a report to <code>Documents\Timberborn\LateGamePerformance</code> every 3,000 ticks. It applies from the next save load, the game runs a little slower while it is on, and it does not affect the simulation. Launching the game with <code>-metrics</code> has the same effect.</p></div>
+  </details>
+
+  <h2 id="compat">Compatibility</h2>
+
+  <details id="mods">
+    <summary>Does it work with other mods?</summary>
+    <div class="answer"><p>The hauling cache is dropped every tick, so an input the mod does not track, for example one added by another mod, can be out of date only within a single tick. It needs Harmony and Mod Settings. Beyond that, keep a copy of your save when combining mods, as always.</p></div>
+  </details>
+
+  <details id="game-version">
+    <summary>Which Timberborn version does it need?</summary>
+    <div class="answer"><p>It is built against 1.1.2.4 and asks for 1.1.2.4 or newer. On start the mod checks that every game method it patches still exists. After a game update that moves something, the affected feature does not start, the game runs its own code, and the startup line says <code>OFF</code> for it.</p></div>
+  </details>
+
+  <h2 id="project">The project</h2>
+
+  <details id="license">
+    <summary>Is it open source?</summary>
+    <div class="answer"><p>Yes, MIT licensed, and free. The source is on <a href="https://github.com/timbermods/LateGamePerformance">GitHub</a>. It is an unofficial mod and is not affiliated with Mechanistry.</p></div>
+  </details>
+
+  <details id="report">
+    <summary>How do I report a problem?</summary>
+    <div class="answer"><p><a href="https://github.com/timbermods/LateGamePerformance/issues/new">Open an issue</a> with the mod and game versions, the <code>[LateGamePerformance]</code> lines from <code>Player.log</code> and what you were doing. More detail in <a href="troubleshooting.html#report">Troubleshooting</a>.</p></div>
+  </details>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap foot">
+    <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
+    <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.9">Release v0.4.9</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+  </div>
+</footer>
+<script src="site.js" defer></script>
+</body>
+</html>

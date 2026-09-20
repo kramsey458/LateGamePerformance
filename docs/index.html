@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Late Game Performance: fewer lag spikes in big Timberborn colonies</title>
+<meta name="description" content="A Timberborn 1.1 mod that removes work the game repeats in large colonies (hauling, routes, tree searches, memory clean-up) so late-game saves stutter less. Built for BeaverBuddies co-op.">
+<meta property="og:title" content="Late Game Performance for Timberborn">
+<meta property="og:description" content="Fewer lag spikes in big colonies. It is built to change how quickly the game finds its answers, not what the answers are, and it is built for BeaverBuddies co-op.">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>try{var t=localStorage.getItem('lgp-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><img src="favicon.svg" alt="" width="32" height="32"> Late Game Performance</a>
+    <nav class="nav" aria-label="Main">
+      <a href="index.html" aria-current="page">Home</a>
+      <a href="index.html#features">Features</a>
+      <a href="install.html">Install</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/timbermods/LateGamePerformance">GitHub</a>
+      <button class="theme-btn" id="theme-toggle" type="button">Dark mode</button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow">Timberborn 1.1 mod &middot; Version 0.4.9</span>
+      <h1>Late-game colonies that keep up.</h1>
+      <p class="lead">Big colonies make the game repeat the same work again and again: finding jobs for haulers, rebuilding routes, searching for trees, cleaning up memory. Late Game Performance removes that repeated work, so you get fewer lag spikes and freezes. It is built to change how quickly the game finds its answers, not what the answers are.</p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/download/v0.4.9/LateGamePerformance-0.4.9.zip">Download v0.4.9</a>
+        <a class="btn ghost" href="install.html">Install guide</a>
+      </div>
+      <ul class="badges" aria-label="Facts">
+        <li>Free &amp; open source (MIT)</li>
+        <li>Needs Harmony and Mod Settings</li>
+        <li>Built against Timberborn 1.1.2.4</li>
+      </ul>
+      <div class="notice ok" role="note">
+        <p><strong>Played in a real late-game colony.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8; 0.4.9 runs the same code). <a href="#status">See exactly what is and isn't tested.</a></p>
+      </div>
+    </div>
+    <figure class="diagram">
+      <svg viewBox="0 0 520 300" role="img" aria-label="Illustration: a line showing time per frame. Without the mod it jumps up in tall spikes again and again. With the mod it stays low and nearly flat.">
+        <text x="30" y="30" font-size="15" font-weight="700">Time per frame</text>
+        <g stroke="var(--line)" stroke-width="1" stroke-dasharray="3 6"><line x1="30" y1="70" x2="490" y2="70"/><line x1="30" y1="120" x2="490" y2="120"/><line x1="30" y1="170" x2="490" y2="170"/></g>
+        <line x1="30" y1="230" x2="490" y2="230" stroke="var(--axis)" stroke-width="1.5"/>
+        <polyline fill="none" stroke="var(--series-2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="30,196 70,186 88,84 106,192 152,178 178,62 194,194 242,186 272,116 292,192 342,182 368,74 384,194 432,184 454,100 472,192 490,188"/>
+        <path fill="none" stroke="var(--series-1)" stroke-width="4" stroke-linecap="round" d="M30 202 C80 196 130 200 180 194 S280 198 330 192 S430 196 490 190"/>
+        <text x="186" y="56" font-size="12" class="soft" fill="var(--ink-2)">a lag spike</text>
+        <g font-size="13">
+          <line x1="30" y1="266" x2="54" y2="266" stroke="var(--series-2)" stroke-width="2.5" stroke-linecap="round"/><text x="62" y="271">Without the mod</text>
+          <line x1="220" y1="266" x2="244" y2="266" stroke="var(--series-1)" stroke-width="4" stroke-linecap="round"/><text x="252" y="271">With the mod</text>
+        </g>
+      </svg>
+      <figcaption>Illustration only, not real data.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="band" id="why">
+  <div class="wrap two-col">
+    <div>
+      <h2>Big colonies do the same work over and over.</h2>
+      <p>Every decision a hauler makes, every road you finish and every lumberjack's search for a tree makes the game redo calculations whose results mostly have not changed. In a small colony that costs nothing. In a colony of hundreds of beavers it adds up, and you feel it as the game stuttering.</p>
+    </div>
+    <div>
+      <p>This mod keeps the results the game has already worked out, does the heavy parts on other CPU cores, and skips lookups that could not change the answer. Beavers make the same choices they would have made anyway, just sooner.</p>
+      <p>It is aimed at big late-game colonies. A small colony has little repeated work to remove, so it is unlikely to notice much.</p>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Features</span>
+      <h2>What it changes in your game</h2>
+    </div>
+    <div class="grid three">
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></svg></div>
+        <h3>Haulers stop redoing their homework</h3>
+        <p>Every time a hauler looks for work, the game rebuilds and sorts a list of every hauling job in the district. The mod keeps each list until something that feeds it changes. It is the same list, in the same order, that the game would have built.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9l4 4"/><path d="M4 12h16"/><path d="M4 18h9l4-4"/></svg></div>
+        <h3>Road changes stall the game less</h3>
+        <p>After you finish a path, stair or platform, the game has to rebuild the route map of every building with an entrance, and does it on the main thread. The mod spreads that work over up to 7 worker threads, and the maps come out exactly as the game would have built them.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21v-6"/><path d="M12 15c-4 0-6-2.4-6-5.4 0-2 1.3-3.5 3-4C9.5 4 10.6 3 12 3s2.5 1 3 2.6c1.7.5 3 2 3 4 0 3-2 5.4-6 5.4z"/></svg></div>
+        <h3>Lumberjacks search smarter</h3>
+        <p>To find a tree, the game measures the path to every marked tree, though most of them are still growing. The mod leaves out the measurements that cannot change the answer. Lumberjacks, gatherers and farmers still get the game's own result.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v5h-5"/></svg></div>
+        <h3>Fewer memory-cleaning freezes</h3>
+        <p>The game cleans up memory with everything stopped, which in a big colony can freeze it for most of a second, about once a minute. One tick-box in the mod's settings page switches on incremental collection, which does the same work a few milliseconds at a time.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.4"/><path d="M16.5 14.2A5 5 0 0 1 21 19"/></svg></div>
+        <h3>Built for BeaverBuddies co-op</h3>
+        <p>Every speed-up is built to give the game's own answer, and nothing that affects the simulation is a setting, so every player on the same version runs the same code. Compatibility with multiplayer has been the top priority. <a href="#coop">Details</a></p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-6"/><path d="M12 20V6"/><path d="M19 20v-10"/></svg></div>
+        <h3>See what it does for you</h3>
+        <p>The mod writes a timing line to the game log: ticks per second, longest frame, time per system, memory clean-ups and saves. You can measure your own colony instead of taking anyone's word for it.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="coop">
+  <div class="wrap two-col">
+    <div>
+      <span class="eyebrow">Co-op first</span>
+      <h2>Built for BeaverBuddies from the start.</h2>
+      <p class="lead">In multiplayer every player's game has to calculate exactly the same thing. A performance mod that changed even one answer would be worse than no mod, so keeping BeaverBuddies games in step has come before every speed-up.</p>
+      <p>It has been played in multiplayer on two computers, and tested extensively against the game's own code. <a href="#status">The full list is below.</a></p>
+    </div>
+    <div>
+      <ul class="checks">
+        <li><strong>The game's own answers.</strong> Hauling lists and tree searches are the game's results, and route maps have exactly the game's contents. Tests compare them against the game's own code.</li>
+        <li><strong>Same version, same behaviour.</strong> Nothing that affects the simulation is a setting, so two players cannot drift apart by editing a settings file. A multiplayer mod's version check covers the rest.</li>
+        <li><strong>Independent of what any one player looked at.</strong> Which route maps get built never depends on what a single player's screen asked for.</li>
+        <li><strong>Easy to confirm.</strong> A startup line in <code>Player.log</code> reads the same on every computer running the same version.</li>
+        <li><strong>Local choices stay local.</strong> Memory clean-up, thread counts and timing logs do not affect the simulation, so each player can set them differently.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="rules">
+  <div class="wrap two-col">
+    <div>
+      <span class="eyebrow">Safe by construction</span>
+      <h2>What it always does</h2>
+      <ul class="checks">
+        <li>Can be checked against the game: verify modes run the game's own hauling list and tree search alongside it and log any difference.</li>
+        <li>Switches a feature off for the rest of the session if it throws an error, and lets the game's own code run instead.</li>
+        <li>Does not start a feature at all if a game method it needs is missing, for example after a game update.</li>
+        <li>Behaves the same for everyone on the same version.</li>
+        <li>Stores nothing in your saves.</li>
+      </ul>
+    </div>
+    <div>
+      <span class="eyebrow">Hard limits</span>
+      <h2>What it never does</h2>
+      <ul class="checks no">
+        <li>Approximate: it skips work only when the answer cannot change.</li>
+        <li>Change what your beavers decide on purpose. The one known difference is explained in the <a href="faq.html#same-results">FAQ</a>.</li>
+        <li>Touch a game file unless you tick the incremental memory clean-up box.</li>
+        <li>Let a settings file put two players out of step.</li>
+        <li>Need anything besides Harmony and Mod Settings.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="results">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Results</span>
+      <h2>What the numbers say</h2>
+      <p class="lead">Figures from the mod's own test harness and from play. None of them is a promise about your colony: the gain depends on its size and shape.</p>
+    </div>
+    <div class="grid two">
+      <div class="chart-card">
+        <h3>Path lookups in one tree search</h3>
+        <p class="sub">A model forest of 2,000 marked trees, 50 of them grown. Lower is better</p>
+        <div class="chart" role="group" aria-label="Bar chart of path lookups: the game's own search 2,000, with the mod 51.">
+          <div class="grid-layer" aria-hidden="true"><i class="zero" style="left:0"></i><i style="left:33.333%"></i><i style="left:66.667%"></i></div>
+          <div class="row" tabindex="0" data-name="Game's own search" data-value="2,000" data-color="var(--series-2)" data-desc="The game measures the path distance of every marked tree before asking whether it has anything to take.">
+            <span class="lab">Game's own search</span>
+            <span class="track"><span class="bar" style="width:66.667%;background:var(--series-2)"></span><span class="val">2,000</span></span>
+          </div>
+          <div class="row" tabindex="0" data-name="With the mod" data-value="51" data-color="var(--series-1)" data-desc="Only the lookups that can change the answer are made, in the game's order. The answer is the same.">
+            <span class="lab">With the mod</span>
+            <span class="track"><span class="bar" style="width:1.7%;min-width:4px;background:var(--series-1)"></span><span class="val">51</span></span>
+          </div>
+          <div class="ticks" aria-hidden="true"><i style="left:0">0</i><i style="left:33.333%">1,000</i><i style="left:66.667%">2,000</i></div>
+        </div>
+        <div class="tip" role="tooltip" aria-hidden="true"></div>
+        <details class="table-view">
+          <summary>View chart data as a table</summary>
+          <table>
+            <thead><tr><th>Case</th><th class="num">Lookups</th></tr></thead>
+            <tbody>
+              <tr><td>Game's own search</td><td class="num">2,000</td></tr>
+              <tr><td>With the mod</td><td class="num">51</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <p class="muted small" style="margin:0.8rem 0 0">A test model of the game's search, not a live game. How much it saves in your colony depends on your forest: a lot when most marked trees are still growing, nothing when every marked tree is grown.</p>
+      </div>
+      <div class="chart-card">
+        <h3>Time to rebuild 420 route maps</h3>
+        <p class="sub">A 22,600-tile road network in the test harness. Lower is better</p>
+        <div class="chart" role="group" aria-label="Bar chart of route map rebuild time: one at a time about 1.8 seconds, on 7 workers about 0.23 seconds.">
+          <div class="grid-layer" aria-hidden="true"><i class="zero" style="left:0"></i><i style="left:40%"></i><i style="left:80%"></i></div>
+          <div class="row" tabindex="0" data-name="One at a time" data-value="1.8 s" data-color="var(--series-2)" data-desc="One after another on a single thread, as the game rebuilds them.">
+            <span class="lab">One at a time</span>
+            <span class="track"><span class="bar" style="width:72%;background:var(--series-2)"></span><span class="val">1.8 s</span></span>
+          </div>
+          <div class="row" tabindex="0" data-name="On 7 workers" data-value="0.23 s" data-color="var(--series-1)" data-desc="The same maps spread over 7 worker threads. The contents are identical.">
+            <span class="lab">On 7 workers</span>
+            <span class="track"><span class="bar" style="width:9.2%;background:var(--series-1)"></span><span class="val">0.23 s</span></span>
+          </div>
+          <div class="ticks" aria-hidden="true"><i style="left:0">0</i><i style="left:40%">1 s</i><i style="left:80%">2 s</i></div>
+        </div>
+        <div class="tip" role="tooltip" aria-hidden="true"></div>
+        <details class="table-view">
+          <summary>View chart data as a table</summary>
+          <table>
+            <thead><tr><th>Case</th><th class="num">Time</th></tr></thead>
+            <tbody>
+              <tr><td>One at a time</td><td class="num">about 1.8 s</td></tr>
+              <tr><td>On 7 workers</td><td class="num">about 0.23 s</td></tr>
+            </tbody>
+          </table>
+        </details>
+        <p class="muted small" style="margin:0.8rem 0 0">In the game the workers run alongside the tick, and the main thread still builds a map itself if it needs one before a worker has reached it. The harness road network is heavier than a real colony's.</p>
+      </div>
+    </div>
+
+    <div class="grid two" style="margin-top:1.5rem">
+      <div class="card">
+        <h3>Memory clean-up freezes</h3>
+        <p class="sub" style="margin:0 0 0.6rem;color:var(--ink-2)">One 35-minute multiplayer session, same save and same mods, on two computers</p>
+        <table class="compare">
+          <thead><tr><th></th><th>Without incremental collection</th><th>With it</th></tr></thead>
+          <tbody>
+            <tr><td>Freezes from memory clean-up</td><td>39, median 675 ms each (about 30 seconds in total)</td><td>1 frame over 50 ms outside of saves</td></tr>
+            <tr><td>In play</td><td>Drastic spikes at high tick rates</td><td>Much steadier frame rate at high tick rates</td></tr>
+          </tbody>
+        </table>
+        <p class="muted small" style="margin:0.8rem 0 0">Two different computers in one session, so hardware counts as well as the setting. The memory in use was 1.6 to 2.7 GB on both.</p>
+      </div>
+      <div class="tiles wide" style="grid-template-columns:repeat(2,1fr)">
+        <div class="tile"><div class="t-value">about 350</div><div class="t-label">beavers in the late-game save it was played in</div><div class="t-note">noticeably fewer lag spikes</div></div>
+        <div class="tile"><div class="t-value">133</div><div class="t-label">automated checks pass</div><div class="t-note">including 44 patch targets checked against the game</div></div>
+        <div class="tile"><div class="t-value">0</div><div class="t-label">differences from the game's tree search</div><div class="t-note">in 4,000 random forests</div></div>
+        <div class="tile"><div class="t-value">9.5 million</div><div class="t-label">route map nodes compared with the game's own</div><div class="t-note">every one identical</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="status">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Status</span>
+      <h2>What is tested, and what isn't</h2>
+      <p class="lead">Tested extensively, but it is still a young mod, so here is the honest picture. Try it on a copy of a save first.</p>
+    </div>
+    <div class="grid two">
+      <div class="notice ok" style="margin:0">
+        <p><strong>Verified</strong></p>
+        <ul class="checks">
+          <li>Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes.</li>
+          <li>Played in multiplayer sessions on two computers, including a 35-minute session logged on both.</li>
+          <li>133 automated checks pass against the installed game's own assemblies, including 44 patch targets.</li>
+          <li>Rebuilt route maps are identical to the game's, node for node, whoever built them, and every map is complete at the moment it is asked for (25 shuffled rounds with workers busy).</li>
+          <li>The tree and plant search gives the same answer as a model of the game's search in 4,000 random forests, with unreachable, dead and destroyed plants and ties.</li>
+          <li>Nothing that affects the simulation can be changed from a file.</li>
+        </ul>
+      </div>
+      <div class="notice" style="margin:0">
+        <p><strong>Not yet verified</strong></p>
+        <ul class="checks no">
+          <li>This exact 0.4.9 build has not been reported as played yet. It runs the same code paths as 0.4.8 with its default settings.</li>
+          <li>The tree search against the game's own search inside a running game (the model comes from reading the game's code).</li>
+          <li>A controlled frame rate benchmark. The improvement is reported from play and logs, and it depends on your colony.</li>
+          <li>Whether adaptive garbage collection pacing helps at all: it is experimental, and one session each way showed no difference. It is off by default.</li>
+          <li>The main menu notice about incremental collection, because the test computers already have it on.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cta">
+      <a class="btn" href="install.html">Install it</a>
+      <a class="btn ghost" href="faq.html">Read the FAQ</a>
+      <a class="btn ghost" href="https://github.com/timbermods/LateGamePerformance/issues/new">Report a problem</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap foot">
+    <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
+    <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.9">Release v0.4.9</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+  </div>
+</footer>
+<script src="site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Troubleshooting: Late Game Performance</title>
+<meta name="description" content="Troubleshooting the Late Game Performance Timberborn mod: reading the game log, features that say OFF, incremental garbage collection that will not turn on, multiplayer differences and how to report a problem.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>try{var t=localStorage.getItem('lgp-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><img src="favicon.svg" alt="" width="32" height="32"> Late Game Performance</a>
+    <nav class="nav" aria-label="Main">
+      <a href="index.html">Home</a>
+      <a href="index.html#features">Features</a>
+      <a href="install.html">Install</a>
+      <a href="troubleshooting.html" aria-current="page">Troubleshooting</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/timbermods/LateGamePerformance">GitHub</a>
+      <button class="theme-btn" id="theme-toggle" type="button">Dark mode</button>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="doc">
+<div class="wrap narrow trouble">
+  <span class="eyebrow">Guide</span>
+  <h1>Troubleshooting</h1>
+  <p class="lead">Most questions can be answered from the game log. Start there, then find your symptom below.</p>
+
+  <h2 id="log">First: read the log</h2>
+  <ul>
+    <li>Current session: <code>%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log</code></li>
+    <li>Previous session: <code>Player-prev.log</code> in the same folder</li>
+  </ul>
+  <p>Search for <code>[LateGamePerformance]</code>. These are the messages that matter:</p>
+  <table>
+    <thead><tr><th>Message</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>0.4.9 loading.</code></td><td>The mod started. Normal.</td></tr>
+      <tr><td><code>HaulCache: enabled (13/13 patches).</code> and similar for <code>RouteMaps</code>, <code>YielderSearch</code></td><td>A feature installed all its hooks. Normal.</td></tr>
+      <tr><td><code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on.</code></td><td>All three features that affect the simulation are running. Normal, and it should read the same for every player.</td></tr>
+      <tr><td><code>Simulation features: … OFF …</code></td><td>A feature could not start. <a href="#off">What to do</a>.</td></tr>
+      <tr><td><code>… required patch '…' failed … Feature disabled; the game runs unmodified for this part.</code></td><td>The reason a feature could not start. <a href="#off">What to do</a>.</td></tr>
+      <tr><td><code>… failed and turned itself off for this session: …</code></td><td>A feature hit an unexpected error and switched itself off. <a href="#failed">Report it</a>.</td></tr>
+      <tr><td><code>GC: incremental=True</code> or <code>False</code></td><td>Whether memory clean-ups are spread out. <a href="#gc-off">If False</a>.</td></tr>
+      <tr><td><code>Settings: '…' is ignored. It is no longer a setting…</code></td><td>An old settings file has a key that no longer exists. <a href="#ignored">Harmless</a>.</td></tr>
+      <tr><td><code>Last 1000 ticks. Timing: …</code>, <code>HaulCache: …</code>, <code>RouteMaps: …</code>, <code>YielderSearch: …</code></td><td>Stats lines. Normal. <a href="faq.html#timing">What they show</a>.</td></tr>
+      <tr><td><code>Save: … ms total = …</code></td><td>One line per save, with the time of each stage. Normal.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="symptoms">Find your symptom</h2>
+
+  <details id="not-listed">
+    <summary>The mod isn't in the Mods list</summary>
+    <div class="answer">
+      <ul>
+        <li><strong>Wrong folder depth.</strong> The game needs <code>Mods\LateGamePerformance\version-1.1\manifest.json</code>. A doubled <code>LateGamePerformance\LateGamePerformance</code> folder is the usual mistake. See the <a href="install.html#layout">folder layout</a>.</li>
+        <li><strong>Wrong Mods folder.</strong> It must be the folder your other mods are in, normally <code>Documents\Timberborn\Mods</code>.</li>
+        <li><strong>Old game.</strong> The mod needs Timberborn 1.1.2.4 or newer.</li>
+        <li>Fully quit and restart the game after copying files.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details id="needs-mods">
+    <summary>It won't enable, or the game complains about a missing mod</summary>
+    <div class="answer">
+      <p>Late Game Performance needs <strong>Harmony</strong> (2.4.1 or newer) and <strong>Mod Settings</strong>, both from the Steam Workshop. Subscribe to them, enable them in the Mods menu, and restart.</p>
+    </div>
+  </details>
+
+  <details id="no-log">
+    <summary>It's enabled, but there is no <code>[LateGamePerformance]</code> line in the log</summary>
+    <div class="answer">
+      <ul>
+        <li>Make sure you're reading the right session. The log is overwritten each launch, and the previous one is <code>Player-prev.log</code>.</li>
+        <li>Check the mod list near the top of the log. <code>Late Game Performance</code> should be listed. If it isn't, it wasn't enabled, or you didn't restart after enabling it.</li>
+        <li>If it's listed but the <code>loading.</code> line is missing, check the game didn't fail to load the mod's DLL further down the log, and <a href="#report">report it</a> with that log.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details id="crash">
+    <summary>The game crashes while loading</summary>
+    <div class="answer">
+      <p>Use the latest release. Version 0.4.3 is broken and crashes the game while loading; if that is what you have, replace it. If you are on 0.4.9 and it still crashes, <a href="#report">report it</a> with <code>Player.log</code>, and try the game once with only Harmony, Mod Settings and this mod enabled.</p>
+    </div>
+  </details>
+
+  <details id="off">
+    <summary>The startup line says a feature is <code>OFF</code></summary>
+    <div class="answer">
+      <p>A game method the feature needs was missing or different, most often after a game update, so the feature did not start and this computer runs the game's own code for that part. The lines just above the summary say which patch failed.</p>
+      <ul>
+        <li><strong>HaulCache or YielderSearch OFF:</strong> nothing is lost except the speed-up. Both give exactly the game's results, so one of them being off on one computer changes nothing about the simulation.</li>
+        <li><strong>RouteMaps OFF on one computer:</strong> this is the case worth acting on in multiplayer. Check that every player is on the same game version and the same mod version, then compare everyone's startup line.</li>
+        <li>Either way, <a href="#report">report it</a> with the log, so it can be fixed for that game version.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details id="failed">
+    <summary>A log line says a feature "failed and turned itself off for this session"</summary>
+    <div class="answer">
+      <p>The feature hit an unexpected error, so it switched itself off and the game's own code took over for the rest of the session. Nothing is broken, but it should not happen. <a href="#report">Report it</a> with the whole line, including the error text that follows it. In multiplayer, a <code>RouteMaps</code> line on one computer is the one worth noticing: tell the other players and include everyone's log in the report.</p>
+    </div>
+  </details>
+
+  <details id="no-difference">
+    <summary>I don't notice any difference</summary>
+    <div class="answer">
+      <ul>
+        <li>It targets large colonies. A small one has little repeated work to remove.</li>
+        <li>Open the <code>Timing:</code> line (<a href="faq.html#timing">what it shows</a>). If <strong>everything else</strong> is most of the main thread's time, that is rendering, animation and Unity itself, which this mod does not touch. A frame rate cap then gives the simulation more of each second, because the per-frame cost is paid less often.</li>
+        <li>If the freezes you see are about once a minute and last most of a second, tick <a href="install.html#gc">Incremental garbage collection</a>. Check that the startup line says <code>GC: incremental=True</code>.</li>
+        <li>How much the tree search saves depends on your forest: a lot when most marked trees are still growing, nothing when every marked tree is grown.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details id="gc-off">
+    <summary>The startup line says <code>GC: incremental=False</code></summary>
+    <div class="answer">
+      <ul>
+        <li><strong>You haven't ticked it.</strong> It is a setting: <strong>Mods &gt; Late Game Performance &gt; Incremental garbage collection</strong>. See <a href="install.html#gc">how</a>.</li>
+        <li><strong>You ticked it but haven't restarted.</strong> Unity reads the choice before any mod loads, so it takes effect the next time the game starts.</li>
+        <li><strong>The file could not be written.</strong> The log then has a line starting <code>GC: could not change</code> or <code>GC: … was not found</code>. Close the game and add the line <code>gc-max-time-slice=3</code> to <code>Timberborn_Data\boot.config</code> in the game's install folder by hand (a read-only install folder is the usual cause).</li>
+        <li><strong>A game update or Steam's file check put the original file back.</strong> If the box is ticked, the mod puts the line back at the next start and logs <code>Putting it back</code>. Restart once more.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details id="notice">
+    <summary>A message about garbage collection appears in the main menu</summary>
+    <div class="answer">
+      <p>That is the reminder that incremental collection is off. It appears once per launch and offers <strong>Turn it on</strong> or <strong>Not now</strong>. To stop it appearing, untick <strong>Warn when garbage collection is not incremental</strong> on the mod's settings page.</p>
+    </div>
+  </details>
+
+  <details id="ignored">
+    <summary>The log says a setting "is ignored. It is no longer a setting"</summary>
+    <div class="answer">
+      <p>Your <code>LateGamePerformance.cfg</code> is from an older version and still has one of the keys <code>HaulCache</code>, <code>HaulCacheFlushEveryTicks</code>, <code>RouteMaps</code> or <code>YielderSearch</code>. They are ignored and harmless: those features are always on, the same for everyone. You can delete those lines from the file. To run without one of them, disable the mod.</p>
+    </div>
+  </details>
+
+  <details id="slower">
+    <summary>The game got slower after I changed a setting</summary>
+    <div class="answer">
+      <ul>
+        <li><code>HaulCacheVerify = true</code> and <code>YielderSearchVerify = true</code> run the game's own code as well and compare. They are slower than no mod and are for testing only. Set them back to <code>false</code>.</li>
+        <li><strong>Record per-component timings</strong> adds two stopwatch calls around every component tick, so the game runs a little slower while it is on. Untick it after a profiling session.</li>
+        <li><code>Diagnostics = true</code> adds overhead to hot code. Switch it off again after collecting numbers.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details id="multiplayer">
+    <summary>Multiplayer: the players' startup lines or versions differ</summary>
+    <div class="answer">
+      <ul>
+        <li>Every player must run the <strong>same version</strong> of the mod and the same game version. Nothing in the settings file affects the simulation, so there is nothing else to match.</li>
+        <li>Each player's <code>Simulation features:</code> line should read the same. If one says <code>OFF</code>, see <a href="#off">above</a>.</li>
+        <li>Garbage collection, thread counts and the timing options may differ between players. They do not affect the simulation.</li>
+        <li>If games go out of step (a desync), keep <code>Player.log</code> from every player and <a href="#report">report it</a> with the mod list of each player. Also say whether the fault happens without this mod.</li>
+      </ul>
+    </div>
+  </details>
+
+  <h2 id="report">Reporting a problem</h2>
+  <p><a href="https://github.com/timbermods/LateGamePerformance/issues/new">Open an issue on GitHub</a> and include:</p>
+  <ul>
+    <li>The mod version and game version.</li>
+    <li>Whether it happened in single-player or multiplayer, and the other mods you have enabled.</li>
+    <li>The <code>[LateGamePerformance]</code> lines from <code>Player.log</code>, or the whole file. In multiplayer, every player's. Remove personal information before posting logs publicly.</li>
+    <li>What you were doing, and whether it stops when you disable the mod.</li>
+  </ul>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap foot">
+    <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
+    <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.9">Release v0.4.9</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+  </div>
+</footer>
+<script src="site.js" defer></script>
+</body>
+</html>

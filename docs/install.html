@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install guide: Late Game Performance</title>
+<meta name="description" content="Step-by-step install guide for the Late Game Performance Timberborn mod: requirements, download, folder layout, checking that it works, incremental garbage collection, multiplayer, updating and uninstalling.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>try{var t=localStorage.getItem('lgp-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="index.html"><img src="favicon.svg" alt="" width="32" height="32"> Late Game Performance</a>
+    <nav class="nav" aria-label="Main">
+      <a href="index.html">Home</a>
+      <a href="index.html#features">Features</a>
+      <a href="install.html" aria-current="page">Install</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="faq.html">FAQ</a>
+      <a href="https://github.com/timbermods/LateGamePerformance">GitHub</a>
+      <button class="theme-btn" id="theme-toggle" type="button">Dark mode</button>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="doc">
+<div class="wrap narrow">
+  <span class="eyebrow">Guide</span>
+  <h1>Install guide</h1>
+  <p class="lead">About five minutes. You need Timberborn 1.1 and two other mods, Harmony and Mod Settings, which most players already have.</p>
+
+  <div class="notice" role="note">
+    <p><strong>Back up first.</strong> It is a young mod, so try it on a copy of your save. It stores nothing in saves, but a copy costs nothing.</p>
+  </div>
+
+  <nav class="toc" aria-label="On this page">
+    <p>On this page</p>
+    <ul>
+      <li><a href="#requirements">Requirements</a></li>
+      <li><a href="#steps">Step by step</a></li>
+      <li><a href="#layout">Folder layout</a></li>
+      <li><a href="#verify">Check that it works</a></li>
+      <li><a href="#gc">Turn on incremental garbage collection</a></li>
+      <li><a href="#multiplayer">Multiplayer</a></li>
+      <li><a href="#update">Updating</a></li>
+      <li><a href="#uninstall">Uninstalling</a></li>
+      <li><a href="#checksum">Verify the download</a></li>
+    </ul>
+  </nav>
+
+  <h2 id="requirements">Requirements</h2>
+  <ul>
+    <li><strong>Timberborn 1.1.</strong> The mod is built against 1.1.2.4 and asks for 1.1.2.4 or newer. A future game update could break a feature: the mod then leaves that feature off and the game runs its own code.</li>
+    <li><strong>Harmony 2.4.1 or newer</strong> and <strong>Mod Settings</strong>, both from the Steam Workshop. Enable them in the game's Mods menu along with this mod.</li>
+    <li>The folders shown on this page are the Windows ones.</li>
+  </ul>
+
+  <h2 id="steps">Step by step</h2>
+  <ol class="steps">
+    <li><div><strong>Back up your save</strong><p>Copy the save you want to use from <code>Documents\Timberborn\Saves</code>.</p></div></li>
+    <li><div><strong>Get Harmony and Mod Settings</strong><p>Subscribe to both on the Steam Workshop if you have not already. This mod will not start without them.</p></div></li>
+    <li><div><strong>Download the mod</strong><p>Get <a href="https://github.com/timbermods/LateGamePerformance/releases/download/v0.4.9/LateGamePerformance-0.4.9.zip"><code>LateGamePerformance-0.4.9.zip</code></a> from the <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.9">release page</a>. On the release page choose that file under <strong>Assets</strong>, not <strong>Source code</strong>.</p></div></li>
+    <li><div><strong>Close Timberborn</strong><p>Make sure the game is fully closed before you copy files into its Mods folder.</p></div></li>
+    <li><div><strong>Extract into your Mods folder</strong><p>Delete any older <code>LateGamePerformance</code> folder first. Then extract the ZIP into <code>Documents\Timberborn\Mods</code>. It contains one folder, <code>LateGamePerformance</code>, and you should end up with the layout <a href="#layout">shown below</a>. If you extracted into a new folder you may have a doubled <code>LateGamePerformance\LateGamePerformance</code>. Move the inner one up.</p></div></li>
+    <li><div><strong>Enable it and restart</strong><p>Start Timberborn, open <strong>Mods</strong> from the main menu, tick <strong>Harmony</strong>, <strong>Mod Settings</strong> and <strong>Late Game Performance</strong>, and restart the game when it asks. Menu wording can differ a little between game versions.</p></div></li>
+    <li><div><strong>Load your save and play</strong><p>Nothing else is needed. The mod starts working as soon as a game is loaded. <a href="#verify">Check that it is running.</a></p></div></li>
+  </ol>
+
+  <h2 id="layout">Folder layout</h2>
+  <p>This is what a correct install looks like. The game reads the manifest and the DLL from the <code>version-1.1</code> folder.</p>
+<pre class="tree"><code>Documents\Timberborn\Mods\
+└── LateGamePerformance\
+    ├── LICENSE
+    ├── README.md
+    └── version-1.1\
+        ├── LateGamePerformance.cfg
+        ├── manifest.json
+        └── Scripts\
+            └── LateGamePerformance.dll</code></pre>
+
+  <h2 id="verify">Check that it works</h2>
+  <p>The mod writes to the game log, so that is where you confirm it is running.</p>
+  <ol>
+    <li>Quit the game, then open <code>%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log</code>. If you have already restarted, the previous session is in <code>Player-prev.log</code>.</li>
+    <li>Search for <code>[LateGamePerformance]</code>. At startup you should see a line for the version and one for the features:
+<pre><code class="log-line">[LateGamePerformance] 0.4.9 loading.</code><code class="log-line">[LateGamePerformance] Simulation features: HaulCache on, RouteMaps on, YielderSearch on. These are the same for every player on this version.</code></pre></li>
+    <li>Another startup line reports the garbage collector. <code>GC: incremental=False</code> means memory clean-ups stop the whole game while they run. <a href="#gc">You can change that</a>.</li>
+    <li>While you play, a stats line appears every 1,000 ticks (10 minutes at normal speed). The numbers in this example are an illustration of the format, and yours will differ:
+<pre><code class="log-line">[LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests, 251 served from cache, 161 rebuilt in 96.3 ms (0.598 ms each); buildings recomputed 40211/61843</code></pre></li>
+  </ol>
+  <p>No lines, or a line that says <code>OFF</code>? Head to <a href="troubleshooting.html">Troubleshooting</a>.</p>
+
+  <h2 id="gc">Turn on incremental garbage collection</h2>
+  <p>This is optional, and it is the one feature that is a setting. The game cleans up memory with every thread stopped, and in a late-game colony that can freeze it for most of a second, about once a minute. Incremental collection does the same work a few milliseconds at a time.</p>
+  <ol>
+    <li>Open the mod's settings page: <strong>Mods &gt; Late Game Performance</strong>, from the main menu or in-game.</li>
+    <li>Tick <strong>Incremental garbage collection</strong>.</li>
+    <li>Restart the game. The startup line should now say <code>GC: incremental=True</code>.</li>
+  </ol>
+  <p>Unity reads this choice before any mod loads, so the mod cannot switch it while the game runs. Ticking the box adds the line <code>gc-max-time-slice=3</code> to <code>Timberborn_Data\boot.config</code> in the game's install folder, and unticking removes it. Nothing else in the file is touched, and a backup called <code>boot.config.before-incremental-gc.bak</code> is written beside it before the first change. The file is only ever written because you clicked the box, never at startup.</p>
+  <ul>
+    <li>A game update, or Steam's "verify integrity of game files", puts the original file back. If the box is ticked and the line has gone, the mod puts it back at the next start and says so in the log.</li>
+    <li>If the install folder is read-only, the log says the file could not be changed. Add the line by hand with the game closed.</li>
+    <li>It does not affect the simulation, so in multiplayer every player can choose separately.</li>
+  </ul>
+
+  <h2 id="multiplayer">Multiplayer</h2>
+  <p>Every player installs the <strong>same version</strong> of the mod. That is all: nothing that affects the simulation is a setting, so the same version behaves the same for everyone. The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on</code> should read the same in every player's <code>Player.log</code>. If one player's line says <code>OFF</code>, see <a href="troubleshooting.html#off">Troubleshooting</a>. Incremental garbage collection, thread counts and timing logs may differ between players. The mod has been played in multiplayer on two computers; if you try it, please <a href="https://github.com/timbermods/LateGamePerformance/issues/new">tell us how it went</a>.</p>
+
+  <h2 id="update">Updating</h2>
+  <ol>
+    <li>Close the game and delete the old <code>Mods\LateGamePerformance</code> folder.</li>
+    <li>Extract the new ZIP into <code>Mods</code> as above.</li>
+    <li>Start the game. An older <code>LateGamePerformance.cfg</code> that still has the keys <code>HaulCache</code>, <code>HaulCacheFlushEveryTicks</code>, <code>RouteMaps</code> or <code>YielderSearch</code> is fine: they are ignored, and the log says so.</li>
+    <li>In multiplayer, every player must update to the same version together.</li>
+  </ol>
+
+  <h2 id="uninstall">Uninstalling</h2>
+  <p>Untick it in the Mods menu and restart, or delete the <code>LateGamePerformance</code> folder. The mod stores nothing in saves. If you ticked <strong>Incremental garbage collection</strong> and want that undone too, untick it first, restart once, and then remove the mod: unticking removes the line from <code>boot.config</code>.</p>
+
+  <h2 id="checksum">Verify the download (optional)</h2>
+  <p>In PowerShell, from the folder you downloaded to:</p>
+<pre><code>Get-FileHash .\LateGamePerformance-0.4.9.zip -Algorithm SHA256</code></pre>
+  <p>The hash should be:</p>
+<pre><code>27a39a6152a0873c78935c3c2235a20d69c0018148dbcfb422aae71eb1291c2a</code></pre>
+</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap foot">
+    <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
+    <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.9">Release v0.4.9</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+  </div>
+</footer>
+<script src="site.js" defer></script>
+</body>
+</html>
