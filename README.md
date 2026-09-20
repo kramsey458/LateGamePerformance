@@ -1,10 +1,11 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.4.6** is a preview. 0.4.5 has been played in multiplayer; the incremental garbage collection
-setting and the memory figures 0.4.6 adds have been tested against the game's assemblies but **not yet played
-in-game**. Do not use 0.4.3: it crashes the game while loading.
-Test on a copy of a save first.
+**Latest release: [0.4.6](https://github.com/timbermods/LateGamePerformance/releases/latest).** It has been played
+in multiplayer in a colony of about 350 beavers. On the second computer, which had been freezing for most of a
+second about once a minute, ticking the new **Incremental garbage collection** setting made the frame rate much
+steadier at high tick rates. Do not use 0.4.3: it crashes the game while loading.
+It is still a young mod: test on a copy of a save first.
 
 ## Installation
 
