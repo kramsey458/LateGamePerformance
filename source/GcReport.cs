@@ -10,7 +10,43 @@ namespace LateGamePerformance
     // This only reports the state and how to change it.
     internal static class GcReport
     {
-        private const string BootConfigKey = "gc-max-time-slice";
+        private const string BootConfigKey = BootConfig.Key;
+
+        // Replaced by the test harness, where UnityEngine.Application is not callable.
+        public static Func<string> BootConfigPath = () => Path.Combine(Application.dataPath, "boot.config");
+
+        // Called when the player ticks or unticks the setting. Never throws.
+        public static void ApplyIncremental(bool incremental)
+        {
+            try
+            {
+                string path = BootConfigPath();
+                BootConfig.Outcome outcome = BootConfig.Apply(path, incremental, out string error);
+                switch (outcome)
+                {
+                    case BootConfig.Outcome.Changed:
+                        Log.Info(incremental
+                            ? $"GC: added '{BootConfig.Line}' to {path} (backup: boot.config{BootConfig.BackupSuffix}). " +
+                              "Restart the game; the startup line should then say incremental=True."
+                            : $"GC: removed '{BootConfig.Key}' from {path}. Takes effect after a restart.");
+                        break;
+                    case BootConfig.Outcome.AlreadyAsWanted:
+                        Log.Info($"GC: {path} already " + (incremental ? "has" : "lacks") + $" '{BootConfig.Key}'; nothing changed.");
+                        break;
+                    case BootConfig.Outcome.FileMissing:
+                        Log.Warning($"GC: {path} was not found, so incremental collection could not be changed.");
+                        break;
+                    default:
+                        Log.Warning($"GC: could not change {path} ({error}). To do it by hand, close the game and " +
+                                    (incremental ? $"add the line '{BootConfig.Line}'." : $"remove the '{BootConfig.Key}' line."));
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                Log.Warning("GC: changing boot.config failed: " + exception.Message);
+            }
+        }
 
         public static void Write()
         {
@@ -23,12 +59,14 @@ namespace LateGamePerformance
                 {
                     return;
                 }
-                string bootConfig = Path.Combine(Application.dataPath, "boot.config");
-                bool hasKey = File.Exists(bootConfig) && File.ReadAllText(bootConfig).Contains(BootConfigKey);
-                Log.Info(hasKey
-                    ? $"GC: {BootConfigKey} is present in boot.config but incremental GC is still off."
-                    : $"GC: collections stop the whole game while they run. To try incremental GC, close the game " +
-                      $"and add the line '{BootConfigKey}=3' to {bootConfig} (Steam 'verify files' reverts it).");
+                string bootConfig = BootConfigPath();
+                Log.Info(BootConfig.FileHasKey(bootConfig)
+                    ? $"GC: {BootConfigKey} is in boot.config but incremental GC is off. It takes effect the next " +
+                      "time the game starts; if the game has been restarted since, this Unity build ignores it."
+                    : "GC: every collection stops the whole game until it is done, and in a large colony that is " +
+                      "most of a second, about once a minute. Tick 'Incremental garbage collection' in this mod's " +
+                      "settings (Mods > Late Game Performance) and restart the game, or add the line " +
+                      $"'{BootConfig.Line}' to {bootConfig} yourself (Steam 'verify files' reverts it).");
             }
             catch (Exception exception)
             {

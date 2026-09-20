@@ -52,6 +52,10 @@ namespace LateGamePerformance
         internal static void Start(Config config)
         {
             _config = config;
+            if (config.HaulCache || config.RouteMaps)
+            {
+                Log.Info(Allocations.Probe());
+            }
             if (config.HaulCache && HaulCache.CreateFeature(config).Apply(HarmonyId))
             {
                 HaulCache.Activate();

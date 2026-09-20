@@ -71,6 +71,7 @@ namespace LateGamePerformance
         private static long _candidatesRecomputed;
         private static long _candidatesReused;
         private static long _rebuildStopwatchTicks;
+        private static long _rebuildAllocatedBytes;
         private static long _verifyMismatches;
 
         public static Feature CreateFeature(Config config)
@@ -168,10 +169,12 @@ namespace LateGamePerformance
             long served = _candidatesRecomputed + _candidatesReused;
             string line =
                 $"HaulCache: {_requests} hauler list requests, {_requests - _rebuilds} served from cache, " +
-                $"{_rebuilds} rebuilt in {rebuildMs:0.0} ms ({perRebuildMs:0.000} ms each); " +
+                $"{_rebuilds} rebuilt in {rebuildMs:0.0} ms ({perRebuildMs:0.000} ms each)" +
+                Allocations.Describe(_rebuildAllocatedBytes) + "; " +
                 $"buildings recomputed {_candidatesRecomputed}/{served}" +
                 (_verify ? $"; verify mismatches {_verifyMismatches}" : "");
             _requests = _rebuilds = _candidatesRecomputed = _candidatesReused = _rebuildStopwatchTicks = 0;
+            _rebuildAllocatedBytes = 0;
             return line;
         }
 
@@ -228,6 +231,7 @@ namespace LateGamePerformance
         private static void Rebuild(object districtHaulCandidates, DistrictEntry district)
         {
             long started = Stopwatch.GetTimestamp();
+            long counted = Allocations.Begin();
             long dirtyVersion = _dirtyVersion;
             List<WeightedBehavior> weighted = district.Weighted;
             weighted.Clear();
@@ -265,6 +269,7 @@ namespace LateGamePerformance
             district.Epoch = _epoch;
             district.DirtyVersion = dirtyVersion;
             _rebuilds++;
+            _rebuildAllocatedBytes += Allocations.End(counted);
             _rebuildStopwatchTicks += Stopwatch.GetTimestamp() - started;
         }
 

@@ -1,8 +1,8 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-Version **0.4.5** is a preview. 0.4.2 has been played in multiplayer; the save timing (0.4.4) and the change to
-which route maps are built (0.4.5) have been tested against the game's assemblies but **not yet played
+Version **0.4.6** is a preview. 0.4.5 has been played in multiplayer; the incremental garbage collection
+setting and the memory figures 0.4.6 adds have been tested against the game's assemblies but **not yet played
 in-game**. Do not use 0.4.3: it crashes the game while loading.
 Test on a copy of a save first.
 
@@ -121,6 +121,11 @@ total, longest 105 ms (an average frame is 8.6 ms); 1 save(s): 812 ms, in frame(
   speed to zero while it waits.
 - **garbage collections** shows how long the frames containing a collection were. With incremental collection off
   (see the startup `GC:` line) a collection stops every thread until it is done, so these are hitches.
+- **managed memory** (new in 0.4.6), at the end of the line: `managed memory 1664-2687 MB in use, allocating
+  5.3 MB/s, 1.0 collection(s) per minute freeing about 270 MB each`. These two numbers explain collections: every
+  collection marks everything still in use again, so its length follows the amount in use, and how often one
+  happens follows the allocation rate. Growth between two frames counts as allocation and a drop as freed, so
+  the rate is a lower bound: memory freed and allocated within the same frame cancels out.
 - If "everything else" is a large share, a frame rate cap gives the simulation more of each second, because the
   per-frame cost is paid less often.
 
@@ -167,8 +172,33 @@ and every entry's share of it.
 
 ### Garbage collector report (on by default)
 
-Logs at startup whether incremental garbage collection is on. It is decided by `boot.config` before mods load,
-so the mod cannot change it; when it is off, the log line says which line to add to `boot.config` to try it.
+Logs at startup whether incremental garbage collection is on, and when it is off, how to turn it on.
+
+### Incremental garbage collection (menu setting, new in 0.4.6)
+
+The game cleans up memory with every thread stopped, and each time it goes over everything that is still in
+use. In a late game colony that is 1.6 GB and more. Measured in one 35 minute multiplayer session, same save,
+same mods: on the computer without incremental collection, 39 collections with a median of **675 ms** each,
+about 30 seconds frozen in total, each followed by a burst of catching up; on the computer with it, one
+collection frame over 50 ms outside of saves. Incremental collection does the same work a few milliseconds at a
+time across many frames.
+
+Unity reads that choice from `boot.config` before any mod loads, so a mod cannot switch it while the game runs.
+**Incremental garbage collection** in this mod's settings page (**Mods > Late Game Performance**) edits the file
+for you:
+
+- Ticking it adds the line `gc-max-time-slice=3` to `Timberborn_Data\boot.config` in the game's install folder.
+  Unticking it removes that line. Nothing else in the file is touched.
+- Before the first change a backup is written beside it, `boot.config.before-incremental-gc.bak`, and never
+  overwritten.
+- The file is only ever written because you clicked the box, never at startup. If the line is already there,
+  the box shows ticked.
+- It takes effect the **next time the game starts**; the startup line then says `GC: incremental=True`.
+  `Player.log` says whether the file could be written. If it could not (a read-only install folder), add the
+  line by hand with the game closed.
+- Steam's "verify integrity of game files" and game updates restore the original file, so tick it again
+  afterwards.
+- It does not affect the simulation, so multiplayer peers may differ. Every player benefits separately.
 
 ### Diagnostics (off by default)
 
@@ -182,7 +212,7 @@ Every `StatsEveryTicks` ticks (default 1000) one line is logged, for example:
 
 ```
 [LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests, 251 served from cache,
-161 rebuilt in 96.3 ms (0.598 ms each); buildings recomputed 40211/61843
+161 rebuilt in 96.3 ms (0.598 ms each), allocating 310 KB; buildings recomputed 40211/61843
 ```
 
 "ms each" is roughly what the game pays on every request without the mod, so requests served from cache times
@@ -193,8 +223,14 @@ A second line reports route map rebuilds:
 ```
 [LateGamePerformance] Last 1000 ticks. RouteMaps: 4 background rebuilds of 1435 route maps; main thread spent
 61.0 ms on them, longest single pause 1.9 ms (built 70 itself, waited for 12), workers were busy 180.4 ms
-alongside the game; 6 more built directly on the main thread in batches of fewer than 4
+alongside the game; 6 more built directly on the main thread in batches of fewer than 4; building maps
+allocated 5120 KB
 ```
+
+The allocation figures (new in 0.4.6) are what this mod's own work allocated, counted exactly per thread, so
+its share of the garbage can be compared with the allocation rate in the `Timing:` line. If the game's runtime
+does not keep that counter, a startup line says so and the figures are left out. (The numbers in these examples
+are illustrations, not measurements.)
 
 "longest single pause" is the figure to watch for hitching.
 
@@ -217,6 +253,9 @@ alongside the game; 6 more built directly on the main thread in batches of fewer
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
+
+Two more settings are on the in-game settings page (**Mods > Late Game Performance**), not in this file:
+**Record per-component timings** and **Incremental garbage collection**, both described above.
 
 ## Suggested first test
 

@@ -259,8 +259,7 @@ namespace LateGamePerformance
         {
             try
             {
-                Work item = flight.Items[index];
-                _fill(generator, flight.Graph, item.Field, item.LimitingField, item.StartNodeId);
+                Fill(generator, flight.Graph, flight.Items[index]);
             }
             catch (Exception exception)
             {

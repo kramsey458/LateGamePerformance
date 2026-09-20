@@ -57,6 +57,9 @@ internal static class Program
         TestConfigParsing();
         TestTimingStats();
         TestSaveBreakdown();
+        TestTimingMemory();
+        TestBootConfig();
+        TestAllocations();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
@@ -121,7 +124,7 @@ internal static class Program
                 settings++;
             }
         }
-        Check(settings == 1, "settings page: one setting property is discoverable by Mod Settings");
+        Check(settings == 2, "settings page: both setting properties are discoverable by Mod Settings");
         string manifest = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "packaging", "manifest.json"));
         Check(manifest.Contains("\"Id\": \"" + Plugin.ModId + "\""), "settings page: mod id matches manifest.json");
         Check(manifest.Contains("eMka.ModSettings"), "settings page: manifest requires Mod Settings");
@@ -216,6 +219,108 @@ internal static class Program
         stats.Frame(3560, 12, 7f, 5);
         Check(stats.TakeLine(10, 0.6f, 0).Contains("; 1 save(s): 2500 ms, in frame(s) of 2520 ms with 0 garbage collection(s)"),
             "timing: a save between simulation calls, in a very long frame, is still reported");
+    }
+
+    private static void TestTimingMemory()
+    {
+        const long mb = 1024 * 1024;
+        // 1000 stamps per second. Memory grows 1 MB a frame; two collections free 200 MB and 100 MB.
+        TimingStats stats = new TimingStats(1000);
+        long stamp = 1000, heap = 1600 * mb;
+        for (int frame = 0; frame <= 600; frame++, stamp += 100)
+        {
+            if (frame == 250) heap -= 200 * mb;
+            else if (frame == 500) heap -= 100 * mb;
+            else heap += mb;
+            stats.Frame(stamp, 10, 7f, frame < 250 ? 5 : frame < 500 ? 6 : 7, heap);
+        }
+        string line = stats.TakeLine(100, 0.6f, 2);
+        Console.WriteLine("     " + line);
+        // 600 counted frames = 60 s. It starts at 1601 MB, climbs to 1850, drops to 1650, climbs to 1899, drops to
+        // 1799 and ends at 1899. 598 frames grew 1 MB each (the first call only sets the baseline).
+        Check(line.Contains("; managed memory 1601-1899 MB in use"), "timing: range of managed memory in use");
+        Check(line.Contains("allocating 10.0 MB/s"), "timing: allocation rate is growth between frames over the wall clock");
+        Check(line.EndsWith("2.0 collection(s) per minute freeing about 150 MB each"), "timing: collection rate and what a collection frees");
+        stats.Frame(stamp, 10, 7f, 7, heap);
+        stats.Frame(stamp + 100, 10, 7f, 7, heap + mb);
+        string next = stats.TakeLine(1, 0.6f, 0);
+        Check(next.Contains("allocating 5.0 MB/s") && !next.Contains("per minute"), "timing: memory figures restart each interval, and no collections says nothing about them");
+        TimingStats blind = new TimingStats(1000);
+        blind.Frame(1000, 5, 3f, 1);
+        blind.Frame(1010, 5, 3f, 1);
+        Check(!blind.TakeLine(1, 0.6f, 0).Contains("managed memory"), "timing: no memory figures when the heap cannot be read");
+    }
+
+    private static void TestBootConfig()
+    {
+        string crlf = "wait-for-native-debugger=0\r\nhdr-display-enabled=0\r\n";
+        Check(!BootConfig.HasKey(crlf), "boot.config: key absent");
+        string added = BootConfig.WithIncremental(crlf);
+        Check(added == crlf + "gc-max-time-slice=3\r\n", "boot.config: line appended with the file's own line endings");
+        Check(BootConfig.WithIncremental(added) == added, "boot.config: adding twice changes nothing");
+        Check(BootConfig.WithIncremental("a=1") == "a=1\ngc-max-time-slice=3\n", "boot.config: a file without a final newline gets one first");
+        Check(BootConfig.WithoutIncremental(added) == crlf, "boot.config: removing restores the original text exactly");
+        string byHand = "a=1\n  gc-max-time-slice = 5\nb=2\n";
+        Check(BootConfig.HasKey(byHand) && BootConfig.WithIncremental(byHand) == byHand, "boot.config: a hand-written value is recognised and left alone");
+        Check(BootConfig.WithoutIncremental(byHand) == "a=1\nb=2\n", "boot.config: removing takes only that line");
+        Check(!BootConfig.HasKey("gc-max-time-slice-other=1\n# gc-max-time-slice=3\n"), "boot.config: similar keys and comments do not count");
+
+        string directory = Path.Combine(Path.GetTempPath(), "lgp-bootconfig-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, "boot.config");
+            Check(BootConfig.Apply(path, true, out _) == BootConfig.Outcome.FileMissing, "boot.config: a missing file is reported, not created");
+            File.WriteAllText(path, crlf);
+            Check(BootConfig.Apply(path, false, out _) == BootConfig.Outcome.AlreadyAsWanted && !File.Exists(path + BootConfig.BackupSuffix),
+                "boot.config: nothing to do means no write and no backup");
+            Check(BootConfig.Apply(path, true, out _) == BootConfig.Outcome.Changed && File.ReadAllText(path) == added,
+                "boot.config: enabling writes the line");
+            Check(File.ReadAllText(path + BootConfig.BackupSuffix) == crlf, "boot.config: the backup holds the original");
+            Check(BootConfig.FileHasKey(path), "boot.config: the file reads back as enabled");
+            Check(BootConfig.Apply(path, false, out _) == BootConfig.Outcome.Changed && File.ReadAllText(path) == crlf,
+                "boot.config: disabling restores the original");
+            Check(File.ReadAllText(path + BootConfig.BackupSuffix) == crlf, "boot.config: the first backup is never overwritten");
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+            Check(BootConfig.Apply(path, true, out string error) == BootConfig.Outcome.Failed && !string.IsNullOrEmpty(error),
+                "boot.config: a file that cannot be written is reported, not thrown");
+            File.SetAttributes(path, FileAttributes.Normal);
+
+            // The setting's handler: logs, never throws, and goes through the same path the startup report reads.
+            Func<string> previous = GcReport.BootConfigPath;
+            GcReport.BootConfigPath = () => path;
+            GcReport.ApplyIncremental(true);
+            Check(BootConfig.FileHasKey(path), "boot.config: ticking the setting enables it");
+            GcReport.ApplyIncremental(false);
+            Check(!BootConfig.FileHasKey(path), "boot.config: unticking the setting removes it");
+            GcReport.BootConfigPath = previous;
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    private static void TestAllocations()
+    {
+        Func<long> real = Allocations.ThreadCounter;
+        string message = Allocations.Probe();
+        Console.WriteLine("     " + message);
+        Check(Allocations.Available, "allocations: this runtime's per-thread counter works");
+        long begin = Allocations.Begin();
+        byte[] block = new byte[256 * 1024];
+        long counted = Allocations.End(begin);
+        GC.KeepAlive(block);
+        Check(counted >= 256 * 1024 && counted < 1024 * 1024, $"allocations: a 256 KB block is counted ({counted} bytes)");
+        Check(Allocations.Describe(2048 * 1024) == ", allocating 2048 KB", "allocations: figure for a stats line");
+
+        Allocations.ThreadCounter = () => 0;
+        Check(Allocations.Probe().Contains("did not move") && !Allocations.Available, "allocations: a counter stuck at zero is detected");
+        Check(Allocations.Begin() == -1 && Allocations.End(-1) == 0 && Allocations.Describe(5) == "", "allocations: nothing is reported without a counter");
+        Allocations.ThreadCounter = () => throw new NotImplementedException();
+        Check(Allocations.Probe().Contains("NotImplementedException") && !Allocations.Available, "allocations: a missing counter is detected");
+        Allocations.ThreadCounter = real;
+        Allocations.Probe();
     }
 
     private static void TestSaveBreakdown()

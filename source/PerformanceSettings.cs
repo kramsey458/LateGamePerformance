@@ -18,6 +18,15 @@ namespace LateGamePerformance
                             "Slows the game a little while on; turn it off after a profiling session. " +
                             "Does not affect the simulation, so multiplayer peers may differ."));
 
+        public ModSetting<bool> IncrementalGc { get; } = new ModSetting<bool>(false,
+            ModSettingDescriptor.Create("Incremental garbage collection")
+                .SetTooltip("Without it, the game freezes for most of a second about once a minute in a large colony " +
+                            "while memory is cleaned up; with it, that work is spread over many frames. Ticking this " +
+                            "adds one line (gc-max-time-slice=3) to boot.config in the game's install folder, after " +
+                            "saving a backup beside it; unticking removes the line. Takes effect the next time the " +
+                            "game starts. Steam's 'verify integrity of game files' undoes it. Player.log says whether " +
+                            "it worked. Does not affect the simulation, so multiplayer peers may differ."));
+
         public PerformanceSettings(ISettings settings, ModSettingsOwnerRegistry modSettingsOwnerRegistry,
             ModRepository modRepository) : base(settings, modSettingsOwnerRegistry, modRepository)
         {
@@ -35,6 +44,21 @@ namespace LateGamePerformance
             // scene creates the metrics service.
             MetricsDump.RequestedFromMenu = RecordTimings.Value;
             RecordTimings.ValueChanged += (_, value) => MetricsDump.RequestedFromMenu = value;
+
+            // boot.config is only ever written because the box was clicked, never from here. If the line is
+            // already there (added by hand, or on another computer's copy of the settings), show the box ticked.
+            try
+            {
+                if (!IncrementalGc.Value && BootConfig.FileHasKey(GcReport.BootConfigPath()))
+                {
+                    IncrementalGc.SetValue(true);
+                }
+            }
+            catch (System.Exception)
+            {
+                // Only cosmetic.
+            }
+            IncrementalGc.ValueChanged += (_, value) => GcReport.ApplyIncremental(value);
         }
     }
 

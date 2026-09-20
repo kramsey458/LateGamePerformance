@@ -86,6 +86,7 @@ namespace LateGamePerformance
         private static long _fieldsFilled;
         private static long _builtDirectly;
         private static long _wallStopwatchTicks;
+        private static long _fillAllocatedBytes;
 
         public static int WorkerCount => _workerCount;
 
@@ -127,6 +128,24 @@ namespace LateGamePerformance
             _active = true;
         }
 
+        // Every route map is built through here, on the main thread or a worker, so the allocation figure covers
+        // all of them. The counter is per thread, hence the interlocked add.
+        internal static void Fill(object generator, object graph, Work item)
+        {
+            long counted = Allocations.Begin();
+            try
+            {
+                _fill(generator, graph, item.Field, item.LimitingField, item.StartNodeId);
+            }
+            finally
+            {
+                if (counted >= 0)
+                {
+                    Interlocked.Add(ref _fillAllocatedBytes, Allocations.End(counted));
+                }
+            }
+        }
+
         public static string TakeStatsLine()
         {
             if (!_active && _batches == 0)
@@ -134,7 +153,8 @@ namespace LateGamePerformance
                 return null;
             }
             double msPerTick = 1000.0 / Stopwatch.Frequency;
-            string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}";
+            string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}" +
+                          Allocations.Describe(Interlocked.Exchange(ref _fillAllocatedBytes, 0)).Replace(", allocating", "; building maps allocated");
             string line = _background
                 ? $"RouteMaps: {_batches} background rebuilds of {_fieldsFilled} route maps; main thread spent " +
                   $"{_mainStopwatchTicks * msPerTick:0.0} ms on them, longest single pause " +
@@ -208,8 +228,7 @@ namespace LateGamePerformance
                     // Strided split: no shared counters, and which worker takes which map is fixed.
                     for (int i = worker; i < work.Count; i += workers)
                     {
-                        Work item = work[i];
-                        _fill(generator, graph, item.Field, item.LimitingField, item.StartNodeId);
+                        Fill(generator, graph, work[i]);
                     }
                 }
                 catch (Exception exception)
@@ -309,8 +328,7 @@ namespace LateGamePerformance
                 object mainGenerator = _workerGenerators[_workerGenerators.Length - 1];
                 for (int i = 0; i < WorkScratch.Count; i++)
                 {
-                    Work item = WorkScratch[i];
-                    _fill(mainGenerator, graph, item.Field, item.LimitingField, item.StartNodeId);
+                    Fill(mainGenerator, graph, WorkScratch[i]);
                 }
                 _builtDirectly += WorkScratch.Count;
                 return;
