@@ -52,11 +52,13 @@ namespace LateGamePerformance
         internal static void Start(Config config)
         {
             _config = config;
-            if (config.HaulCache && HaulCache.CreateFeature(config).Apply(HarmonyId))
+            bool haulCache = config.HaulCache && HaulCache.CreateFeature(config).Apply(HarmonyId);
+            if (haulCache)
             {
                 HaulCache.Activate();
             }
-            if (config.RouteMaps && RouteMaps.CreateFeature(config).Apply(HarmonyId))
+            bool routeMaps = config.RouteMaps && RouteMaps.CreateFeature(config).Apply(HarmonyId);
+            if (routeMaps)
             {
                 RouteMaps.Activate();
                 // If any gate cannot be installed, fall back to waiting for the whole batch, which needs none.
@@ -65,10 +67,12 @@ namespace LateGamePerformance
                 Log.Info($"RouteMaps: {RouteMaps.WorkerCount} worker threads, " +
                          (background ? "rebuilding in the background." : "main thread waits for each rebuild."));
             }
-            if (config.YielderSearch && YielderSearch.CreateFeature(config).Apply(HarmonyId))
+            bool yielderSearch = config.YielderSearch && YielderSearch.CreateFeature(config).Apply(HarmonyId);
+            if (yielderSearch)
             {
                 YielderSearch.Activate();
             }
+            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch));
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
                 Timing.Activate();
@@ -92,6 +96,19 @@ namespace LateGamePerformance
             {
                 GcReport.Write();
             }
+        }
+
+        // The parts that replace simulation code are not settings, so they can only differ between two players if
+        // one failed to start (a game update moved something). One line, the same words for everyone, so two
+        // players' logs can be compared at a glance.
+        internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch)
+        {
+            string line = "Simulation features: HaulCache " + (haulCache ? "on" : "OFF") + ", RouteMaps " +
+                          (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") + ".";
+            return haulCache && routeMaps && yielderSearch
+                ? line + " These are the same for every player on this version."
+                : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
+                  "own code for it. In multiplayer, check that the other players' logs show the same line.";
         }
 
         internal static Feature CreateTickFeature()

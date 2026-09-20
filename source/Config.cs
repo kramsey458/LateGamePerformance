@@ -5,20 +5,33 @@ using System.IO;
 
 namespace LateGamePerformance
 {
-    // Plain key=value file next to the manifest. Multiplayer peers must use identical values for the
-    // keys marked "simulation" in the shipped LateGamePerformance.cfg.
+    // Plain key=value file next to the manifest.
+    //
+    // What decides which simulation code runs is NOT a setting: HaulCache, HaulCacheFlushEveryTicks, RouteMaps and
+    // YielderSearch are fixed. Two players whose values differed could drift apart in multiplayer, a multiplayer
+    // mod can compare versions but cannot see inside this file, and nobody should have to know that. With the
+    // values fixed, the same version of this mod behaves the same for everyone. Everything that is still a
+    // setting here is measurement, testing or how work is split over threads, and may differ between players.
+    //
+    // If something needs switching off to track a problem down, that is what disabling the mod is for; a build
+    // with a different fixed value is a different version, which a multiplayer mod's version check can see.
     internal sealed class Config
     {
         public const string FileName = "LateGamePerformance.cfg";
 
-        public bool HaulCache = true;
-        public int HaulCacheFlushEveryTicks = 1;
+        // Keys that were settings up to 0.4.8. Still recognised so an old file can be told they are ignored.
+        public static readonly string[] FixedKeys = { "HaulCache", "HaulCacheFlushEveryTicks", "RouteMaps", "YielderSearch" };
+
+        public bool HaulCache => true;
+        // Nothing cached survives a tick: the conservative choice, and the only one ever played.
+        public int HaulCacheFlushEveryTicks => 1;
+        public bool RouteMaps => true;
+        public bool YielderSearch => true;
+
         public bool HaulCacheVerify = false;
-        public bool RouteMaps = true;
         public bool RouteMapsBackground = true;
         public int RouteMapsMinFields = 4;
         public int RouteMapsWorkers = 0;
-        public bool YielderSearch = true;
         public bool YielderSearchVerify = false;
         public bool Timing = true;
         public bool SaveTiming = true;
@@ -71,14 +84,18 @@ namespace LateGamePerformance
 
         public void Apply(Dictionary<string, string> values)
         {
-            HaulCache = Bool(values, nameof(HaulCache), HaulCache);
-            HaulCacheFlushEveryTicks = Math.Max(0, Int(values, nameof(HaulCacheFlushEveryTicks), HaulCacheFlushEveryTicks));
+            foreach (string key in FixedKeys)
+            {
+                if (values.TryGetValue(key, out string text))
+                {
+                    Log.Info($"Settings: '{key} = {text}' is ignored. It is no longer a setting: since 0.4.9 it is the " +
+                             "same for every player, so that everyone in a multiplayer game runs the same code.");
+                }
+            }
             HaulCacheVerify = Bool(values, nameof(HaulCacheVerify), HaulCacheVerify);
-            RouteMaps = Bool(values, nameof(RouteMaps), RouteMaps);
             RouteMapsBackground = Bool(values, nameof(RouteMapsBackground), RouteMapsBackground);
             RouteMapsMinFields = Math.Max(1, Int(values, nameof(RouteMapsMinFields), RouteMapsMinFields));
             RouteMapsWorkers = Math.Max(0, Int(values, nameof(RouteMapsWorkers), RouteMapsWorkers));
-            YielderSearch = Bool(values, nameof(YielderSearch), YielderSearch);
             YielderSearchVerify = Bool(values, nameof(YielderSearchVerify), YielderSearchVerify);
             Timing = Bool(values, nameof(Timing), Timing);
             SaveTiming = Bool(values, nameof(SaveTiming), SaveTiming);
@@ -90,9 +107,10 @@ namespace LateGamePerformance
 
         public override string ToString()
         {
-            return $"HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
-                   $"HaulCacheVerify={HaulCacheVerify}, RouteMaps={RouteMaps}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
-                   $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearch={YielderSearch}, YielderSearchVerify={YielderSearchVerify}, Timing={Timing}, SaveTiming={SaveTiming}, MetricsEveryTicks={MetricsEveryTicks}, " +
+            return $"(fixed: HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
+                   $"RouteMaps={RouteMaps}, YielderSearch={YielderSearch}) " +
+                   $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
+                   $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, Timing={Timing}, SaveTiming={SaveTiming}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }

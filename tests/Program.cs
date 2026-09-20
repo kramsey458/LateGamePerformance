@@ -101,12 +101,32 @@ internal static class Program
             "# comment", "HaulCache = false", "haulcacheflusheveryticks=5 # trailing", "Diagnostics = TRUE",
             "StatsEveryTicks = -3", "Nonsense", "GcReport = maybe", "RouteMaps = false", "RouteMapsMinFields = 0"
         }));
-        Check(!config.HaulCache, "config: bool parsed");
-        Check(config.HaulCacheFlushEveryTicks == 5, "config: int parsed, key case-insensitive, trailing comment");
+        Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch,
+            "config: what decides which simulation code runs cannot be changed from the file");
         Check(config.Diagnostics, "config: bool case-insensitive");
         Check(config.StatsEveryTicks == 0, "config: negative clamped to 0");
         Check(config.GcReport, "config: unparsable value keeps default");
-        Check(!config.RouteMaps && config.RouteMapsMinFields == 1, "config: route map settings parsed and clamped");
+        Check(config.RouteMapsMinFields == 1, "config: int parsed and clamped");
+        Check(Plugin.SimulationFeaturesLine(true, true, true) ==
+              "Simulation features: HaulCache on, RouteMaps on, YielderSearch on. These are the same for every player on this version.",
+            "startup: one line says which simulation features are running");
+        Check(Plugin.SimulationFeaturesLine(true, false, true).Contains("RouteMaps OFF") &&
+              Plugin.SimulationFeaturesLine(true, false, true).Contains("other players' logs"),
+            "startup: a feature that could not start is called out");
+        config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true" }));
+        Check(config.RouteMapsWorkers == 5 && config.YielderSearchVerify, "config: key case-insensitive, trailing comment, testing switches still work");
+        // No public field or settable property may carry one of the fixed names, or a later change could quietly
+        // make it a setting again.
+        foreach (string key in Config.FixedKeys)
+        {
+            PropertyInfo property = typeof(Config).GetProperty(key);
+            Check(typeof(Config).GetField(key) == null && property != null && !property.CanWrite, $"config: {key} is fixed, not a setting");
+        }
+        string shipped = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "packaging", "LateGamePerformance.cfg"));
+        foreach (string key in Config.FixedKeys)
+        {
+            Check(!System.Text.RegularExpressions.Regex.IsMatch(shipped, @"(?m)^\s*" + key + @"\s*="), $"config: the shipped file does not offer {key}");
+        }
     }
 
     // The settings page cannot be shown outside the game, but what Mod Settings needs from it can be checked:

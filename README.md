@@ -8,6 +8,9 @@ about once a minute on a computer that did not have it) and the faster **tree an
 Do not use 0.4.3: it crashes the game while loading.
 It is still a young mod: test on a copy of a save first.
 
+**Preview: 0.4.9** (pre-release, not yet played in-game). Same features; what decides which simulation code runs
+is no longer a setting, so every player on the same version runs the same code. See Settings.
+
 ## Installation
 
 1. Close Timberborn. Extract the release ZIP into `Documents/Timberborn/Mods`. It contains one
@@ -17,7 +20,10 @@ It is still a young mod: test on a copy of a save first.
 4. Look for `[LateGamePerformance]` lines in `Player.log`
    (`%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log`).
 
-Multiplayer: every peer must install the identical version with identical `(simulation)` settings.
+Multiplayer: every player installs the same version. That is all: from 0.4.9 nothing that affects the
+simulation is a setting, so the same version behaves the same for everyone, and a multiplayer mod's version check
+covers it. The startup line `Simulation features: HaulCache on, RouteMaps on, YielderSearch on` should read the
+same in every player's `Player.log`.
 
 ## What it does
 
@@ -33,9 +39,9 @@ priority), and keeps the district's sorted list until any building in it changed
 assembled in the same building order and sorted with the same comparison as the game, so haulers get the same
 list the game would have produced.
 
-As a safety net, everything cached is dropped every tick by default (`HaulCacheFlushEveryTicks = 1`). An input
+As a safety net, everything cached is dropped every tick. An input
 the mod does not track, such as one added by another mod, can then be out of date only within a single tick.
-Setting it to `0` keeps lists across ticks and relies on change tracking alone: faster, less conservative.
+(Up to 0.4.8 that interval was a setting; it is fixed now, see Settings.)
 
 If anything throws inside the cache, it switches itself off for the session and the game's own code runs.
 If a required game method is missing (for example after a game update), the feature does not enable at all.
@@ -61,7 +67,7 @@ same result every time. In a forest of 2000 marked trees with 50 grown, 51 looku
 - `YielderSearchVerify = true` runs the game's own search as well, compares, logs any difference and uses the
   game's result. It is slower than no mod and only for testing.
 - If anything throws, the feature switches itself off for the session and the game's own code runs.
-- It is marked `(simulation)` out of caution: keep it the same on every multiplayer peer.
+- It is always on. Up to 0.4.8 it could be switched off in the settings file; see Settings for why not any more.
 
 ### Parallel route map rebuild (on by default, new in 0.2.0)
 
@@ -92,7 +98,7 @@ worker threads (up to 7).
 
 One behaviour difference from the unmodded game: maps are now filled before the first request instead of on it.
 A few code paths use a map only "if it is already filled", so they can take the cached route where the unmodded
-game would have searched again. That is why every multiplayer peer needs `RouteMaps` on or off alike.
+game would have searched again. That is why route maps are not a setting: every player on the same version runs them alike.
 
 In the test harness, 420 maps on a 22,600-tile road network took about 1.8 s one by one and about 0.23 s on
 7 workers.
@@ -313,16 +319,20 @@ allocation, and this mod's part of it at about 0.3%.)
 
 `version-1.1/LateGamePerformance.cfg`, plain `key = value`. Restart after editing.
 
+**Nothing in this file changes what the game simulates** (from 0.4.9), so players in a multiplayer game may have
+different values. The hauling cache, the route maps and the tree and plant search are always on, with the same
+fixed values for everyone. Up to 0.4.8 they were settings (`HaulCache`, `HaulCacheFlushEveryTicks`, `RouteMaps`,
+`YielderSearch`) that every player had to keep identical by hand, and nothing could check that for them: a
+multiplayer mod can compare mod versions, but it cannot see inside another mod's settings file. An older file
+that still has those keys is fine: they are ignored, and `Player.log` says so. To run without one of those
+features, disable the mod.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `HaulCache` (simulation) | `true` | The hauling job list cache. |
-| `HaulCacheFlushEveryTicks` (simulation) | `1` | Drop everything cached every N ticks. `0` = never. |
 | `HaulCacheVerify` | `false` | Recompute the game's list on every request and compare; logs mismatches and uses the game's list. Slower than no mod. For testing. |
-| `RouteMaps` (simulation) | `true` | Build every cached route map on worker threads after each navigation tick. |
 | `RouteMapsBackground` | `true` | Rebuild in the background; `false` = main thread waits for the whole batch. May differ between peers. |
 | `RouteMapsMinFields` | `4` | Fewer unbuilt maps than this are built directly on the main thread instead of on workers. May differ between peers. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
-| `YielderSearch` (simulation) | `true` | Leave out path distance lookups that cannot change the answer when a worker looks for a tree or plant. |
 | `YielderSearchVerify` | `false` | Run the game's own search as well and compare; logs mismatches and uses the game's result. Slower than no mod. For testing. |
 | `Timing` | `true` | The timing stats line. |
 | `SaveTiming` | `true` | One line per save with the time of each stage; also lets the timing line report saves separately. Measurement only. |
