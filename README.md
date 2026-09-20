@@ -1,15 +1,14 @@
 # Late Game Performance
 
 A Timberborn 1.1 mod (built against **1.1.2.4**) that removes repeated CPU work in large colonies.
-**Latest release: [0.4.8](https://github.com/timbermods/LateGamePerformance/releases/latest).** It has been played
-in a late game save of about 350 beavers, where it gave noticeably fewer lag spikes. The two changes that matter
-most to how the game feels: **Incremental garbage collection** (a setting; it removed freezes of most of a second
-about once a minute on a computer that did not have it) and the faster **tree and plant search** (on by default).
+**Latest release: [0.4.9](https://github.com/timbermods/LateGamePerformance/releases/latest).** Its features were
+played as 0.4.8 in a late game save of about 350 beavers, where they gave noticeably fewer lag spikes. The two
+that matter most to how the game feels: **Incremental garbage collection** (a setting; it removed freezes of most
+of a second about once a minute on a computer that did not have it) and the faster **tree and plant search**
+(always on). 0.4.9 runs the same code with one difference: what decides which simulation code runs is no longer
+a setting, so every player on the same version runs the same code. See Settings.
 Do not use 0.4.3: it crashes the game while loading.
 It is still a young mod: test on a copy of a save first.
-
-**Preview: 0.4.9** (pre-release, not yet played in-game). Same features; what decides which simulation code runs
-is no longer a setting, so every player on the same version runs the same code. See Settings.
 
 ## Installation
 
