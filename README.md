@@ -7,9 +7,10 @@ second about once a minute, ticking the new **Incremental garbage collection** s
 steadier at high tick rates. Do not use 0.4.3: it crashes the game while loading.
 It is still a young mod: test on a copy of a save first.
 
-**Preview: 0.4.7** (pre-release, **not yet played in-game**) keeps incremental garbage collection on across game
-updates, says in the main menu when it is off, and adds an experimental setting that paces collection work by
-frame time. See "Incremental garbage collection" below.
+**Preview: 0.4.8** (pre-release). New and **not yet played in-game**: a faster search for trees and plants to
+work on (see "Tree and plant search"), and the `Timing:` line now splits "everything else". From 0.4.7, which has
+been played: incremental garbage collection stays on across game updates, the main menu says when it is off, and
+an experimental setting paces collection work.
 
 ## Installation
 
@@ -42,6 +43,29 @@ Setting it to `0` keeps lists across ticks and relies on change tracking alone: 
 
 If anything throws inside the cache, it switches itself off for the session and the game's own code runs.
 If a required game method is missing (for example after a game update), the feature does not enable at all.
+
+### Tree and plant search (on by default, new in 0.4.8)
+
+Every time a lumberjack looks for a tree (and a gatherer or a farmer for a plant), the game goes through every
+candidate, and for each one first looks up the path distance from the building, and only then asks whether the
+plant has anything to take. For lumberjacks the candidates are every unreserved marked tree on the map. In a
+late game colony most of them are still growing, so nearly all of those lookups are thrown away. In the colony
+this mod is measured in, it was the largest single item in the simulation: 2.9 ms per tick, 16% of all tick
+time, on a fast computer.
+
+The distance of a plant with nothing to take matters for exactly one thing: whether it can be reached, and only
+until the search has found something reachable that is grown or alive. After that it cannot change the answer,
+and the mod leaves its lookup out. Plants that do have something to take are looked up exactly as before, in the
+same order. The answer is the game's answer, not an approximation: the tests run the rule against a model of the
+game's search on 4000 random forests (unreachable, dead and destroyed plants and ties included) and require the
+same result every time. In a forest of 2000 marked trees with 50 grown, 51 lookups are left of 2000.
+
+- The first candidate of a search is always looked up, because that lookup is also what refills the building's
+  terrain route map after a terrain change, and that has to happen on the same tick as without the mod.
+- `YielderSearchVerify = true` runs the game's own search as well, compares, logs any difference and uses the
+  game's result. It is slower than no mod and only for testing.
+- If anything throws, the feature switches itself off for the session and the game's own code runs.
+- It is marked `(simulation)` out of caution: keep it the same on every multiplayer peer.
 
 ### Parallel route map rebuild (on by default, new in 0.2.0)
 
@@ -120,6 +144,11 @@ total, longest 105 ms (an average frame is 8.6 ms); 1 save(s): 812 ms, in frame(
   second and usually contains a garbage collection, so before 0.4.4 it showed up as the longest frame and as a
   very long collection. The frame a save ran in is now left out of every other figure; its time is part of
   "not counted".
+- **everything else, split** (new in 0.4.8): `everything else 30.0 ms per frame = 60% (per-frame systems of the
+  game and mods 6.0 ms, their late-update systems 9.0 ms, the rest 15.0 ms: rendering, animation and Unity
+  itself)`. The game runs its own per-frame systems, and those that mods register, from two calls; both are
+  timed, and what remains is Unity. In a multiplayer session one computer spent 40 ms per tick in "everything
+  else", more than in the simulation, and this is what says in which part.
 - **simulation** is time inside the game's tick call; **everything else** is the rest of each frame (rendering,
   animation, UI, other mods' per-frame work). Paused frames are left out.
 - **wall clock, paused, not counted** make pauses visible that nothing logs, such as a multiplayer mod setting the
@@ -227,21 +256,22 @@ ticked, the mod sets the slice each frame from a smoothed frame time:
 
 | Recent frames | Slice |
 |---|---|
-| 40 ms or longer | 1 ms |
-| 25 to 40 ms | 2 ms |
-| 14 to 25 ms | 3 ms (Unity's default here) |
+| 14 ms or longer | 3 ms (Unity's default here) |
 | under 14 ms | 6 ms |
 | paused | 8 ms |
 
-So the same work lands where it is felt least and a cycle finishes sooner, which matters because a cycle that
-cannot keep up with allocation ends in one blocking collection. Only the length of a slice changes; when a
+So a cycle finishes sooner where there is room for it, which matters because a cycle that cannot keep up with
+allocation ends in one blocking collection. 0.4.7 also went down to 1 ms in slow frames. On a computer whose
+frames are always slow that pinned the slice at 1 ms, which makes every cycle three times as long on the machine
+that can least afford it, so from 0.4.8 it never goes below the default. Only the length of a slice changes; when a
 collection starts and what it collects stay Unity's decisions. It applies at once, unticking restores the slice
 it found, it does nothing when collection is not incremental, and if Unity refuses the value it switches
 itself off for the session. It does not affect the simulation.
 
-Whether it helps is an open question; that is why it is off by default. With it on, the `Timing:` line shows what
-it did, `slice 6.0 ms, paced by this mod between 1 and 8 ms (average 4.2 ms)`, next to the figures it is meant to
-improve: the frames containing a collection and their longest.
+One multiplayer session each way (0.4.6 with the fixed slice, 0.4.7 paced, on two computers) showed no difference
+that could be told from noise, so it stays experimental and off by default. With it on, the `Timing:` line shows
+what it did, `slice 6.0 ms, paced by this mod between 3 and 8 ms (average 4.2 ms)`, next to the figures it is
+meant to improve: the frames containing a collection and their longest.
 
 ### Diagnostics (off by default)
 
@@ -255,7 +285,7 @@ Every `StatsEveryTicks` ticks (default 1000) one line is logged, for example:
 
 ```
 [LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests, 251 served from cache,
-161 rebuilt in 96.3 ms (0.598 ms each), allocating 310 KB; buildings recomputed 40211/61843
+161 rebuilt in 96.3 ms (0.598 ms each); buildings recomputed 40211/61843
 ```
 
 "ms each" is roughly what the game pays on every request without the mod, so requests served from cache times
@@ -266,14 +296,20 @@ A second line reports route map rebuilds:
 ```
 [LateGamePerformance] Last 1000 ticks. RouteMaps: 4 background rebuilds of 1435 route maps; main thread spent
 61.0 ms on them, longest single pause 1.9 ms (built 70 itself, waited for 12), workers were busy 180.4 ms
-alongside the game; 6 more built directly on the main thread in batches of fewer than 4; building maps
-allocated 5120 KB
+alongside the game; 6 more built directly on the main thread in batches of fewer than 4
 ```
 
-The allocation figures (new in 0.4.6) are what this mod's own work allocated, counted exactly per thread, so
-its share of the garbage can be compared with the allocation rate in the `Timing:` line. If the game's runtime
-does not keep that counter, a startup line says so and the figures are left out. (The numbers in these examples
-are illustrations, not measurements.)
+A third reports the tree and plant search:
+
+```
+[LateGamePerformance] Last 1000 ticks. YielderSearch: 640 searches for trees and plants over 1280000 candidates;
+32640 distance lookups, 1247360 left out (97%); 410.0 ms in total (0.641 ms each)
+```
+
+(The numbers in these examples are illustrations, not measurements. 0.4.6 and 0.4.7 also printed what the mod's
+own work allocated; the game's runtime turned out not to keep the counter that needs, so those figures were never
+shown and the code is gone. A separate per-entity profile put the whole simulation at under a tenth of all
+allocation, and this mod's part of it at about 0.3%.)
 
 "longest single pause" is the figure to watch for hitching.
 
@@ -290,6 +326,8 @@ are illustrations, not measurements.)
 | `RouteMapsBackground` | `true` | Rebuild in the background; `false` = main thread waits for the whole batch. May differ between peers. |
 | `RouteMapsMinFields` | `4` | Fewer unbuilt maps than this are built directly on the main thread instead of on workers. May differ between peers. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
+| `YielderSearch` (simulation) | `true` | Leave out path distance lookups that cannot change the answer when a worker looks for a tree or plant. |
+| `YielderSearchVerify` | `false` | Run the game's own search as well and compare; logs mismatches and uses the game's result. Slower than no mod. For testing. |
 | `Timing` | `true` | The timing stats line. |
 | `SaveTiming` | `true` | One line per save with the time of each stage; also lets the timing line report saves separately. Measurement only. |
 | `MetricsEveryTicks` | `3000` | While per-component timings are on: write them every N ticks. `0` = never (disables the menu setting too). |

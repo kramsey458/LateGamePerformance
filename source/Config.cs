@@ -18,6 +18,8 @@ namespace LateGamePerformance
         public bool RouteMapsBackground = true;
         public int RouteMapsMinFields = 4;
         public int RouteMapsWorkers = 0;
+        public bool YielderSearch = true;
+        public bool YielderSearchVerify = false;
         public bool Timing = true;
         public bool SaveTiming = true;
         public int MetricsEveryTicks = 3000;
@@ -76,6 +78,8 @@ namespace LateGamePerformance
             RouteMapsBackground = Bool(values, nameof(RouteMapsBackground), RouteMapsBackground);
             RouteMapsMinFields = Math.Max(1, Int(values, nameof(RouteMapsMinFields), RouteMapsMinFields));
             RouteMapsWorkers = Math.Max(0, Int(values, nameof(RouteMapsWorkers), RouteMapsWorkers));
+            YielderSearch = Bool(values, nameof(YielderSearch), YielderSearch);
+            YielderSearchVerify = Bool(values, nameof(YielderSearchVerify), YielderSearchVerify);
             Timing = Bool(values, nameof(Timing), Timing);
             SaveTiming = Bool(values, nameof(SaveTiming), SaveTiming);
             MetricsEveryTicks = Math.Max(0, Int(values, nameof(MetricsEveryTicks), MetricsEveryTicks));
@@ -88,7 +92,7 @@ namespace LateGamePerformance
         {
             return $"HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMaps={RouteMaps}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
-                   $"RouteMapsWorkers={RouteMapsWorkers}, Timing={Timing}, SaveTiming={SaveTiming}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearch={YielderSearch}, YielderSearchVerify={YielderSearchVerify}, Timing={Timing}, SaveTiming={SaveTiming}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }

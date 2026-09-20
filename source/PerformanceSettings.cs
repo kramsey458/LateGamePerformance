@@ -36,10 +36,11 @@ namespace LateGamePerformance
         public ModSetting<bool> AdaptiveGcPacing { get; } = new ModSetting<bool>(false,
             ModSettingDescriptor.Create("Adaptive garbage collection pacing (experimental)")
                 .SetTooltip("Only with incremental garbage collection on. Instead of a fixed 3 ms of clean-up work per " +
-                            "frame, does 1 ms in frames that are already slow, up to 6 ms in fast ones and 8 ms while " +
-                            "paused, so the same work lands where it is felt least and finishes sooner. Applies at " +
-                            "once; unticking restores the fixed slice. The Timing line in Player.log shows what it " +
-                            "did. Does not affect the simulation, so multiplayer peers may differ."));
+                            "frame, does 6 ms while frames are fast and 8 ms while paused, and never less than 3 ms, " +
+                            "so a clean-up cycle finishes sooner. One session each way showed no difference that " +
+                            "could be told from noise, so this stays experimental. Applies at once; unticking " +
+                            "restores the fixed slice. The Timing line in Player.log shows what it did. Does not " +
+                            "affect the simulation, so multiplayer peers may differ."));
 
         public PerformanceSettings(ISettings settings, ModSettingsOwnerRegistry modSettingsOwnerRegistry,
             ModRepository modRepository) : base(settings, modSettingsOwnerRegistry, modRepository)

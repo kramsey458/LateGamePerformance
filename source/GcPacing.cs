@@ -7,24 +7,24 @@ namespace LateGamePerformance
     // How much collection work a frame may carry, chosen from how much room recent frames had.
     //
     // With incremental collection on, Unity does up to a fixed slice of marking per frame while a collection cycle
-    // is running (3 ms from boot.config), whether the frame had 3 ms to spare or was already slow. A full cycle is
-    // the same amount of work either way: about 600 ms of marking for 1.7 GB in use, so about 200 frames at 3 ms.
-    // Spending less of it in frames that are already long and more in frames that are short or idle takes the
-    // same total out of the places where it is felt least, and finishes cycles sooner. That matters, because a
-    // cycle that cannot keep up with allocation ends in one blocking collection, which is the freeze incremental
-    // collection exists to avoid.
+    // is running (3 ms from boot.config), whether or not the frame had room. A full cycle is the same amount of
+    // work either way: about 600 ms of marking for 1.7 GB in use. Doing more of it in frames that are short, or
+    // while paused, finishes cycles sooner, and a cycle that cannot keep up with allocation ends in one blocking
+    // collection, which is the freeze incremental collection exists to avoid.
+    //
+    // Measured in one session each way (0.4.6 fixed, 0.4.7 paced): no difference that could be told from noise.
+    // It stays experimental and off by default.
     //
     // Pure: no Unity, so the tests can drive it.
     internal sealed class GcSlicePolicy
     {
-        public const ulong SlowFrameSlice = 1000000;      // 1 ms: the frame is already long, stay out of the way
-        public const ulong TightFrameSlice = 2000000;
-        public const ulong DefaultSlice = 3000000;        // what boot.config asks for
+        // Never below what boot.config asks for. 0.4.7 went down to 1 ms in slow frames; on a computer whose
+        // frames are always slow that pinned the slice at 1 ms, which only makes every cycle three times as long
+        // on the machine that can least afford one that falls behind.
+        public const ulong DefaultSlice = 3000000;
         public const ulong RoomyFrameSlice = 6000000;
         public const ulong PausedSlice = 8000000;         // nothing is moving; get the cycle done
 
-        public const double SlowFrameMs = 40;
-        public const double TightFrameMs = 25;
         public const double RoomyFrameMs = 14;
 
         // A single long frame should not swing the slice, a run of them should.
@@ -51,14 +51,6 @@ namespace LateGamePerformance
             if (_smoothedFrameMs <= 0)
             {
                 return DefaultSlice;
-            }
-            if (_smoothedFrameMs >= SlowFrameMs)
-            {
-                return SlowFrameSlice;
-            }
-            if (_smoothedFrameMs >= TightFrameMs)
-            {
-                return TightFrameSlice;
             }
             return _smoothedFrameMs >= RoomyFrameMs ? DefaultSlice : RoomyFrameSlice;
         }
@@ -133,9 +125,9 @@ namespace LateGamePerformance
                     _currentSlice = _originalSlice;
                     _applied = true;
                     Log.Info(string.Format(CultureInfo.InvariantCulture,
-                        "GC pacing: on. The slice was {0:0.0} ms; it now follows the frame time, from {1:0} ms in slow " +
-                        "frames to {2:0} ms while paused.", _originalSlice / 1e6, GcSlicePolicy.SlowFrameSlice / 1e6,
-                        GcSlicePolicy.PausedSlice / 1e6));
+                        "GC pacing: on. The slice was {0:0.0} ms; it is now {1:0} ms, or {2:0} ms while frames are " +
+                        "fast and {3:0} ms while paused.", _originalSlice / 1e6, GcSlicePolicy.DefaultSlice / 1e6,
+                        GcSlicePolicy.RoomyFrameSlice / 1e6, GcSlicePolicy.PausedSlice / 1e6));
                 }
                 double frameMs = (stamp - previous) * 1000.0 / stopwatchFrequency;
                 ulong wanted = _policy.Next(frameMs, Timing.CurrentSpeed() <= 0);

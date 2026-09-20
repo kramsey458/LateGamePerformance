@@ -52,10 +52,6 @@ namespace LateGamePerformance
         internal static void Start(Config config)
         {
             _config = config;
-            if (config.HaulCache || config.RouteMaps)
-            {
-                Log.Info(Allocations.Probe());
-            }
             if (config.HaulCache && HaulCache.CreateFeature(config).Apply(HarmonyId))
             {
                 HaulCache.Activate();
@@ -68,6 +64,10 @@ namespace LateGamePerformance
                 RouteMaps.SetBackground(background);
                 Log.Info($"RouteMaps: {RouteMaps.WorkerCount} worker threads, " +
                          (background ? "rebuilding in the background." : "main thread waits for each rebuild."));
+            }
+            if (config.YielderSearch && YielderSearch.CreateFeature(config).Apply(HarmonyId))
+            {
+                YielderSearch.Activate();
             }
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
@@ -132,6 +132,11 @@ namespace LateGamePerformance
                 if (haulLine != null)
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {haulLine}");
+                }
+                string yielderLine = YielderSearch.TakeStatsLine();
+                if (yielderLine != null)
+                {
+                    Log.Info($"Last {_config.StatsEveryTicks} ticks. {yielderLine}");
                 }
                 string routeLine = RouteMaps.TakeStatsLine();
                 if (routeLine != null)

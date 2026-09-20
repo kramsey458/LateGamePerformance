@@ -143,6 +143,16 @@ namespace LateGamePerformance
                 {
                     continue;
                 }
+                if (parameter.Name == "__result")
+                {
+                    Type returned = (target as MethodInfo)?.ReturnType;
+                    Type asked = parameter.ParameterType.IsByRef ? parameter.ParameterType.GetElementType() : parameter.ParameterType;
+                    if (returned == null || returned == typeof(void) || !asked.IsAssignableFrom(returned))
+                    {
+                        problems.Add($"{feature.Name}/{patch.Name}: __result does not match the target's return type");
+                    }
+                    continue;
+                }
                 ParameterInfo match = Array.Find(targetParameters, candidate => candidate.Name == parameter.Name);
                 if (match == null)
                 {

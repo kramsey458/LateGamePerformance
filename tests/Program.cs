@@ -38,7 +38,7 @@ internal static class Program
                      "Timberborn.Navigation", "Timberborn.NeedBehaviorSystem", "Timberborn.BlockingSystem",
                      "Timberborn.Emptying", "Timberborn.StockpilePrioritySystem", "Timberborn.Workshops",
                      "Timberborn.GameSaveRuntimeSystem", "Timberborn.SaveSystem", "Timberborn.WorldPersistence", "Timberborn.WorldSerialization",
-                     "Timberborn.ThumbnailCapturing" })
+                     "Timberborn.ThumbnailCapturing", "Timberborn.SingletonSystem", "Timberborn.YielderFinding" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -59,14 +59,14 @@ internal static class Program
         TestSaveBreakdown();
         TestTimingMemory();
         TestBootConfig();
-        TestAllocations();
+        TestYielderSearch();
         TestGcPacing();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
         {
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
-            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), GcPacing.CreateFeature(), MetricsDump.CreateFeature(new Config()),
+            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), GcPacing.CreateFeature(), YielderSearch.CreateFeature(new Config()), MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -82,7 +82,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 41, $"41 patches declared (found {patchCount})");
+        Check(patchCount == 44, $"44 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -259,6 +259,18 @@ internal static class Program
         blind.Frame(1000, 5, 3f, 1);
         blind.Frame(1010, 5, 3f, 1);
         Check(!blind.TakeLine(1, 0.6f, 0).Contains("managed memory"), "timing: no memory figures when the heap cannot be read");
+
+        // 100 frames of 50 ms: 20 ms of simulation, 6 ms in the per-frame systems, 9 ms in the late ones.
+        TimingStats split = new TimingStats(1000);
+        for (int frame = 0; frame <= 100; frame++) split.Frame(1000 + frame * 50, 20, 7f, 1, 0, 6, 9);
+        string splitLine = split.TakeLine(50, 0.6f, 0);
+        Console.WriteLine("     " + splitLine);
+        Check(splitLine.Contains("everything else 30.0 ms per frame = 60% (per-frame systems of the game and mods 6.0 ms, " +
+                                 "their late-update systems 9.0 ms, the rest 15.0 ms: rendering, animation and Unity itself);"),
+            "timing: everything else is split into the game's per-frame systems and the rest");
+        split.Frame(10000, 20, 7f, 1);
+        split.Frame(10050, 20, 7f, 1);
+        Check(!split.TakeLine(1, 0.6f, 0).Contains("per-frame systems"), "timing: no split when the per-frame systems were not measured");
     }
 
     private static void TestBootConfig()
@@ -311,26 +323,81 @@ internal static class Program
         }
     }
 
-    private static void TestAllocations()
+    // A plant for the search rule: what the game would see of it.
+    private sealed class Plant
     {
-        Func<long> real = Allocations.ThreadCounter;
-        string message = Allocations.Probe();
-        Console.WriteLine("     " + message);
-        Check(Allocations.Available, "allocations: this runtime's per-thread counter works");
-        long begin = Allocations.Begin();
-        byte[] block = new byte[256 * 1024];
-        long counted = Allocations.End(begin);
-        GC.KeepAlive(block);
-        Check(counted >= 256 * 1024 && counted < 1024 * 1024, $"allocations: a 256 KB block is counted ({counted} bytes)");
-        Check(Allocations.Describe(2048 * 1024) == ", allocating 2048 KB", "allocations: figure for a stats line");
+        public bool Exists = true, Yielding, Alive, Reachable;
+        public string Good = "Log";
+        public float Distance;
+    }
 
-        Allocations.ThreadCounter = () => 0;
-        Check(Allocations.Probe().Contains("did not move") && !Allocations.Available, "allocations: a counter stuck at zero is detected");
-        Check(Allocations.Begin() == -1 && Allocations.End(-1) == 0 && Allocations.Describe(5) == "", "allocations: nothing is reported without a counter");
-        Allocations.ThreadCounter = () => throw new NotImplementedException();
-        Check(Allocations.Probe().Contains("NotImplementedException") && !Allocations.Available, "allocations: a missing counter is detected");
-        Allocations.ThreadCounter = real;
-        Allocations.Probe();
+    // What ClosestYielderFinder.FindClosestYielders makes of a sequence of looked-up candidates: whether it found
+    // anything at all, and the closest yielding plant of each good. (null = a lookup that did not reach its plant.)
+    private static string GamesAnswer(IEnumerable<Plant> reachedCandidates)
+    {
+        bool foundSomething = false;
+        var closest = new SortedDictionary<string, Plant>();
+        foreach (Plant plant in reachedCandidates)
+        {
+            if (plant == null || !plant.Exists) continue;
+            foundSomething = foundSomething || plant.Yielding || plant.Alive;
+            if (plant.Yielding && (!closest.TryGetValue(plant.Good, out Plant best) || plant.Distance < best.Distance))
+            {
+                closest[plant.Good] = plant;
+            }
+        }
+        return foundSomething + ":" + string.Join(",", closest.Select(pair => pair.Key + "@" + pair.Value.Distance));
+    }
+
+    private static void TestYielderSearch()
+    {
+        Random random = new Random(12345);
+        int cases = 0, differences = 0; long lookupsSaved = 0, firstNotLookedUp = 0;
+        for (int round = 0; round < 4000; round++)
+        {
+            int count = random.Next(0, 40);
+            // Different mixes: forests that are mostly growing, mostly grown, unreachable, dead, destroyed.
+            double yielding = random.NextDouble(), alive = random.NextDouble(), reachable = round % 5 == 0 ? 0.1 : random.NextDouble();
+            List<Plant> plants = new List<Plant>();
+            for (int i = 0; i < count; i++)
+            {
+                plants.Add(new Plant
+                {
+                    Exists = random.NextDouble() > 0.03, Yielding = random.NextDouble() < yielding,
+                    Alive = random.NextDouble() < alive, Reachable = random.NextDouble() < reachable,
+                    Good = random.Next(3) == 0 ? "Pine" : "Log", Distance = random.Next(1, 12)   // ties on purpose
+                });
+            }
+            int firstLookedUp = -1, position = 0;
+            var counters = new YielderSearch.Counters();
+            Func<Plant, Plant> lookUp = plant => plant.Reachable ? plant : null;
+            string games = GamesAnswer(plants.Select(lookUp));
+            string mods = GamesAnswer(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding,
+                plant => plant.Alive, plant => { if (firstLookedUp < 0) firstLookedUp = position; return lookUp(plant); },
+                reached => reached != null, counters).Select(reached => { position++; return reached; }));
+            cases++;
+            if (games != mods) differences++;
+            if (count > 0 && counters.Lookups == 0) firstNotLookedUp++;
+            lookupsSaved += counters.Candidates - counters.Lookups;
+            if (counters.Candidates != count) differences++;
+        }
+        Check(differences == 0, $"yielder search: same answer as the game's search in {cases} random forests ({differences} differences)");
+        Check(firstNotLookedUp == 0, "yielder search: the first candidate is always looked up, so the route map is filled on the same tick");
+        Check(lookupsSaved > 10000, $"yielder search: lookups are actually left out ({lookupsSaved})");
+
+        // A forest like the one measured: 2000 marked trees, 50 grown, everything reachable and alive.
+        List<Plant> forest = new List<Plant>();
+        for (int i = 0; i < 2000; i++) forest.Add(new Plant { Yielding = i % 40 == 7, Alive = true, Reachable = true, Distance = i % 97 });
+        var forestCounters = new YielderSearch.Counters();
+        string lazy = GamesAnswer(YielderSearch.LazyCandidates(forest, plant => plant.Exists, plant => plant.Yielding,
+            plant => plant.Alive, plant => plant, reached => reached != null, forestCounters));
+        Check(lazy == GamesAnswer(forest) && forestCounters.Lookups == 51, $"yielder search: 2000 trees with 50 grown need {forestCounters.Lookups} lookups instead of 2000");
+        // Nothing reachable: every candidate has to be looked up, exactly as the game does.
+        forest.ForEach(plant => plant.Reachable = false);
+        var blocked = new YielderSearch.Counters();
+        GamesAnswer(YielderSearch.LazyCandidates(forest, plant => plant.Exists, plant => plant.Yielding, plant => plant.Alive,
+            plant => plant.Reachable ? plant : null, reached => reached != null, blocked));
+        Check(blocked.Lookups == 2000, "yielder search: with nothing reachable nothing can be left out");
     }
 
     private static void TestGcPacing()
@@ -339,18 +406,19 @@ internal static class Program
         Check(policy.Next(0, false) == GcSlicePolicy.DefaultSlice, "gc pacing: no frame time yet means the default slice");
         for (int i = 0; i < 40; i++) policy.Next(8, false);
         Check(policy.Next(8, false) == GcSlicePolicy.RoomyFrameSlice, "gc pacing: fast frames get a bigger slice");
-        Check(policy.Next(600, false) == GcSlicePolicy.SlowFrameSlice, "gc pacing: a very long frame backs off at once");
-        Check(policy.Next(5000, false) == GcSlicePolicy.SlowFrameSlice && policy.SmoothedFrameMs < 200, "gc pacing: a loading gap is ignored");
+        Check(policy.Next(600, false) == GcSlicePolicy.DefaultSlice, "gc pacing: a very long frame goes back to the default at once");
+        Check(policy.Next(5000, false) == GcSlicePolicy.DefaultSlice && policy.SmoothedFrameMs < 200, "gc pacing: a loading gap is ignored");
         policy = new GcSlicePolicy();
         for (int i = 0; i < 40; i++) policy.Next(8, false);
         policy.Next(30, false);
         Check(policy.Next(8, false) == GcSlicePolicy.RoomyFrameSlice, "gc pacing: one slightly long frame does not swing it");
-        for (int i = 0; i < 40; i++) policy.Next(30, false);
-        Check(policy.Next(30, false) == GcSlicePolicy.TightFrameSlice, "gc pacing: a run of 30 ms frames gets a smaller slice");
         for (int i = 0; i < 40; i++) policy.Next(18, false);
         Check(policy.Next(18, false) == GcSlicePolicy.DefaultSlice, "gc pacing: ordinary frames keep the default");
-        for (int i = 0; i < 40; i++) policy.Next(55, false);
-        Check(policy.Next(55, false) == GcSlicePolicy.SlowFrameSlice, "gc pacing: slow frames get the smallest slice");
+        foreach (double slow in new[] { 30.0, 55.0, 150.0, 900.0 })
+        {
+            for (int i = 0; i < 40; i++) policy.Next(slow, false);
+            Check(policy.Next(slow, false) == GcSlicePolicy.DefaultSlice, $"gc pacing: never below the default, however slow the frames ({slow} ms)");
+        }
         Check(policy.Next(55, true) == GcSlicePolicy.PausedSlice, "gc pacing: paused gets the largest");
 
         // The feature, against a fake collector and a clock of 1000 stamps per second.

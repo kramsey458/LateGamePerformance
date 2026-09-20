@@ -86,7 +86,6 @@ namespace LateGamePerformance
         private static long _fieldsFilled;
         private static long _builtDirectly;
         private static long _wallStopwatchTicks;
-        private static long _fillAllocatedBytes;
 
         public static int WorkerCount => _workerCount;
 
@@ -128,22 +127,10 @@ namespace LateGamePerformance
             _active = true;
         }
 
-        // Every route map is built through here, on the main thread or a worker, so the allocation figure covers
-        // all of them. The counter is per thread, hence the interlocked add.
+        // Every route map is built through here, on the main thread or a worker.
         internal static void Fill(object generator, object graph, Work item)
         {
-            long counted = Allocations.Begin();
-            try
-            {
-                _fill(generator, graph, item.Field, item.LimitingField, item.StartNodeId);
-            }
-            finally
-            {
-                if (counted >= 0)
-                {
-                    Interlocked.Add(ref _fillAllocatedBytes, Allocations.End(counted));
-                }
-            }
+            _fill(generator, graph, item.Field, item.LimitingField, item.StartNodeId);
         }
 
         public static string TakeStatsLine()
@@ -153,8 +140,7 @@ namespace LateGamePerformance
                 return null;
             }
             double msPerTick = 1000.0 / Stopwatch.Frequency;
-            string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}" +
-                          Allocations.Describe(Interlocked.Exchange(ref _fillAllocatedBytes, 0)).Replace(", allocating", "; building maps allocated");
+            string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}";
             string line = _background
                 ? $"RouteMaps: {_batches} background rebuilds of {_fieldsFilled} route maps; main thread spent " +
                   $"{_mainStopwatchTicks * msPerTick:0.0} ms on them, longest single pause " +
