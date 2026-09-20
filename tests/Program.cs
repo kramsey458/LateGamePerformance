@@ -60,12 +60,13 @@ internal static class Program
         TestTimingMemory();
         TestBootConfig();
         TestAllocations();
+        TestGcPacing();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
         {
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
-            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), MetricsDump.CreateFeature(new Config()),
+            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), GcPacing.CreateFeature(), MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -81,12 +82,12 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 40, $"40 patches declared (found {patchCount})");
+        Check(patchCount == 41, $"41 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
-        Check(warnings.Count == 1 && warnings[0].Contains("RouteMaps failed"),
-            $"only the expected warning from the forced failure was logged ({warnings.Count})");
+        Check(warnings.Count == 2 && warnings[0].Contains("GC pacing failed") && warnings[1].Contains("RouteMaps failed"),
+            $"only the two expected warnings from the forced failures were logged ({warnings.Count})");
 
         Console.WriteLine(_failures == 0 ? "ALL PASSED" : _failures + " FAILED");
         return _failures == 0 ? 0 : 1;
@@ -124,7 +125,16 @@ internal static class Program
                 settings++;
             }
         }
-        Check(settings == 2, "settings page: both setting properties are discoverable by Mod Settings");
+        Check(settings == 4, "settings page: all four setting properties are discoverable by Mod Settings");
+        // The main menu notice is built by the game's container: it needs one public constructor whose
+        // parameters are things the main menu binds, and the game calls it through this interface.
+        Type notice = typeof(GcNotice);
+        ConstructorInfo[] constructors = notice.GetConstructors();
+        Check(constructors.Length == 1 && constructors[0].GetParameters().Length == 2 &&
+              constructors[0].GetParameters()[0].ParameterType.FullName == "Timberborn.CoreUI.DialogBoxShower" &&
+              constructors[0].GetParameters()[1].ParameterType == page,
+            "gc notice: constructed from the dialog shower and the settings page");
+        Check(notice.GetInterface("Timberborn.SingletonSystem.IPostLoadableSingleton") != null, "gc notice: runs after the main menu has loaded");
         string manifest = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "packaging", "manifest.json"));
         Check(manifest.Contains("\"Id\": \"" + Plugin.ModId + "\""), "settings page: mod id matches manifest.json");
         Check(manifest.Contains("eMka.ModSettings"), "settings page: manifest requires Mod Settings");
@@ -323,12 +333,94 @@ internal static class Program
         Allocations.Probe();
     }
 
+    private static void TestGcPacing()
+    {
+        GcSlicePolicy policy = new GcSlicePolicy();
+        Check(policy.Next(0, false) == GcSlicePolicy.DefaultSlice, "gc pacing: no frame time yet means the default slice");
+        for (int i = 0; i < 40; i++) policy.Next(8, false);
+        Check(policy.Next(8, false) == GcSlicePolicy.RoomyFrameSlice, "gc pacing: fast frames get a bigger slice");
+        Check(policy.Next(600, false) == GcSlicePolicy.SlowFrameSlice, "gc pacing: a very long frame backs off at once");
+        Check(policy.Next(5000, false) == GcSlicePolicy.SlowFrameSlice && policy.SmoothedFrameMs < 200, "gc pacing: a loading gap is ignored");
+        policy = new GcSlicePolicy();
+        for (int i = 0; i < 40; i++) policy.Next(8, false);
+        policy.Next(30, false);
+        Check(policy.Next(8, false) == GcSlicePolicy.RoomyFrameSlice, "gc pacing: one slightly long frame does not swing it");
+        for (int i = 0; i < 40; i++) policy.Next(30, false);
+        Check(policy.Next(30, false) == GcSlicePolicy.TightFrameSlice, "gc pacing: a run of 30 ms frames gets a smaller slice");
+        for (int i = 0; i < 40; i++) policy.Next(18, false);
+        Check(policy.Next(18, false) == GcSlicePolicy.DefaultSlice, "gc pacing: ordinary frames keep the default");
+        for (int i = 0; i < 40; i++) policy.Next(55, false);
+        Check(policy.Next(55, false) == GcSlicePolicy.SlowFrameSlice, "gc pacing: slow frames get the smallest slice");
+        Check(policy.Next(55, true) == GcSlicePolicy.PausedSlice, "gc pacing: paused gets the largest");
+
+        // The feature, against a fake collector and a clock of 1000 stamps per second.
+        bool incremental = true; ulong slice = 3000000; int writes = 0; float speed = 7f;
+        Func<float> previousSpeed = Timing.CurrentSpeed;
+        GcPacing.IsIncremental = () => incremental;
+        GcPacing.GetSlice = () => slice;
+        GcPacing.SetSlice = value => { slice = value; writes++; };
+        Timing.CurrentSpeed = () => speed;
+        GcPacing.ResetForTests();
+        GcPacing.Enabled = false;
+        long stamp = 1000;
+        for (int i = 0; i < 10; i++, stamp += 8) GcPacing.Frame(stamp, 1000);
+        Check(writes == 0 && GcPacing.TakeText() == "", "gc pacing: does nothing until it is switched on");
+        GcPacing.Enabled = true;
+        incremental = false;
+        for (int i = 0; i < 10; i++, stamp += 8) GcPacing.Frame(stamp, 1000);
+        Check(writes == 0, "gc pacing: does nothing when collection is not incremental");
+        incremental = true;
+        for (int i = 0; i < 50; i++, stamp += 8) GcPacing.Frame(stamp, 1000);
+        Check(slice == GcSlicePolicy.RoomyFrameSlice && writes == 1, $"gc pacing: the slice is only written when it changes ({writes})");
+        speed = 0f;
+        GcPacing.Frame(stamp += 8, 1000);
+        Check(slice == GcSlicePolicy.PausedSlice, "gc pacing: paused frames use the paused slice");
+        string text = Timing.CollectorText();
+        Console.WriteLine("     " + text);
+        Check(text.StartsWith("; garbage collection is incremental, slice 8.0 ms, paced by this mod between 6 and 8 ms (average "),
+            "timing: collector state and what pacing did");
+        Check(Timing.CollectorText() == "; garbage collection is incremental, slice 8.0 ms", "timing: pacing figures restart each interval");
+        GcPacing.Enabled = false;
+        GcPacing.Frame(stamp += 8, 1000);
+        Check(slice == 3000000, "gc pacing: switching it off restores the slice it found");
+        incremental = false;
+        Check(Timing.CollectorText().Contains("NOT incremental"), "timing: says so when collection is not incremental");
+        GcPacing.Enabled = true;
+        incremental = true;
+        GcPacing.SetSlice = _ => throw new InvalidOperationException("no");
+        for (int i = 0; i < 5; i++) GcPacing.Frame(stamp += 8, 1000);
+        GcPacing.Enabled = false;   // reaching this line means the refusal was not thrown; it is logged once, checked at the end
+        Timing.CurrentSpeed = previousSpeed;
+
+        // Re-adding the line after a game update: only through the path the ticked setting takes, once a launch.
+        string directory = Path.Combine(Path.GetTempPath(), "lgp-reapply-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, "boot.config");
+            File.WriteAllText(path, "a=1\n");
+            Func<string> previousPath = GcReport.BootConfigPath;
+            GcReport.BootConfigPath = () => path;
+            GcReport.ReapplyIncremental();
+            Check(BootConfig.FileHasKey(path), "boot.config: the line is put back when the setting is ticked and the file was restored");
+            File.WriteAllText(path, "a=1\n");
+            GcReport.ReapplyIncremental();
+            Check(!BootConfig.FileHasKey(path), "boot.config: put back at most once per launch");
+            GcReport.BootConfigPath = previousPath;
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
     private static void TestSaveBreakdown()
     {
         SaveBreakdown save = new SaveBreakdown(1000);
         save.Add(SaveStage.Snapshot, 50);
         Check(!save.IsOpen && save.Close(100) == null, "save: a stage outside a save is ignored and nothing is reported");
         save.Open("Save");
+        Check(save.IsEmpty, "save: a save in which no stage ran can be told apart");
         save.Add(SaveStage.FinishingTheTick, 14);
         save.Add(SaveStage.Snapshot, 190);
         save.Add(SaveStage.WorldJson, 520);

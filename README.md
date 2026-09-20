@@ -7,6 +7,10 @@ second about once a minute, ticking the new **Incremental garbage collection** s
 steadier at high tick rates. Do not use 0.4.3: it crashes the game while loading.
 It is still a young mod: test on a copy of a save first.
 
+**Preview: 0.4.7** (pre-release, **not yet played in-game**) keeps incremental garbage collection on across game
+updates, says in the main menu when it is off, and adds an experimental setting that paces collection work by
+frame time. See "Incremental garbage collection" below.
+
 ## Installation
 
 1. Close Timberborn. Extract the release ZIP into `Documents/Timberborn/Mods`. It contains one
@@ -201,6 +205,44 @@ for you:
   afterwards.
 - It does not affect the simulation, so multiplayer peers may differ. Every player benefits separately.
 
+New in 0.4.7:
+
+- **It stays on.** A game update, or Steam's file check, puts the original `boot.config` back without telling
+  anyone. If the box is ticked and the line is gone at startup, the mod puts the line back (once per launch, and
+  `Player.log` says so). Ticking the box is the consent for that; for a player who never ticked it, nothing is
+  written. Untick the box to stop it.
+- **It says so when it is off.** While collection is not incremental and the line is not in `boot.config`, a
+  message in the main menu explains it once per launch, with **Turn it on** and **Not now**. The setting **Warn
+  when garbage collection is not incremental** switches the message off.
+- Every `Timing:` line ends with the state, so any log answers the question:
+  `garbage collection is incremental, slice 3.0 ms` or `garbage collection is NOT incremental, so every
+  collection freezes the game`.
+
+#### Adaptive garbage collection pacing (experimental, off by default, new in 0.4.7)
+
+With incremental collection on, Unity does up to a fixed 3 ms of clean-up work per frame while a collection
+cycle is running, whether the frame had 3 ms to spare or was already slow. The total is the same either way:
+about 600 ms of work for 1.7 GB in use, so about 200 frames per cycle. With **Adaptive garbage collection pacing**
+ticked, the mod sets the slice each frame from a smoothed frame time:
+
+| Recent frames | Slice |
+|---|---|
+| 40 ms or longer | 1 ms |
+| 25 to 40 ms | 2 ms |
+| 14 to 25 ms | 3 ms (Unity's default here) |
+| under 14 ms | 6 ms |
+| paused | 8 ms |
+
+So the same work lands where it is felt least and a cycle finishes sooner, which matters because a cycle that
+cannot keep up with allocation ends in one blocking collection. Only the length of a slice changes; when a
+collection starts and what it collects stay Unity's decisions. It applies at once, unticking restores the slice
+it found, it does nothing when collection is not incremental, and if Unity refuses the value it switches
+itself off for the session. It does not affect the simulation.
+
+Whether it helps is an open question; that is why it is off by default. With it on, the `Timing:` line shows what
+it did, `slice 6.0 ms, paced by this mod between 1 and 8 ms (average 4.2 ms)`, next to the figures it is meant to
+improve: the frames containing a collection and their longest.
+
 ### Diagnostics (off by default)
 
 `Diagnostics = true` times route map (road flow field) fills, including the ones the game still does on
@@ -255,8 +297,9 @@ are illustrations, not measurements.)
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
-Two more settings are on the in-game settings page (**Mods > Late Game Performance**), not in this file:
-**Record per-component timings** and **Incremental garbage collection**, both described above.
+Four more settings are on the in-game settings page (**Mods > Late Game Performance**), not in this file:
+**Record per-component timings**, **Incremental garbage collection**, **Warn when garbage collection is not
+incremental** and **Adaptive garbage collection pacing (experimental)**, all described above.
 
 ## Suggested first test
 

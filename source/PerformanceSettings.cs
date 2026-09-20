@@ -27,6 +27,20 @@ namespace LateGamePerformance
                             "game starts. Steam's 'verify integrity of game files' undoes it. Player.log says whether " +
                             "it worked. Does not affect the simulation, so multiplayer peers may differ."));
 
+        public ModSetting<bool> WarnWhenNotIncremental { get; } = new ModSetting<bool>(true,
+            ModSettingDescriptor.Create("Warn when garbage collection is not incremental")
+                .SetTooltip("Shows a message in the main menu, once per launch, while garbage collection is not " +
+                            "incremental and the setting above has not been ticked. A game update or Steam's " +
+                            "'verify integrity of game files' can switch it off again without telling you."));
+
+        public ModSetting<bool> AdaptiveGcPacing { get; } = new ModSetting<bool>(false,
+            ModSettingDescriptor.Create("Adaptive garbage collection pacing (experimental)")
+                .SetTooltip("Only with incremental garbage collection on. Instead of a fixed 3 ms of clean-up work per " +
+                            "frame, does 1 ms in frames that are already slow, up to 6 ms in fast ones and 8 ms while " +
+                            "paused, so the same work lands where it is felt least and finishes sooner. Applies at " +
+                            "once; unticking restores the fixed slice. The Timing line in Player.log shows what it " +
+                            "did. Does not affect the simulation, so multiplayer peers may differ."));
+
         public PerformanceSettings(ISettings settings, ModSettingsOwnerRegistry modSettingsOwnerRegistry,
             ModRepository modRepository) : base(settings, modSettingsOwnerRegistry, modRepository)
         {
@@ -45,19 +59,28 @@ namespace LateGamePerformance
             MetricsDump.RequestedFromMenu = RecordTimings.Value;
             RecordTimings.ValueChanged += (_, value) => MetricsDump.RequestedFromMenu = value;
 
-            // boot.config is only ever written because the box was clicked, never from here. If the line is
-            // already there (added by hand, or on another computer's copy of the settings), show the box ticked.
+            // If the line is already there (added by hand), show the box ticked. If the box is ticked and the line
+            // is gone, a game update or Steam's file check restored boot.config: ticking the box was the player's
+            // standing consent, so the line is put back, once per launch, and the log says so. Nothing is written
+            // for a player who never ticked it.
             try
             {
-                if (!IncrementalGc.Value && BootConfig.FileHasKey(GcReport.BootConfigPath()))
+                bool inFile = BootConfig.FileHasKey(GcReport.BootConfigPath());
+                if (!IncrementalGc.Value && inFile)
                 {
                     IncrementalGc.SetValue(true);
+                }
+                else if (IncrementalGc.Value && !inFile)
+                {
+                    GcReport.ReapplyIncremental();
                 }
             }
             catch (System.Exception)
             {
-                // Only cosmetic.
+                // The startup GC line still says what state it is in.
             }
+            GcPacing.Enabled = AdaptiveGcPacing.Value;
+            AdaptiveGcPacing.ValueChanged += (_, value) => GcPacing.Enabled = value;
             IncrementalGc.ValueChanged += (_, value) => GcReport.ApplyIncremental(value);
         }
     }

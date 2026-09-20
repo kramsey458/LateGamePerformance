@@ -291,7 +291,7 @@ namespace LateGamePerformance
             int collections = GC.CollectionCount(0);
             string line = Stats.TakeLine(ticks, _tickSeconds, collections - _collectionsAtLastReport);
             _collectionsAtLastReport = collections;
-            return line;
+            return line == null ? null : line + CollectorText();
         }
 
         // Called by SaveTiming; startStamp is a Stopwatch timestamp, like the frame stamps.
@@ -321,6 +321,25 @@ namespace LateGamePerformance
                 _heapAtFrameStart);
         }
         // ReSharper restore InconsistentNaming
+
+        // Any log someone sends should answer "was it incremental?" without the startup lines.
+        internal static string CollectorText()
+        {
+            try
+            {
+                if (!GcPacing.IsIncremental())
+                {
+                    return "; garbage collection is NOT incremental, so every collection freezes the game (setting: " +
+                           "Incremental garbage collection)";
+                }
+                return string.Format(CultureInfo.InvariantCulture, "; garbage collection is incremental, slice {0:0.0} ms{1}",
+                    GcPacing.GetSlice() / 1e6, GcPacing.TakeText());
+            }
+            catch (Exception)
+            {
+                return "";
+            }
+        }
 
         private static long ReadHeap()
         {

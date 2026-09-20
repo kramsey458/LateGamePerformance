@@ -15,6 +15,21 @@ namespace LateGamePerformance
         // Replaced by the test harness, where UnityEngine.Application is not callable.
         public static Func<string> BootConfigPath = () => Path.Combine(Application.dataPath, "boot.config");
 
+        private static bool _reappliedThisLaunch;
+
+        // The setting is ticked but the line is missing: boot.config was restored behind the player's back.
+        public static void ReapplyIncremental()
+        {
+            if (_reappliedThisLaunch)
+            {
+                return;
+            }
+            _reappliedThisLaunch = true;
+            Log.Info("GC: 'Incremental garbage collection' is ticked but boot.config no longer has the line (a game " +
+                     "update or Steam's file check restores the file). Putting it back.");
+            ApplyIncremental(true);
+        }
+
         // Called when the player ticks or unticks the setting. Never throws.
         public static void ApplyIncremental(bool incremental)
         {

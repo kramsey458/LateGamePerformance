@@ -36,6 +36,22 @@ namespace LateGamePerformance
 
         public bool IsOpen => _what != null;
 
+        // No stage has reported anything yet.
+        public bool IsEmpty
+        {
+            get
+            {
+                foreach (long stage in _stageStopwatchTicks)
+                {
+                    if (stage != 0)
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
         public void Open(string what)
         {
             Array.Clear(_stageStopwatchTicks, 0, _stageStopwatchTicks.Length);
@@ -225,8 +241,10 @@ namespace LateGamePerformance
                     return;
                 }
                 long elapsed = Stopwatch.GetTimestamp() - __state;
+                bool nothingHappened = Breakdown.IsEmpty && elapsed < Stopwatch.Frequency / 100;
                 string line = Breakdown.Close(elapsed);
-                if (line != null)
+                // A queued save that another mod deferred returns at once with no stage run; that is not a save.
+                if (line != null && !nothingHappened)
                 {
                     Timing.SaveFinished(__state, elapsed);
                     Log.Info(line);
