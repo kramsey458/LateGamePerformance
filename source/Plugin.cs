@@ -87,7 +87,29 @@ namespace LateGamePerformance
             {
                 DistrictCounts.Activate();
             }
-            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts));
+            bool waterMapCopy = config.WaterMapCopy && WaterMapCopy.CreateFeature(config).Apply(HarmonyId);
+            if (waterMapCopy)
+            {
+                WaterMapCopy.Activate();
+            }
+            bool soilScans = config.SoilScans && SoilScans.CreateFeature(config).Apply(HarmonyId);
+            if (soilScans)
+            {
+                SoilScans.Activate();
+            }
+            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts,
+                waterMapCopy, soilScans));
+            if (config.WaterRendering)
+            {
+                if (WaterRendering.CreateTilesFeature().Apply(HarmonyId))
+                {
+                    WaterRendering.ActivateTiles();
+                }
+                if (WaterRendering.CreateUploadsFeature().Apply(HarmonyId))
+                {
+                    WaterRendering.ActivateUploads();
+                }
+            }
             if (config.BackgroundSave && BackgroundSave.CreateFeature().Apply(HarmonyId))
             {
                 BackgroundSave.Activate();
@@ -120,13 +142,15 @@ namespace LateGamePerformance
         // one failed to start (a game update moved something). One line, the same words for everyone, so two
         // players' logs can be compared at a glance.
         internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch,
-            bool terrainMaps, bool plantWater, bool districtCounts)
+            bool terrainMaps, bool plantWater, bool districtCounts, bool waterMapCopy, bool soilScans)
         {
             string line = "Simulation features: HaulCache " + (haulCache ? "on" : "OFF") + ", RouteMaps " +
                           (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") +
                           ", TerrainMaps " + (terrainMaps ? "on" : "OFF") + ", PlantWater " + (plantWater ? "on" : "OFF") +
-                          ", DistrictCounts " + (districtCounts ? "on" : "OFF") + ".";
-            return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater && districtCounts
+                          ", DistrictCounts " + (districtCounts ? "on" : "OFF") + ", WaterMapCopy " +
+                          (waterMapCopy ? "on" : "OFF") + ", SoilScans " + (soilScans ? "on" : "OFF") + ".";
+            return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater && districtCounts && waterMapCopy &&
+                   soilScans
                 ? line + " These are the same for every player on this version."
                 : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
                   "own code for it. In multiplayer, check that the other players' logs show the same line.";
@@ -191,6 +215,14 @@ namespace LateGamePerformance
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {districtLine}");
                 }
+                foreach (string line in new[]
+                         { WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine() })
+                {
+                    if (line != null)
+                    {
+                        Log.Info($"Last {_config.StatsEveryTicks} ticks. {line}");
+                    }
+                }
                 string routeLine = RouteMaps.TakeStatsLine();
                 if (routeLine != null)
                 {
@@ -208,6 +240,8 @@ namespace LateGamePerformance
             // A new game or map editor scene: nothing cached from the previous one may survive.
             HaulCache.Reset();
             BackgroundSave.SceneCreated();
+            WaterMapCopy.SceneCreated();
+            WaterRendering.SceneCreated();
             _ticksSinceReport = 0;
         }
     }

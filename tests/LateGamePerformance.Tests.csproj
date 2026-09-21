@@ -12,5 +12,6 @@
     <ProjectReference Include="..\source\LateGamePerformance.csproj" />
     <Reference Include="$(HarmonyPath)" />
     <Reference Include="$(GameDir)\Timberborn_Data\Managed\Timberborn.*.dll" Private="false" />
+    <Reference Include="$(GameDir)\Timberborn_Data\Managed\UnityEngine.CoreModule.dll" Private="false" />
   </ItemGroup>
 </Project>

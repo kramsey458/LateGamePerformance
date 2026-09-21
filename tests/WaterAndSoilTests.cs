@@ -1,0 +1,552 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using LateGamePerformance;
+using Timberborn.MapIndexSystem;
+using Timberborn.MapStateSystem;
+using Timberborn.TerrainSystemRendering;
+using Timberborn.TickSystem;
+using Timberborn.WaterSystem;
+using UnityEngine;
+using Random = System.Random;
+
+// The water map copy and the soil scans against the installed game's real classes.
+//
+// Water map: two real ThreadSafeWaterMaps read one real WaterSimulator. One only ever runs the game's own Tick;
+// the other goes through the mod (copy on the "worker" after the simulated water tasks, swap in the tick). After
+// every tick both must hold the same bytes, through normal ticks, layout changes, resets and a new water layer.
+//
+// Soil: two identical real SoilMoistureServices (and SoilContaminationServices) over the same flags; one runs the
+// game's UpdateMoistureLevels, the other the mod's scan. The stored levels, the order of the dry/contaminated
+// object lookups and the soil texture changes queued must be the same.
+internal static class WaterAndSoilTests
+{
+    private const BindingFlags Any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+    public class Fake : DispatchProxy
+    {
+        public Func<MethodInfo, object[], object> Handler;
+
+        protected override object Invoke(MethodInfo targetMethod, object[] args)
+        {
+            return Handler(targetMethod, args);
+        }
+    }
+
+    private static T Proxy<T>(Func<MethodInfo, object[], object> handler)
+    {
+        T proxy = DispatchProxy.Create<T, Fake>();
+        ((Fake)(object)proxy).Handler = handler;
+        return proxy;
+    }
+
+    public static void Run(Action<bool, string> check)
+    {
+        RunScanModel(check);
+        RunWaterMap(check, verify: false);
+        RunWaterMap(check, verify: true);
+        RunWaterTiming(check);
+        RunSoil(check);
+    }
+
+    private static MapIndexService CreateMapIndex(int width, int height, int depth)
+    {
+        MapSize size = MapSize.NewMap(new Vector2Int(width, height));
+        typeof(MapSize).GetProperty("TerrainSize").SetValue(size, new Vector3Int(width, height, depth));
+        typeof(MapSize).GetProperty("TotalSize").SetValue(size, new Vector3Int(width, height, depth + 8));
+        MapIndexService mapIndex = new MapIndexService(size);
+        mapIndex.Load();
+        return mapIndex;
+    }
+
+    private static TickOnlyArrayService CreateArrayService()
+    {
+        ITickableSingletonService ticks = Proxy<ITickableSingletonService>((method, _) =>
+            method.Name == "get_ParalleTicklIsFinished" || method.Name == "get_IsStartingParallelTick" ? (object)true
+            : throw new NotSupportedException(method.Name));
+        return new TickOnlyArrayService(ticks);
+    }
+
+    private static object CreateArray(TickOnlyArrayService service, Type element, int size)
+    {
+        return typeof(TickOnlyArrayService).GetMethod("Create").MakeGenericMethod(element).Invoke(service, new object[] { size });
+    }
+
+    private static Array ArrayOf(object tickOnlyArray)
+    {
+        return (Array)tickOnlyArray.GetType().GetField("_array", Any).GetValue(tickOnlyArray);
+    }
+
+    // ---- Soil scan, pure ----
+
+    private sealed class RecordingCells : SoilScans.Cells
+    {
+        public int[] Counts;
+        public readonly List<int> Seen = new List<int>();
+
+        public override int ColumnCount(int index2D) => Counts[index2D];
+
+        public override void Changed(int index2D, int index3D) => Seen.Add(index3D);
+    }
+
+    private static void RunScanModel(Action<bool, string> check)
+    {
+        Random random = new Random(31);
+        bool same = true;
+        long skipped = 0, blocks = 0;
+        foreach ((int width, int height) in new[] { (1, 1), (7, 3), (8, 8), (9, 5), (64, 64), (123, 77) })
+        {
+            int stride = width + 2, verticalStride = stride * (height + 2);
+            foreach (int layers in new[] { 1, 2, 4 })
+            {
+                foreach (int density in new[] { 0, 1, 20, 500, 1000 })
+                {
+                    bool[] flags = new bool[verticalStride * layers];
+                    for (int i = 0; i < flags.Length; i++) flags[i] = random.Next(1000) < density;
+                    RecordingCells cells = new RecordingCells { Counts = new int[verticalStride] };
+                    for (int i = 0; i < verticalStride; i++) cells.Counts[i] = random.Next(layers + 1);
+                    SoilScans.Scan(flags, verticalStride, stride, width, height, cells, out int b, out int s);
+                    blocks += b;
+                    skipped += s;
+                    List<int> expected = new List<int>();
+                    for (int y = 1; y <= height; y++)
+                    for (int x = 1; x <= width; x++)
+                    {
+                        int current = y * stride + x;
+                        for (int i = 0; i < cells.Counts[current]; i++)
+                        {
+                            if (flags[current + i * verticalStride]) expected.Add(current + i * verticalStride);
+                        }
+                    }
+                    same &= expected.Count == cells.Seen.Count;
+                    for (int i = 0; same && i < expected.Count; i++) same &= expected[i] == cells.Seen[i];
+                }
+            }
+        }
+        check(same, "soil scan: the same cells in the same order as the game's loop, on 90 random maps");
+        check(skipped > 0 && skipped < blocks, $"soil scan: groups with nothing set are passed over ({skipped} of {blocks})");
+
+        // Timing on a 256 x 256 map with 3 soil layers and 1 cell in 500 changed, against the game's loop over the
+        // same (interface-like, virtual) column count.
+        {
+            const int width = 256, height = 256, layers = 3;
+            int stride = width + 2, verticalStride = stride * (height + 2);
+            bool[] flags = new bool[verticalStride * layers];
+            for (int i = 0; i < flags.Length; i++) flags[i] = random.Next(500) == 0;
+            RecordingCells cells = new RecordingCells { Counts = new int[verticalStride] };
+            for (int i = 0; i < verticalStride; i++) cells.Counts[i] = 1 + random.Next(layers);
+            long game = 0, mod = 0;
+            for (int round = 0; round < 40; round++)
+            {
+                cells.Seen.Clear();
+                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                for (int y = 1; y <= height; y++)
+                for (int x = 1; x <= width; x++)
+                {
+                    int current = y * stride + x;
+                    int count = cells.ColumnCount(current);
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (flags[current + i * verticalStride]) cells.Changed(current, current + i * verticalStride);
+                    }
+                }
+                long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
+                int seen = cells.Seen.Count;
+                cells.Seen.Clear();
+                SoilScans.Scan(flags, verticalStride, stride, width, height, cells, out _, out _);
+                long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
+                same &= seen == cells.Seen.Count;
+                if (round >= 10)
+                {
+                    game += t1 - t0;
+                    mod += t2 - t1;
+                }
+            }
+            double ms = 1000.0 / System.Diagnostics.Stopwatch.Frequency / 30;
+            Console.WriteLine($"     timing: soil scan of a 256 x 256 map, 3 layers, 1 cell in 500 changed: the game's loop {game * ms:0.000} ms, " +
+                              $"the mod {mod * ms:0.000} ms");
+            check(same, "soil scan: the full-size map gives the same cells");
+        }
+    }
+
+    // ---- Water map ----
+
+    private sealed class WaterWorld
+    {
+        public MapIndexService MapIndex;
+        public TickOnlyArrayService Arrays;
+        public object Simulator;
+        public object Game;
+        public object Mod;
+        public Type ColumnType;
+        public Type OutflowsType;
+        public int Layers;
+    }
+
+    private static WaterWorld CreateWaterWorld(int width = 48, int height = 40)
+    {
+        Assembly water = typeof(ReadOnlyWaterColumn).Assembly;
+        WaterWorld world = new WaterWorld { MapIndex = CreateMapIndex(width, height, 12), Arrays = CreateArrayService(), Layers = 3 };
+        world.ColumnType = water.GetType("Timberborn.WaterSystem.WaterColumn", true);
+        world.OutflowsType = water.GetType("Timberborn.WaterSystem.ColumnOutflows", true);
+        Type simType = water.GetType("Timberborn.WaterSystem.WaterSimulator", true);
+        object sim = RuntimeHelpers.GetUninitializedObject(simType);
+        int verticalStride = world.MapIndex.VerticalStride;
+        RouteMapsTests.SetField(sim, "_columnCounts", CreateArray(world.Arrays, typeof(byte), world.MapIndex.MaxIndex));
+        RouteMapsTests.SetField(sim, "_waterColumns", CreateArray(world.Arrays, world.ColumnType, verticalStride * world.Layers));
+        RouteMapsTests.SetField(sim, "_outflows", CreateArray(world.Arrays, world.OutflowsType, verticalStride * world.Layers));
+        Type modification = simType.GetNestedType("Modification", Any);
+        RouteMapsTests.SetField(sim, "_modifications", Activator.CreateInstance(typeof(Queue<>).MakeGenericType(modification)));
+        simType.GetField("<MaxColumnCount>k__BackingField", Any).SetValue(sim, world.Layers);
+        world.Simulator = sim;
+
+        Type calculatorType = water.GetType("Timberborn.WaterSystem.FlowVectorCalculator", true);
+        object calculator = Activator.CreateInstance(calculatorType, Any, null, new object[] { world.MapIndex }, null);
+        RouteMapsTests.Call(calculator, "Load");
+        Type mapType = water.GetType("Timberborn.WaterSystem.ThreadSafeWaterMap", true);
+        object[] maps = new object[2];
+        for (int i = 0; i < 2; i++)
+        {
+            maps[i] = Activator.CreateInstance(mapType, Any, null,
+                new object[] { world.MapIndex, null, new WaterColumnRetriever(), calculator, sim }, null);
+            RouteMapsTests.Call(maps[i], "Load");
+            RouteMapsTests.Call(maps[i], "PostLoad");
+        }
+        world.Game = maps[0];
+        world.Mod = maps[1];
+        return world;
+    }
+
+    // What the water tasks do to the simulation's arrays, roughly: depths and flows move everywhere, and the
+    // number of columns on some tiles changes too (which the game would flag; the copy must not care).
+    private static void SimulateWaterTasks(WaterWorld world, Random random, bool changeCounts)
+    {
+        Array columns = ArrayOf(RouteMapsTests.GetField(world.Simulator, "_waterColumns"));
+        Array outflows = ArrayOf(RouteMapsTests.GetField(world.Simulator, "_outflows"));
+        byte[] counts = (byte[])ArrayOf(RouteMapsTests.GetField(world.Simulator, "_columnCounts"));
+        int verticalStride = world.MapIndex.VerticalStride;
+        int layers = columns.Length / verticalStride;
+        FieldInfo floor = world.ColumnType.GetField("Floor"), ceiling = world.ColumnType.GetField("Ceiling"),
+            depth = world.ColumnType.GetField("WaterDepth"), old = world.ColumnType.GetField("OldWaterDepth"),
+            contamination = world.ColumnType.GetField("Contamination"), overflow = world.ColumnType.GetField("Overflow");
+        FieldInfo[] sides =
+        {
+            world.OutflowsType.GetField("BottomFlow"), world.OutflowsType.GetField("LeftFlow"),
+            world.OutflowsType.GetField("TopFlow"), world.OutflowsType.GetField("RightFlow")
+        };
+        FieldInfo list = world.OutflowsType.GetField("Outflows");
+        for (int i = 0; i < columns.Length; i++)
+        {
+            if (random.Next(3) != 0) continue;
+            object column = columns.GetValue(i);
+            floor.SetValue(column, (byte)random.Next(5));
+            ceiling.SetValue(column, (byte)random.Next(5, 12));
+            depth.SetValue(column, (float)random.NextDouble() * 3);
+            old.SetValue(column, (float)random.NextDouble() * 3);
+            contamination.SetValue(column, (float)random.NextDouble());
+            overflow.SetValue(column, (float)random.NextDouble());
+            columns.SetValue(column, i);
+
+            object flows = outflows.GetValue(i);
+            foreach (FieldInfo side in sides)
+            {
+                side.SetValue(flows, new TargetedFlow((float)random.NextDouble() - 0.5f,
+                    random.Next(4) == 0 ? -1 : random.Next(columns.Length)));
+            }
+            if (random.Next(6) == 0)
+            {
+                List<TargetedFlow> extra = new List<TargetedFlow>();
+                int tile = i % verticalStride;
+                for (int k = random.Next(1, 4); k > 0; k--)
+                {
+                    extra.Add(new TargetedFlow((float)random.NextDouble(), tile + random.Next(layers) * verticalStride));
+                }
+                list.SetValue(flows, extra);
+            }
+            else
+            {
+                list.SetValue(flows, null);
+            }
+            outflows.SetValue(flows, i);
+        }
+        if (changeCounts)
+        {
+            for (int i = 0; i < counts.Length; i++)
+            {
+                if (random.Next(4) == 0) counts[i] = (byte)random.Next(layers + 1);
+            }
+        }
+    }
+
+    private static void AddLayer(WaterWorld world)
+    {
+        // What IncreaseMaxColumnCount does, from the simulation's side.
+        world.Layers++;
+        int size = world.Layers * world.MapIndex.VerticalStride;
+        RouteMapsTests.Call(RouteMapsTests.GetField(world.Simulator, "_waterColumns"), "Resize", size);
+        RouteMapsTests.Call(RouteMapsTests.GetField(world.Simulator, "_outflows"), "Resize", size);
+        world.Simulator.GetType().GetField("<MaxColumnCount>k__BackingField", Any).SetValue(world.Simulator, world.Layers);
+    }
+
+    private static bool SameMaps(WaterWorld world)
+    {
+        bool same = true;
+        foreach (string field in new[] { "_threadSafeWaterColumns", "_waterFlowDirections", "_threadSafeColumnCounts" })
+        {
+            Array a = (Array)RouteMapsTests.GetField(world.Game, field), b = (Array)RouteMapsTests.GetField(world.Mod, field);
+            same &= a.Length == b.Length && Bytes(a).SequenceEqual(Bytes(b));
+        }
+        same &= (int)RouteMapsTests.Get(world.Game, "MaxColumnCount") == (int)RouteMapsTests.Get(world.Mod, "MaxColumnCount");
+        same &= (bool)RouteMapsTests.Get(world.Game, "AnyColumnChanged") == (bool)RouteMapsTests.Get(world.Mod, "AnyColumnChanged");
+        return same;
+    }
+
+    private static ReadOnlySpan<byte> Bytes(Array array)
+    {
+        switch (array)
+        {
+            case ReadOnlyWaterColumn[] columns: return MemoryMarshal.AsBytes(new ReadOnlySpan<ReadOnlyWaterColumn>(columns));
+            case Vector2[] flows: return MemoryMarshal.AsBytes(new ReadOnlySpan<Vector2>(flows));
+            case byte[] counts: return counts;
+            default: throw new NotSupportedException(array.GetType().Name);
+        }
+    }
+
+    private enum Round { Normal, CountsMove, LayoutChanged, Reset, SimulatorFlagsChange, NewLayer, NoCopy }
+
+    private static void RunWaterMap(Action<bool, string> check, bool verify)
+    {
+        WaterMapCopy.CreateFeature(new Config { WaterMapCopyVerify = verify }).Patches[0].Target();
+        WaterMapCopy.SceneCreated();
+        WaterMapCopy.Activate();
+        WaterWorld world = CreateWaterWorld();
+        Random random = new Random(verify ? 5 : 6);
+        Round[] rounds =
+        {
+            Round.NoCopy, Round.Normal, Round.Normal, Round.CountsMove, Round.Normal, Round.LayoutChanged, Round.Normal,
+            Round.Reset, Round.SimulatorFlagsChange, Round.Normal, Round.NewLayer, Round.Normal, Round.CountsMove,
+            Round.Normal, Round.NoCopy, Round.Normal
+        };
+        WaterMapCopy.TakeStatsLine();
+        bool same = true, differed = false;
+        int expectedSwaps = 0;
+        byte[] before = null;
+        foreach (Round round in rounds)
+        {
+            PropertyInfo anyChanged = world.Simulator.GetType().GetProperty("AnyColumnChanged");
+            anyChanged.SetValue(world.Simulator, false);
+            // The game's StartParallelTick: the mod sets up the copy, then the water tasks run, the last one
+            // followed by the mod's copy on its worker.
+            WaterMapCopy.StartParallelTickPrefix(world.Simulator);
+            SimulateWaterTasks(world, random, round == Round.CountsMove);
+            if (round != Round.NoCopy)
+            {
+                same &= WaterMapCopy.FillForTests();
+            }
+            // Between the tasks and the next tick: what only the main thread may do to the simulation.
+            switch (round)
+            {
+                case Round.LayoutChanged:
+                    // A change was queued and is applied now (ProcessModifications with something in the queue).
+                    object queue = RouteMapsTests.GetField(world.Simulator, "_modifications");
+                    Type simType = world.Simulator.GetType();
+                    object change = Activator.CreateInstance(simType.GetNestedType("Modification", Any), Any, null,
+                        new[] { true, new Vector3Int(3, 3, 1), Enum.ToObject(simType.GetNestedType("ChangeType", Any), 0) }, null);
+                    queue.GetType().GetMethod("Enqueue").Invoke(queue, new[] { change });
+                    WaterMapCopy.ProcessModificationsPrefix(world.Simulator);
+                    SimulateWaterTasks(world, random, false);
+                    break;
+                case Round.Reset:
+                    WaterMapCopy.SimulationResetPrefix();
+                    SimulateWaterTasks(world, random, false);
+                    break;
+                case Round.SimulatorFlagsChange:
+                    anyChanged.SetValue(world.Simulator, true);
+                    break;
+                case Round.NewLayer:
+                    AddLayer(world);
+                    SimulateWaterTasks(world, random, true);
+                    break;
+                case Round.Normal:
+                case Round.CountsMove:
+                    if (!verify) expectedSwaps++;
+                    break;
+            }
+            if (round == Round.LayoutChanged)
+            {
+                object queue = RouteMapsTests.GetField(world.Simulator, "_modifications");
+                queue.GetType().GetMethod("Clear").Invoke(queue, null);
+            }
+            before ??= Bytes((Array)RouteMapsTests.GetField(world.Game, "_threadSafeWaterColumns")).ToArray();
+            RouteMapsTests.Call(world.Game, "Tick");
+            if (WaterMapCopy.MapTickPrefix(world.Mod))
+            {
+                RouteMapsTests.Call(world.Mod, "Tick");
+            }
+            WaterMapCopy.MapTickPostfix(world.Mod);
+            same &= SameMaps(world);
+            differed |= !Bytes((Array)RouteMapsTests.GetField(world.Game, "_threadSafeWaterColumns")).SequenceEqual(before);
+        }
+        string stats = WaterMapCopy.TakeStatsLine();
+        Console.WriteLine("     " + stats);
+        string mode = verify ? "verify mode" : "water map copy";
+        check(differed, $"{mode}: the test water actually changes between ticks");
+        check(same, $"{mode}: after every tick the map holds the same bytes as the game's own copy " +
+                    "(normal ticks, moving column counts, layout changes, a reset, a new water layer, a missing copy)");
+        check(WaterMapCopy.IsActive, $"{mode}: the feature is still active");
+        if (verify)
+        {
+            check(stats.Contains("10 ticks compared with") && stats.Contains("verify mismatches 0"),
+                "verify mode: every usable copy was compared with the game's and none differed");
+        }
+        else
+        {
+            check(stats.StartsWith($"WaterMapCopy: {expectedSwaps} ticks swapped in") &&
+                  stats.Contains("in 4 ticks where the water layout changed and 2 where no copy was ready"),
+                $"water map copy: swapped in on the {expectedSwaps} ordinary ticks, the game copied on the others");
+        }
+        WaterMapCopy.SceneCreated();
+    }
+
+    // A full-size map (256 x 256, three water layers), filled once: what the game's copy costs on the main thread,
+    // what the mod's costs on the worker, and what is left on the main thread.
+    private static void RunWaterTiming(Action<bool, string> check)
+    {
+        WaterMapCopy.CreateFeature(new Config()).Patches[0].Target();
+        WaterMapCopy.SceneCreated();
+        WaterMapCopy.Activate();
+        WaterWorld world = CreateWaterWorld(256, 256);
+        Random random = new Random(8);
+        SimulateWaterTasks(world, random, true);
+        const int rounds = 60, warmUp = 10;
+        long game = 0, worker = 0, main = 0;
+        bool same = true;
+        WaterMapCopy.MapTickPrefix(world.Mod);
+        RouteMapsTests.Call(world.Mod, "Tick");
+        for (int round = 0; round < rounds; round++)
+        {
+            WaterMapCopy.StartParallelTickPrefix(world.Simulator);
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            same &= WaterMapCopy.FillForTests();
+            long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
+            RouteMapsTests.Call(world.Game, "Tick");
+            long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
+            same &= !WaterMapCopy.MapTickPrefix(world.Mod);
+            long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (round >= warmUp)
+            {
+                worker += t1 - t0;
+                game += t2 - t1;
+                main += t3 - t2;
+            }
+        }
+        same &= SameMaps(world);
+        double ms = 1000.0 / System.Diagnostics.Stopwatch.Frequency / (rounds - warmUp);
+        Console.WriteLine($"     timing: water map copy on a 256 x 256 map with 3 layers: the game {game * ms:0.000} ms on the main " +
+                          $"thread; the mod {worker * ms:0.000} ms on a worker and {main * ms:0.0000} ms on the main thread");
+        check(same, "water map copy: a full-size map is swapped in every tick and ends up identical to the game's");
+        WaterMapCopy.TakeStatsLine();
+        WaterMapCopy.SceneCreated();
+    }
+
+    // ---- Soil ----
+
+    // The game's per-cell method pulls in the soil texture map, whose static constructor calls into Unity's native
+    // code, so it cannot run here. The test records the calls the mod makes to it instead, and compares them with
+    // the calls the game's loop (UpdateMoistureLevels / UpdateContaminationLevels, as decompiled) makes over the
+    // same real services.
+    private static void RunSoil(Action<bool, string> check)
+    {
+        SoilScans.CreateFeature(new Config { SoilScansVerify = true }).Patches[0].Target();
+        SoilScans.Activate();
+        List<string> calls = new List<string>();
+        SoilScans.SetMoistureForTests((_, coordinates, index, level) => calls.Add("m " + coordinates + " " + index + " " + level));
+        SoilScans.SetContaminationForTests((_, coordinates, index, level) => calls.Add("c " + coordinates + " " + index + " " + level));
+
+        const int width = 70, height = 50, depth = 10, layers = 3;
+        MapIndexService mapIndex = CreateMapIndex(width, height, depth);
+        TickOnlyArrayService arrays = CreateArrayService();
+        int verticalStride = mapIndex.VerticalStride;
+        Random random = new Random(12);
+        int[] columnCounts = new int[verticalStride];
+        for (int i = 0; i < columnCounts.Length; i++) columnCounts[i] = random.Next(layers + 1);
+        Func<int, int> ceiling = index3D => 1 + (index3D * 7 + index3D / verticalStride * 3) % (depth - 1);
+        Func<MethodInfo, object[], object> terrain = (method, args) =>
+            method.Name == "GetColumnCount" ? columnCounts[(int)args[0]]
+            : method.Name == "GetColumnCeiling" ? ceiling((int)args[0])
+            : throw new NotSupportedException(method.Name);
+
+        Assembly moistureAssembly = Assembly.Load("Timberborn.SoilMoistureSystem");
+        Assembly contaminationAssembly = Assembly.Load("Timberborn.SoilContaminationSystem");
+        object mSim = RuntimeHelpers.GetUninitializedObject(
+            moistureAssembly.GetType("Timberborn.SoilMoistureSystem.SoilMoistureSimulator", true));
+        object mFlags = CreateArray(arrays, typeof(bool), verticalStride * layers);
+        object mLevels = CreateArray(arrays, typeof(float), verticalStride * layers);
+        RouteMapsTests.SetField(mSim, "_moistureLevelsChangedLastTick", mFlags);
+        RouteMapsTests.SetField(mSim, "_moistureLevels", mLevels);
+        object moisture = RuntimeHelpers.GetUninitializedObject(
+            moistureAssembly.GetType("Timberborn.SoilMoistureSystem.SoilMoistureService", true));
+        RouteMapsTests.SetField(moisture, "_soilMoistureSimulator", mSim);
+        RouteMapsTests.SetField(moisture, "_mapIndexService", mapIndex);
+        RouteMapsTests.SetField(moisture, "_threadSafeColumnTerrainMap", Proxy<Timberborn.TerrainSystem.IThreadSafeColumnTerrainMap>(terrain));
+
+        object cSim = RuntimeHelpers.GetUninitializedObject(
+            contaminationAssembly.GetType("Timberborn.SoilContaminationSystem.SoilContaminationSimulator", true));
+        object cFlags = CreateArray(arrays, typeof(bool), verticalStride * layers);
+        object cLevels = CreateArray(arrays, typeof(float), verticalStride * layers);
+        RouteMapsTests.SetField(cSim, "_contaminationsChangedLastTick", cFlags);
+        RouteMapsTests.SetField(cSim, "_contaminationLevels", cLevels);
+        object contamination = RuntimeHelpers.GetUninitializedObject(
+            contaminationAssembly.GetType("Timberborn.SoilContaminationSystem.SoilContaminationService", true));
+        RouteMapsTests.SetField(contamination, "_soilContaminationSimulator", cSim);
+        RouteMapsTests.SetField(contamination, "_mapIndexService", mapIndex);
+        RouteMapsTests.SetField(contamination, "_terrainService", Proxy<Timberborn.TerrainSystem.ITerrainService>(terrain));
+
+        bool same = true, handled = true;
+        int changes = 0;
+        SoilScans.TakeStatsLine();
+        foreach (int density in new[] { 0, 2, 30, 300, 1000, 2 })
+        {
+            foreach ((string kind, object flagArray, object levelArray) in new[] { ("m", mFlags, mLevels), ("c", cFlags, cLevels) })
+            {
+                bool[] flags = (bool[])ArrayOf(flagArray);
+                float[] levels = (float[])ArrayOf(levelArray);
+                for (int i = 0; i < flags.Length; i++)
+                {
+                    flags[i] = random.Next(1000) < density;
+                    levels[i] = (float)random.NextDouble() * 8;
+                }
+                // The game's loop.
+                List<string> expected = new List<string>();
+                Index2DEnumerator enumerator = mapIndex.Indices2D.GetEnumerator();
+                while (enumerator.MoveNext())
+                {
+                    int current = enumerator.Current;
+                    for (int i = 0; i < columnCounts[current]; i++)
+                    {
+                        int index = current + i * verticalStride;
+                        if (flags[index])
+                        {
+                            expected.Add(kind + " " + mapIndex.IndexToCoordinates(current, ceiling(index)) + " " + index + " " + levels[index]);
+                        }
+                    }
+                }
+                calls.Clear();
+                handled &= kind == "m" ? !SoilScans.MoisturePrefix(moisture) : !SoilScans.ContaminationPrefix(contamination);
+                same &= expected.Count == calls.Count;
+                for (int i = 0; same && i < expected.Count; i++) same &= expected[i] == calls[i];
+                changes += expected.Count;
+            }
+        }
+        string stats = SoilScans.TakeStatsLine();
+        Console.WriteLine("     " + stats);
+        check(changes > 1000, $"soil: the test soil actually changes ({changes} cells over 12 passes)");
+        check(handled, "soil: every pass over the real services went through the mod");
+        check(same, "soil: the game's per-cell method is called for the same cells, with the same coordinates and levels, " +
+                    "in the same order as the game's own loop");
+        check(stats.Contains("verify mismatches 0") && SoilScans.IsActive, "soil: verify mode agrees and the feature is still active");
+    }
+}

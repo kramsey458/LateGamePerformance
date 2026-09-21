@@ -153,6 +153,73 @@ adds the workers' tables into the game's tables. The two steps that go through i
 - `DistrictCountsVerify = true` lets the game count as well and compares. If anything throws, the feature
   switches itself off; the game's count starts by clearing every table, so nothing of the failed one is left.
 
+### Water map copy on a worker thread (always on, new in 0.4.14)
+
+Every tick the game copies the whole water map into the copy that readers on other threads use
+(`ThreadSafeWaterMap.Tick`): every water column of every tile, then a flow direction for every column, on the main
+thread. 0.70 ms per tick in the colony this is measured in; 0.83 ms for a 256 x 256 map with three water layers in
+the harness.
+
+What that copy will hold is known earlier than the game makes it. The water simulation runs on worker threads
+during the tick and ends with `UpdateWaterChangesTask`; after that nothing touches the simulation's arrays until
+the main thread's next tick. So right after that last task, on the same worker thread, the mod makes the same copy
+into a second set of arrays, calling the game's own `FlowVectorCalculator` for the flow directions. In the next
+tick, where the game would copy, the main thread only swaps the two sets (under 0.001 ms). In the harness the
+worker's copy takes 0.54 ms, alongside the game's own work.
+
+- Nobody reads the second set while it is written: the soil, water rendering and other parallel tasks read the set
+  that was current when their tick started, and the main thread reads through the map's own fields, which only
+  change in the swap.
+- The copy is not used, and the game copies on the main thread as without the mod, on any tick where the
+  simulation's arrays may have changed after the copy was made: a queued change to the water layout was applied
+  (`WaterSimulator.ProcessModifications` with anything queued: a building, dam or terrain change), the simulation
+  was reset, a water layer was added, the game says a column changed, or the copy was not ready. Those are the
+  only ways the arrays change outside the water tasks.
+- The tests drive two real `ThreadSafeWaterMap`s over one real `WaterSimulator`, one ticking the game's way and one
+  through the mod, for 16 ticks with water, flows and column counts moving, a layout change, a reset, a new layer
+  and a missing copy, and require the same bytes in both after every tick.
+- `WaterMapCopyVerify = true` lets the game copy every tick as well and compares byte for byte (nothing is swapped
+  in that mode). If anything throws, the feature switches itself off and the game copies.
+
+### Soil moisture and contamination scans (always on, new in 0.4.14)
+
+Every tick the game walks every tile of the map, every soil layer of it, to find the few cells whose moisture or
+contamination changed (`SoilMoistureService.UpdateMoistureLevels`,
+`SoilContaminationService.UpdateContaminationLevels`); for each one it finds it updates the soil's look and tells
+plants that dry out, recover or get contaminated. The simulation marks what changed in a flag array.
+
+The mod walks the same tiles in the same order, but first reads eight tiles' flags at once, in every layer, and
+passes over the eight when none is set. For the others it runs the game's loop, calling the game's own
+`SetMoistureLevel` / `SetContaminationLevel` for each changed cell. A group passed over is one where the game's
+loop would only have read flags that are not set, so the same cells are updated in the same order with the same
+values.
+
+- In the harness, a 256 x 256 map with three layers and one cell in 500 changed: the game's loop 0.59 ms, the mod
+  0.10 ms, and there are two of these scans per tick.
+- The tests compare the order of cells with the game's loop on 90 random maps, and drive the real services: the
+  game's per-cell method is called for the same cells, coordinates and levels, in the same order. (The game's
+  per-cell method itself cannot run in the harness because the soil texture map it updates calls into Unity.)
+- `SoilScansVerify = true` walks every cell the game's way as well and compares the list of cells updated.
+
+### Water rendering (on by default, new in 0.4.14)
+
+Rendering only; the simulation never reads any of it, so it cannot affect multiplayer. `WaterRendering = false`
+turns it off.
+
+- **Tiles.** The water surface is drawn in 16 x 16 tiles per water layer. Every tick the game switches every tile it
+  ever made off and the ones with water on again, one native Unity call each. The mod remembers which tiles are on
+  and only switches the ones whose state changes. The tiles that are on afterwards are the same.
+- **Uploads.** Each water data texture exists twice (before and after the tick); every tick the game swaps them and
+  uploads both, layer by layer. For flow directions and flow limits the "before" upload sends exactly what the
+  graphics card already has: what the game uploaded as "after" one tick earlier, into the same texture, from the
+  same array, which nothing wrote since. The mod checks that per layer (same texture, same array, exactly one data
+  swap in between) and otherwise lets the game upload both. Depths, contamination, columns and link barriers are
+  left alone because the game edits their "before" data between the two uploads.
+- Not done: skipping layers that hold no water. That needs comparing whole layers, which costs about what the upload
+  does.
+- Unlike the rest, this part cannot be tested outside the game (it needs Unity's renderer). If water looks wrong
+  (tiles missing or flickering, flow patterns frozen), set `WaterRendering = false` and report it.
+
 ### Background save (on by default, new in 0.4.13)
 
 A save freezes the game for 0.8 s on a fast computer and up to 2.4 s on a slower one in the colony this is
@@ -465,6 +532,19 @@ One for the district counts (0.4.13):
 "ms each" is to be compared with the 1.07 ms the game's own count was measured at. "on the main thread" counts
 inventories whose capacity rule comes from a mod.
 
+Three for the features added in 0.4.14:
+
+```
+[LateGamePerformance] Last 1000 ticks. WaterMapCopy: 996 ticks swapped in the copy made on a worker thread
+(0.540 ms there per tick); the game copied on the main thread in 3 ticks where the water layout changed and 1 where
+no copy was ready
+[LateGamePerformance] Last 1000 ticks. SoilScans: 2000 moisture and contamination passes in 200.0 ms (0.100 ms
+each); 97.0% of 8-tile groups had nothing changed and were passed over; 5400 changed cells updated
+[LateGamePerformance] Last 1000 ticks. WaterRendering: 1000 updates switched water tiles 800 times where the game
+switches them 900000 times; 3000 of 6000 flow direction and flow limit uploads left out because the graphics card
+already had them
+```
+
 A third reports the tree and plant search:
 
 ```
@@ -506,6 +586,9 @@ features, disable the mod.
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result. For testing. |
 | `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare. For testing. |
+| `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy. For testing. |
+| `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
+| `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 

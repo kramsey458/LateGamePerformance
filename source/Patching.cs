@@ -237,6 +237,21 @@ namespace LateGamePerformance
             return Expression.Lambda<Func<object, TField>>(body, instance).Compile();
         }
 
+        public static Action<object, TField> FieldSetter<TField>(Type declaringType, string fieldName)
+        {
+            FieldInfo field = AccessTools.Field(declaringType, fieldName);
+            if (field == null)
+            {
+                throw new MissingFieldException(declaringType.Name, fieldName);
+            }
+            ParameterExpression instance = Expression.Parameter(typeof(object), "instance");
+            ParameterExpression value = Expression.Parameter(typeof(TField), "value");
+            Expression body = Expression.Assign(
+                Expression.Field(Expression.Convert(instance, declaringType), field),
+                Expression.Convert(value, field.FieldType));
+            return Expression.Lambda<Action<object, TField>>(body, instance, value).Compile();
+        }
+
         // Compiled call to an instance method on a type we cannot name at compile time. Arguments arrive as
         // objects (or exact value types) and are cast to the real parameter types.
         public static TDelegate InstanceCall<TDelegate>(MethodInfo method) where TDelegate : Delegate
