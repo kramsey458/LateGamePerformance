@@ -780,7 +780,7 @@ internal static class SaveAndCountsTests
     {
         DistrictCounts.CreateFeature(new Config { DistrictCountsVerify = true });
         DistrictCounts.BindAccessors();
-        DistrictCounts.PatchOwners = method => new[] { Plugin.HarmonyId + ".HaulCache" };
+        DistrictCounts.PatchesOn = method => new[] { (Plugin.HarmonyId + ".HaulCache", "LateGamePerformance.HaulCache.InputChangedPostfix") };
         DistrictCounts.Activate();
         ModDisallower.Thread = Environment.CurrentManagedThreadId;
         ModDisallower.Calls = ModDisallower.CallsOnOtherThreads = 0;
@@ -861,12 +861,31 @@ internal static class SaveAndCountsTests
 
         // Another mod patches something the workers would call: the game's own count runs, quietly.
         DistrictCounts.ResetForTests();
-        DistrictCounts.PatchOwners = method => method.Name == "GetCapacity" ? new[] { "some.other.mod" } : null;
+        DistrictCounts.PatchesOn = method => method.Name == "GetCapacity" ? new[] { ("some.other.mod", "Other.Patch.Prefix") } : null;
         DistrictCounts.Activate();
         check(DistrictCounts.UpdatePrefix(mods) && !DistrictCounts.IsActive,
             "district counts: if another mod patches a method the workers call, the game's own count runs");
+
+        // MixedStorage's AllowedAmount prefix was read and is accepted; any other patch of the same mod is not.
+        List<string> accepted = new List<string>();
+        DistrictCounts.PatchesOn = method => method.Name == "AllowedAmount" && method.DeclaringType.Name == "SingleGoodAllower"
+            ? new[] { ("kyler.mixedstorage", "MixedStorage.LimitPatch.Prefix") } : null;
+        check(DistrictCounts.ForeignPatch(accepted) == null && accepted.Count == 1 && accepted[0].Contains("kyler.mixedstorage"),
+            "district counts: MixedStorage's allocation limit patch is accepted, and logged");
+        DistrictCounts.PatchesOn = method => method.Name == "AllowedAmount" && method.DeclaringType.Name == "SingleGoodAllower"
+            ? new[] { ("kyler.mixedstorage", "MixedStorage.SomethingNew.Prefix") } : null;
+        check(DistrictCounts.ForeignPatch(null) != null,
+            "district counts: a patch from the same mod that was not read still hands counting to the game");
+        DistrictCounts.PatchesOn = method => method.Name == "AllowedAmount" && method.DeclaringType.Name == "SingleGoodAllower"
+            ? new[] { ("someone.else", "MixedStorage.LimitPatch.Prefix") } : null;
+        check(DistrictCounts.ForeignPatch(null) != null,
+            "district counts: the same patch name under another mod's id is not accepted");
+        DistrictCounts.PatchesOn = method => method.Name == "GetCapacity" ? new[] { ("kyler.mixedstorage", "MixedStorage.LimitPatch.Prefix") } : null;
+        check(DistrictCounts.ForeignPatch(null) != null,
+            "district counts: the reviewed patch is only accepted on the method it was reviewed on");
+
         DistrictCounts.ResetForTests();
-        DistrictCounts.PatchOwners = method => null;
+        DistrictCounts.PatchesOn = method => null;
         DistrictCounts.Activate();
 
         // A broken inventory: the feature turns itself off and the game's count runs (and fails its own way).

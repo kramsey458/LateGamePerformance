@@ -299,7 +299,13 @@ namespace LateGamePerformance
                 if (!_checkedForeignPatches)
                 {
                     _checkedForeignPatches = true;
-                    string patched = ForeignPatch();
+                    List<string> accepted = new List<string>();
+                    string patched = ForeignPatch(accepted);
+                    foreach (string reviewed in accepted)
+                    {
+                        Log.Info($"DistrictCounts: another mod patches {reviewed}; that patch was read and is safe to " +
+                                 "run on worker threads, so counting stays on them.");
+                    }
                     if (patched != null)
                     {
                         _active = false;
@@ -343,24 +349,62 @@ namespace LateGamePerformance
             }
         }
 
-        // Who patches a method; swapped by the tests, where Harmony's patch registry cannot run.
-        internal static Func<MethodBase, IEnumerable<string>> PatchOwners = method => Harmony.GetPatchInfo(method)?.Owners;
+        // Another mod's patch that was read and may run on worker threads: target, Harmony id, patch method.
+        //
+        // MixedStorage (kyler.mixedstorage, read at 0.5.7): LimitPatch.Prefix answers AllowedAmount for its multi-good
+        // warehouses and piles from the allocation the player set and Inventory.Capacity. It only reads, except for
+        // its own per-storage cache of limits, which it rebuilds from those same two values; each storage belongs to
+        // one inventory, and each inventory is counted by exactly one worker, so no two threads touch one cache. The
+        // allocation only changes on the main thread (the panel, loading), never during a count.
+        internal static readonly (string Target, string Owner, string Patch)[] ReviewedPatches =
+        {
+            ("SingleGoodAllower.AllowedAmount", "kyler.mixedstorage", "MixedStorage.LimitPatch.Prefix")
+        };
 
-        private static string ForeignPatch()
+        // Every patch on a method, as (Harmony id, "Namespace.Type.Method" of the patch); swapped by the tests,
+        // where Harmony's patch registry cannot run.
+        internal static Func<MethodBase, IEnumerable<(string Owner, string Patch)>> PatchesOn = method =>
+        {
+            Patches info = Harmony.GetPatchInfo(method);
+            if (info == null)
+            {
+                return null;
+            }
+            List<(string, string)> all = new List<(string, string)>();
+            foreach (IEnumerable<Patch> kind in new[] { info.Prefixes, info.Postfixes, info.Transpilers, info.Finalizers })
+            {
+                foreach (Patch patch in kind)
+                {
+                    all.Add((patch.owner, patch.PatchMethod.DeclaringType?.FullName + "." + patch.PatchMethod.Name));
+                }
+            }
+            return all;
+        };
+
+        // The first patch by another mod that has not been read, or null. Reviewed ones are listed in `accepted`.
+        internal static string ForeignPatch(List<string> accepted)
         {
             foreach (MethodBase method in _workerMethods)
             {
-                IEnumerable<string> owners = PatchOwners(method);
-                if (owners == null)
+                IEnumerable<(string Owner, string Patch)> patches = PatchesOn(method);
+                if (patches == null)
                 {
                     continue;
                 }
-                foreach (string owner in owners)
+                string target = $"{method.DeclaringType?.Name}.{method.Name}";
+                foreach ((string owner, string patch) in patches)
                 {
-                    if (!owner.StartsWith(Plugin.HarmonyId, StringComparison.Ordinal))
+                    if (owner.StartsWith(Plugin.HarmonyId, StringComparison.Ordinal))
                     {
-                        return $"{method.DeclaringType?.Name}.{method.Name} ({owner})";
+                        continue;
                     }
+                    if (Array.Exists(ReviewedPatches, reviewed =>
+                            reviewed.Target == target && reviewed.Owner == owner && reviewed.Patch == patch))
+                    {
+                        accepted?.Add($"{target} ({owner}, {patch})");
+                        continue;
+                    }
+                    return $"{target} ({owner}, {patch})";
                 }
             }
             return null;

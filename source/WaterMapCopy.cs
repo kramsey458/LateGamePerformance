@@ -34,6 +34,11 @@ namespace LateGamePerformance
     // the number of water layers grew, the game says a column changed, or the copy was not finished or not made.
     // Those are the only ways the arrays change outside the water tasks.
     //
+    // The hook is on ThreadSafeWaterMap.Update, the method that copies, not on Tick, which calls it: Harmony still
+    // runs other mods' postfixes on a method whose prefix skipped it, so a mod that looks at the map after Update
+    // (BeaverBuddies' desync trace hashes it there) sees the swapped map, the same bytes the game's copy would be.
+    // Up to 0.4.14 the hook was on Tick, and such postfixes did not run on swapped ticks.
+    //
     // WaterMapCopyVerify lets the game copy every tick as well and compares, byte for byte, with what the worker
     // made. Nothing is swapped in that mode.
     internal static class WaterMapCopy
@@ -114,15 +119,15 @@ namespace LateGamePerformance
             Feature feature = new Feature { Name = "WaterMapCopy" };
             feature.Patches.Add(new PatchSpec
             {
-                Name = "ThreadSafeWaterMap.Tick",
+                Name = "ThreadSafeWaterMap.Update",
                 Required = true,
                 Target = () =>
                 {
                     BindAccessors();
-                    return Reflect.Method(mapType, "Tick");
+                    return Reflect.Method(mapType, "Update");
                 },
-                Prefix = Reflect.Own(self, nameof(MapTickPrefix)),
-                Postfix = Reflect.Own(self, nameof(MapTickPostfix))
+                Prefix = Reflect.Own(self, nameof(MapUpdatePrefix)),
+                Postfix = Reflect.Own(self, nameof(MapUpdatePostfix))
             });
             feature.Patches.Add(new PatchSpec
             {
@@ -338,7 +343,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
-        internal static bool MapTickPrefix(object __instance)
+        internal static bool MapUpdatePrefix(object __instance)
         {
             if (!_active)
             {
@@ -394,7 +399,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
-        internal static void MapTickPostfix(object __instance)
+        internal static void MapUpdatePostfix(object __instance)
         {
             Job job = _verifyJob;
             _verifyJob = null;

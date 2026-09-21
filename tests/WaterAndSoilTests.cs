@@ -382,11 +382,11 @@ internal static class WaterAndSoilTests
             }
             before ??= Bytes((Array)RouteMapsTests.GetField(world.Game, "_threadSafeWaterColumns")).ToArray();
             RouteMapsTests.Call(world.Game, "Tick");
-            if (WaterMapCopy.MapTickPrefix(world.Mod))
+            if (WaterMapCopy.MapUpdatePrefix(world.Mod))
             {
                 RouteMapsTests.Call(world.Mod, "Tick");
             }
-            WaterMapCopy.MapTickPostfix(world.Mod);
+            WaterMapCopy.MapUpdatePostfix(world.Mod);
             same &= SameMaps(world);
             differed |= !Bytes((Array)RouteMapsTests.GetField(world.Game, "_threadSafeWaterColumns")).SequenceEqual(before);
         }
@@ -424,7 +424,7 @@ internal static class WaterAndSoilTests
         const int rounds = 60, warmUp = 10;
         long game = 0, worker = 0, main = 0;
         bool same = true;
-        WaterMapCopy.MapTickPrefix(world.Mod);
+        WaterMapCopy.MapUpdatePrefix(world.Mod);
         RouteMapsTests.Call(world.Mod, "Tick");
         for (int round = 0; round < rounds; round++)
         {
@@ -434,7 +434,7 @@ internal static class WaterAndSoilTests
             long t1 = System.Diagnostics.Stopwatch.GetTimestamp();
             RouteMapsTests.Call(world.Game, "Tick");
             long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
-            same &= !WaterMapCopy.MapTickPrefix(world.Mod);
+            same &= !WaterMapCopy.MapUpdatePrefix(world.Mod);
             long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
             if (round >= warmUp)
             {

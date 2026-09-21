@@ -145,6 +145,12 @@ adds the workers' tables into the game's tables. The two steps that go through i
   other inventory is counted on the main thread by the same code.
 - If another mod has patched one of the methods the workers would call, the feature stands down with one log
   line and the game's own count runs. The numbers are the same either way.
+- Exception (0.4.15): patches that were read and are safe on worker threads are accepted, by mod id, patch method
+  and target together. So far one: MixedStorage's `LimitPatch.Prefix` on `SingleGoodAllower.AllowedAmount` (read
+  at MixedStorage 0.5.7). It answers from the allocation the player set and the storage's capacity, and the only
+  thing it writes is its own per-storage cache of limits, rebuilt from those same values; each storage is counted
+  by exactly one worker. The log says `DistrictCounts: another mod patches ... that patch was read and is safe`.
+  Up to 0.4.14 MixedStorage's patch made the feature stand down.
 - Districts with fewer than 96 storage inventories are left to the game's loop.
 - The tests fill one counter with the game's `UpdateCounters` and one with the mod over 700 real `Inventory`
   objects with the game's own capacity rules (and one stand-in mod rule, which must only ever be asked on the
@@ -166,6 +172,11 @@ the main thread's next tick. So right after that last task, on the same worker t
 into a second set of arrays, calling the game's own `FlowVectorCalculator` for the flow directions. In the next
 tick, where the game would copy, the main thread only swaps the two sets (under 0.001 ms). In the harness the
 worker's copy takes 0.54 ms, alongside the game's own work.
+
+The hook is on `ThreadSafeWaterMap.Update`, the method that copies (from 0.4.15; 0.4.14 hooked `Tick`, which calls
+it). Harmony still runs other mods' postfixes on a method whose prefix skipped it, so a mod that looks at the map
+after `Update` sees the swapped map, the same bytes the game's copy would be. BeaverBuddies' desync trace (with its
+Debug setting on) hashes the map there; under 0.4.14 it missed every swapped tick.
 
 - Nobody reads the second set while it is written: the soil, water rendering and other parallel tasks read the set
   that was current when their tick started, and the main thread reads through the map's own fields, which only

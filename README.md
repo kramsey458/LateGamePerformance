@@ -20,7 +20,7 @@ In a big late-game colony the game does the same work again and again: finding j
 ## What to expect
 
 - Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes. 0.4.14 has been played since and reported as working well.
-- 0.4.10 to 0.4.14 (all in this release): one checkbox on the settings page; a faster tree search when lumberjack flags are full; plant water checks, terrain route maps and district resource counts on worker threads; autosaves and menu saves finish on a worker thread, so the freeze is roughly halved; the water map copy on a worker thread, faster soil scans and less water rendering work (0.4.14). See [TECHNICAL.md](TECHNICAL.md).
+- Preview 0.4.15 (pre-release): the district resource counts stay on worker threads with MixedStorage installed, and BeaverBuddies' water desync trace sees every tick again; not yet played. 0.4.10 to 0.4.14 (the latest release): one checkbox on the settings page; a faster tree search when lumberjack flags are full; plant water checks, terrain route maps and district resource counts on worker threads; autosaves and menu saves finish on a worker thread, so the freeze is roughly halved; the water map copy on a worker thread, faster soil scans and less water rendering work (0.4.14). See [TECHNICAL.md](TECHNICAL.md).
 - Incremental garbage collection, in one 35-minute multiplayer session on two computers: 39 freezes with a median of 675 ms (about 30 s in total) on the computer without it, one collection frame over 50 ms on the computer with it.
 - It is aimed at large colonies. A small colony has little repeated work to remove, so you are unlikely to notice much.
 - How much you gain depends on your colony and your computer. There is no controlled frame rate benchmark yet.
