@@ -171,16 +171,16 @@ whether part of a save is worth moving off the main thread.
 The game can time every tickable component, every once-per-tick system and every root behaviour, but only when
 launched with a `-metrics` option, and it only writes the result at the end of a benchmark run.
 
-Tick **Record per-component timings** in this mod's settings page (**Mods > Late Game Performance**, from the main
-menu or in-game) and **load a save**. The mod switches the game's timers on for that session and writes the report
+Set `RecordTimings = true` in `LateGamePerformance.cfg` and restart the game (up to 0.4.9 this was a box on the
+settings page; it is a profiling tool, so from 0.4.10 it lives in the file). The mod switches the game's timers on for that session and writes the report
 during normal play, multiplayer included, to `Documents\Timberborn\LateGamePerformance` every `MetricsEveryTicks`
 ticks (default 3000), then resets the timers so each file covers one interval. Each group lists its total seconds
 and every entry's share of it.
 
-- It applies from the **next save load**, not immediately: every building and beaver decides whether to time
-  itself at the moment it is created.
+- It needs a **restart of the game** after editing the file: every building and beaver decides whether to time
+  itself at the moment it is created, and the file is read once at startup.
 - The game's timers add two stopwatch calls around every component tick, so expect it to run a little slower
-  while this is on. Untick it after a profiling session.
+  while this is on. Set it back to `false` after a profiling session.
 - It does not affect the simulation, so multiplayer peers may have it set differently.
 - Launching the game with `-metrics` still works and has the same effect.
 
@@ -221,37 +221,21 @@ New in 0.4.7:
   `Player.log` says so). Ticking the box is the consent for that; for a player who never ticked it, nothing is
   written. Untick the box to stop it.
 - **It says so when it is off.** While collection is not incremental and the line is not in `boot.config`, a
-  message in the main menu explains it once per launch, with **Turn it on** and **Not now**. The setting **Warn
-  when garbage collection is not incremental** switches the message off.
+  message in the main menu explains it, with **Turn it on** and **Not now**. From 0.4.10 it asks once: **Not
+  now** is remembered (in the game's own settings store, so it survives updating the mod), and the checkbox on
+  the settings page remains for a player who changes their mind. 0.4.7 to 0.4.9 asked once per launch and had a
+  separate setting to switch the message off.
 - Every `Timing:` line ends with the state, so any log answers the question:
   `garbage collection is incremental, slice 3.0 ms` or `garbage collection is NOT incremental, so every
   collection freezes the game`.
 
-#### Adaptive garbage collection pacing (experimental, off by default, new in 0.4.7)
+#### Adaptive garbage collection pacing (0.4.7 to 0.4.9, removed in 0.4.10)
 
-With incremental collection on, Unity does up to a fixed 3 ms of clean-up work per frame while a collection
-cycle is running, whether the frame had 3 ms to spare or was already slow. The total is the same either way:
-about 600 ms of work for 1.7 GB in use, so about 200 frames per cycle. With **Adaptive garbage collection pacing**
-ticked, the mod sets the slice each frame from a smoothed frame time:
-
-| Recent frames | Slice |
-|---|---|
-| 14 ms or longer | 3 ms (Unity's default here) |
-| under 14 ms | 6 ms |
-| paused | 8 ms |
-
-So a cycle finishes sooner where there is room for it, which matters because a cycle that cannot keep up with
-allocation ends in one blocking collection. 0.4.7 also went down to 1 ms in slow frames. On a computer whose
-frames are always slow that pinned the slice at 1 ms, which makes every cycle three times as long on the machine
-that can least afford it, so from 0.4.8 it never goes below the default. Only the length of a slice changes; when a
-collection starts and what it collects stay Unity's decisions. It applies at once, unticking restores the slice
-it found, it does nothing when collection is not incremental, and if Unity refuses the value it switches
-itself off for the session. It does not affect the simulation.
-
-One multiplayer session each way (0.4.6 with the fixed slice, 0.4.7 paced, on two computers) showed no difference
-that could be told from noise, so it stays experimental and off by default. With it on, the `Timing:` line shows
-what it did, `slice 6.0 ms, paced by this mod between 3 and 8 ms (average 4.2 ms)`, next to the figures it is
-meant to improve: the frames containing a collection and their longest.
+An experimental setting that changed how much clean-up work a frame may carry (Unity's
+`incrementalTimeSliceNanoseconds`) from the frame time. One multiplayer session each way, on two computers, showed
+no difference that could be told from noise, and a player has no way to judge it, so it is gone, together with
+the per-frame hook it needed. Unity's fixed 3 ms slice from `boot.config` applies, and the `Timing:` line still
+reports it.
 
 ### Diagnostics (off by default)
 
@@ -314,14 +298,17 @@ features, disable the mod.
 | `YielderSearchVerify` | `false` | Run the game's own search as well and compare; logs mismatches and uses the game's result. Slower than no mod. For testing. |
 | `Timing` | `true` | The timing stats line. |
 | `SaveTiming` | `true` | One line per save with the time of each stage; also lets the timing line report saves separately. Measurement only. |
-| `MetricsEveryTicks` | `3000` | While per-component timings are on: write them every N ticks. `0` = never (disables the menu setting too). |
+| `RecordTimings` | `false` | A profiling tool: switch on the game's per-component tick timers and write their report. Slows the game a little. |
+| `MetricsEveryTicks` | `3000` | While per-component timings are on: write them every N ticks. `0` = never (disables `RecordTimings` too). |
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
-Four more settings are on the in-game settings page (**Mods > Late Game Performance**), not in this file:
-**Record per-component timings**, **Incremental garbage collection**, **Warn when garbage collection is not
-incremental** and **Adaptive garbage collection pacing (experimental)**, all described above.
+One setting is on the in-game settings page (**Mods > Late Game Performance**), not in this file:
+**Incremental garbage collection**, described above. It is there because it is the one decision that is the
+player's to make: it edits a file in the game's folder. Up to 0.4.9 the page had three more boxes; from 0.4.10
+per-component timings are `RecordTimings` in this file, the warning asks once and needs no setting, and adaptive
+pacing is removed.
 
 ## Suggested first test
 

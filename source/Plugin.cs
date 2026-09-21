@@ -81,8 +81,7 @@ namespace LateGamePerformance
             {
                 SaveTiming.CreateFeature().Apply(HarmonyId);
             }
-            // Always installed, and idle until the settings page switches it on.
-            GcPacing.CreateFeature().Apply(HarmonyId);
+            MetricsDump.Requested = config.RecordTimings;
             if (config.MetricsEveryTicks > 0)
             {
                 MetricsDump.CreateFeature(config).Apply(HarmonyId);

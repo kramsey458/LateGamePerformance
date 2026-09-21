@@ -12,7 +12,9 @@ namespace LateGamePerformance
     {
         private const string BootConfigKey = BootConfig.Key;
 
-        // Replaced by the test harness, where UnityEngine.Application is not callable.
+        // Replaced by the test harness, where UnityEngine is not callable.
+        public static Func<bool> IsIncremental = () => GarbageCollector.isIncremental;
+        public static Func<ulong> SliceNanoseconds = () => GarbageCollector.incrementalTimeSliceNanoseconds;
         public static Func<string> BootConfigPath = () => Path.Combine(Application.dataPath, "boot.config");
 
         private static bool _reappliedThisLaunch;
@@ -67,7 +69,7 @@ namespace LateGamePerformance
         {
             try
             {
-                bool incremental = GarbageCollector.isIncremental;
+                bool incremental = IsIncremental();
                 long heapMb = Profiler.GetMonoHeapSizeLong() / (1024 * 1024);
                 Log.Info($"GC: incremental={incremental}, mode={GarbageCollector.GCMode}, managed heap={heapMb} MB.");
                 if (incremental)

@@ -19,6 +19,7 @@ In a big late-game colony the game does the same work again and again: finding j
 ## What to expect
 
 - Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes. 0.4.9 runs the same code.
+- Preview 0.4.10 (pre-release, not yet played) leaves one checkbox on the settings page, **Incremental garbage collection**; see [TECHNICAL.md](TECHNICAL.md).
 - Incremental garbage collection, in one 35-minute multiplayer session on two computers: 39 freezes with a median of 675 ms (about 30 s in total) on the computer without it, one collection frame over 50 ms on the computer with it.
 - It is aimed at large colonies. A small colony has little repeated work to remove, so you are unlikely to notice much.
 - How much you gain depends on your colony and your computer. There is no controlled frame rate benchmark yet.

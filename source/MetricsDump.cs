@@ -10,21 +10,22 @@ namespace LateGamePerformance
     // work, carrying, wandering...). It only does so when launched with -metrics, and only writes the result at
     // the end of a benchmark run. This:
     //
-    //  - switches those timers on when "Record per-component timings" is ticked in the mod's settings page, so no
-    //    launch option is needed (-metrics still works too);
+    //  - switches those timers on when RecordTimings = true in the settings file, so no launch option is needed
+    //    (-metrics still works too). Up to 0.4.9 this was a box on the settings page; it is a profiling tool, not
+    //    something a player needs to see;
     //  - writes the same report during normal play, multiplayer included, every MetricsEveryTicks ticks, then
     //    resets the timers so each file covers one interval.
     //
     // Every building and beaver decides whether to time itself when it is created, from the metrics service's
     // flag. So the flag is set as the service is created and again after it loads (its Load resets it from the
-    // command line), before anything is created, and a change to the setting applies from the next save load.
+    // command line), before anything is created.
     //
     // The timers (two stopwatch calls around every component tick) are the game's and slow it a little, so this
     // is for a profiling session, not for all the time.
     internal static class MetricsDump
     {
-        // Written by the settings page. A plain field so this class never touches Mod Settings types.
-        public static bool RequestedFromMenu;
+        // RecordTimings in the settings file. Up to 0.4.9 this was a box on the settings page.
+        public static bool Requested;
 
         private static IMetricsService _metricsService;
         private static MethodInfo _setMetricsEnabled;
@@ -100,7 +101,7 @@ namespace LateGamePerformance
         // ReSharper disable InconsistentNaming
         internal static void MetricsServiceCreatedPostfix(object __instance)
         {
-            if (RequestedFromMenu && _everyTicks > 0)
+            if (Requested && _everyTicks > 0)
             {
                 TryForceOn(__instance);
             }
@@ -132,21 +133,16 @@ namespace LateGamePerformance
                 return;
             }
             bool fromLaunchOption = service.MetricsEnabled;
-            if (!fromLaunchOption && RequestedFromMenu)
+            if (!fromLaunchOption && Requested)
             {
                 TryForceOn(__instance);
             }
             if (service.MetricsEnabled)
             {
                 _metricsService = service;
-                Log.Info($"Metrics: on ({(fromLaunchOption ? "-metrics launch option" : "mod setting")}). Per-component " +
+                Log.Info($"Metrics: on ({(fromLaunchOption ? "-metrics launch option" : "RecordTimings in the settings file")}). Per-component " +
                          $"timings are written every {_everyTicks} ticks to {Folder}. The game's timers slow it a " +
                          "little; turn this off again when done.");
-            }
-            else
-            {
-                Log.Info("Metrics: off. To record what each part of a tick costs, tick 'Record per-component timings' " +
-                         "in this mod's settings (Mods > Late Game Performance), then load a save.");
             }
         }
         // ReSharper restore InconsistentNaming

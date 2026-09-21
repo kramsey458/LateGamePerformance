@@ -35,6 +35,7 @@ namespace LateGamePerformance
         public bool YielderSearchVerify = false;
         public bool Timing = true;
         public bool SaveTiming = true;
+        public bool RecordTimings = false;
         public int MetricsEveryTicks = 3000;
         public bool GcReport = true;
         public bool Diagnostics = false;
@@ -99,6 +100,7 @@ namespace LateGamePerformance
             YielderSearchVerify = Bool(values, nameof(YielderSearchVerify), YielderSearchVerify);
             Timing = Bool(values, nameof(Timing), Timing);
             SaveTiming = Bool(values, nameof(SaveTiming), SaveTiming);
+            RecordTimings = Bool(values, nameof(RecordTimings), RecordTimings);
             MetricsEveryTicks = Math.Max(0, Int(values, nameof(MetricsEveryTicks), MetricsEveryTicks));
             GcReport = Bool(values, nameof(GcReport), GcReport);
             Diagnostics = Bool(values, nameof(Diagnostics), Diagnostics);
@@ -110,7 +112,7 @@ namespace LateGamePerformance
             return $"(fixed: HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
                    $"RouteMaps={RouteMaps}, YielderSearch={YielderSearch}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
-                   $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, Timing={Timing}, SaveTiming={SaveTiming}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, Timing={Timing}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }

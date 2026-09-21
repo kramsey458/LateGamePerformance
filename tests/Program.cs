@@ -60,13 +60,13 @@ internal static class Program
         TestTimingMemory();
         TestBootConfig();
         TestYielderSearch();
-        TestGcPacing();
+        TestGarbageCollection();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
         {
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
-            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), GcPacing.CreateFeature(), YielderSearch.CreateFeature(new Config()), MetricsDump.CreateFeature(new Config()),
+            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), YielderSearch.CreateFeature(new Config()), MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -82,12 +82,12 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 44, $"44 patches declared (found {patchCount})");
+        Check(patchCount == 43, $"43 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
-        Check(warnings.Count == 2 && warnings[0].Contains("GC pacing failed") && warnings[1].Contains("RouteMaps failed"),
-            $"only the two expected warnings from the forced failures were logged ({warnings.Count})");
+        Check(warnings.Count == 1 && warnings[0].Contains("RouteMaps failed"),
+            $"only the expected warning from the forced failure was logged ({warnings.Count})");
 
         Console.WriteLine(_failures == 0 ? "ALL PASSED" : _failures + " FAILED");
         return _failures == 0 ? 0 : 1;
@@ -113,8 +113,9 @@ internal static class Program
         Check(Plugin.SimulationFeaturesLine(true, false, true).Contains("RouteMaps OFF") &&
               Plugin.SimulationFeaturesLine(true, false, true).Contains("other players' logs"),
             "startup: a feature that could not start is called out");
-        config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true" }));
-        Check(config.RouteMapsWorkers == 5 && config.YielderSearchVerify, "config: key case-insensitive, trailing comment, testing switches still work");
+        Check(!config.RecordTimings, "config: per-component timings are off unless asked for");
+        config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true", "RecordTimings = true" }));
+        Check(config.RouteMapsWorkers == 5 && config.YielderSearchVerify && config.RecordTimings, "config: key case-insensitive, trailing comment, testing switches still work");
         // No public field or settable property may carry one of the fixed names, or a later change could quietly
         // make it a setting again.
         foreach (string key in Config.FixedKeys)
@@ -145,15 +146,17 @@ internal static class Program
                 settings++;
             }
         }
-        Check(settings == 4, "settings page: all four setting properties are discoverable by Mod Settings");
+        Check(settings == 1 && page.GetProperty("IncrementalGc") != null,
+            "settings page: exactly one setting, incremental garbage collection");
         // The main menu notice is built by the game's container: it needs one public constructor whose
         // parameters are things the main menu binds, and the game calls it through this interface.
         Type notice = typeof(GcNotice);
         ConstructorInfo[] constructors = notice.GetConstructors();
-        Check(constructors.Length == 1 && constructors[0].GetParameters().Length == 2 &&
+        Check(constructors.Length == 1 && constructors[0].GetParameters().Length == 3 &&
               constructors[0].GetParameters()[0].ParameterType.FullName == "Timberborn.CoreUI.DialogBoxShower" &&
-              constructors[0].GetParameters()[1].ParameterType == page,
-            "gc notice: constructed from the dialog shower and the settings page");
+              constructors[0].GetParameters()[1].ParameterType == page &&
+              constructors[0].GetParameters()[2].ParameterType.FullName == "Timberborn.SettingsSystem.ISettings",
+            "gc notice: constructed from the dialog shower, the settings page and the game's settings store");
         Check(notice.GetInterface("Timberborn.SingletonSystem.IPostLoadableSingleton") != null, "gc notice: runs after the main menu has loaded");
         string manifest = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "packaging", "manifest.json"));
         Check(manifest.Contains("\"Id\": \"" + Plugin.ModId + "\""), "settings page: mod id matches manifest.json");
@@ -165,17 +168,17 @@ internal static class Program
         PropertyInfo enabled = serviceType.GetProperty("MetricsEnabled");
         MetricsDump.CreateFeature(new Config()).Patches.ForEach(patch => patch.Target());
         MetricsDump.UserDataFolderPath = () => Path.GetTempPath();
-        MetricsDump.RequestedFromMenu = false;
+        MetricsDump.Requested = false;
         MetricsDump.MetricsServiceCreatedPostfix(service);
         MetricsDump.MetricsServiceLoadedPostfix(service);
-        Check(!(bool)enabled.GetValue(service), "metrics: stay off when the menu setting is off");
-        MetricsDump.RequestedFromMenu = true;
+        Check(!(bool)enabled.GetValue(service), "metrics: stay off when RecordTimings is off");
+        MetricsDump.Requested = true;
         MetricsDump.MetricsServiceCreatedPostfix(service);
         Check((bool)enabled.GetValue(service), "metrics: switched on as the service is created");
         enabled.SetValue(service, false);   // what the game's own Load does without -metrics
         MetricsDump.MetricsServiceLoadedPostfix(service);
         Check((bool)enabled.GetValue(service), "metrics: switched on again after the game's Load reset it");
-        MetricsDump.RequestedFromMenu = false;
+        MetricsDump.Requested = false;
     }
 
     private static void TestTimingStats()
@@ -420,65 +423,27 @@ internal static class Program
         Check(blocked.Lookups == 2000, "yielder search: with nothing reachable nothing can be left out");
     }
 
-    private static void TestGcPacing()
+    private static void TestGarbageCollection()
     {
-        GcSlicePolicy policy = new GcSlicePolicy();
-        Check(policy.Next(0, false) == GcSlicePolicy.DefaultSlice, "gc pacing: no frame time yet means the default slice");
-        for (int i = 0; i < 40; i++) policy.Next(8, false);
-        Check(policy.Next(8, false) == GcSlicePolicy.RoomyFrameSlice, "gc pacing: fast frames get a bigger slice");
-        Check(policy.Next(600, false) == GcSlicePolicy.DefaultSlice, "gc pacing: a very long frame goes back to the default at once");
-        Check(policy.Next(5000, false) == GcSlicePolicy.DefaultSlice && policy.SmoothedFrameMs < 200, "gc pacing: a loading gap is ignored");
-        policy = new GcSlicePolicy();
-        for (int i = 0; i < 40; i++) policy.Next(8, false);
-        policy.Next(30, false);
-        Check(policy.Next(8, false) == GcSlicePolicy.RoomyFrameSlice, "gc pacing: one slightly long frame does not swing it");
-        for (int i = 0; i < 40; i++) policy.Next(18, false);
-        Check(policy.Next(18, false) == GcSlicePolicy.DefaultSlice, "gc pacing: ordinary frames keep the default");
-        foreach (double slow in new[] { 30.0, 55.0, 150.0, 900.0 })
-        {
-            for (int i = 0; i < 40; i++) policy.Next(slow, false);
-            Check(policy.Next(slow, false) == GcSlicePolicy.DefaultSlice, $"gc pacing: never below the default, however slow the frames ({slow} ms)");
-        }
-        Check(policy.Next(55, true) == GcSlicePolicy.PausedSlice, "gc pacing: paused gets the largest");
-
-        // The feature, against a fake collector and a clock of 1000 stamps per second.
-        bool incremental = true; ulong slice = 3000000; int writes = 0; float speed = 7f;
-        Func<float> previousSpeed = Timing.CurrentSpeed;
-        GcPacing.IsIncremental = () => incremental;
-        GcPacing.GetSlice = () => slice;
-        GcPacing.SetSlice = value => { slice = value; writes++; };
-        Timing.CurrentSpeed = () => speed;
-        GcPacing.ResetForTests();
-        GcPacing.Enabled = false;
-        long stamp = 1000;
-        for (int i = 0; i < 10; i++, stamp += 8) GcPacing.Frame(stamp, 1000);
-        Check(writes == 0 && GcPacing.TakeText() == "", "gc pacing: does nothing until it is switched on");
-        GcPacing.Enabled = true;
-        incremental = false;
-        for (int i = 0; i < 10; i++, stamp += 8) GcPacing.Frame(stamp, 1000);
-        Check(writes == 0, "gc pacing: does nothing when collection is not incremental");
-        incremental = true;
-        for (int i = 0; i < 50; i++, stamp += 8) GcPacing.Frame(stamp, 1000);
-        Check(slice == GcSlicePolicy.RoomyFrameSlice && writes == 1, $"gc pacing: the slice is only written when it changes ({writes})");
-        speed = 0f;
-        GcPacing.Frame(stamp += 8, 1000);
-        Check(slice == GcSlicePolicy.PausedSlice, "gc pacing: paused frames use the paused slice");
-        string text = Timing.CollectorText();
-        Console.WriteLine("     " + text);
-        Check(text.StartsWith("; garbage collection is incremental, slice 8.0 ms, paced by this mod between 6 and 8 ms (average "),
-            "timing: collector state and what pacing did");
-        Check(Timing.CollectorText() == "; garbage collection is incremental, slice 8.0 ms", "timing: pacing figures restart each interval");
-        GcPacing.Enabled = false;
-        GcPacing.Frame(stamp += 8, 1000);
-        Check(slice == 3000000, "gc pacing: switching it off restores the slice it found");
+        bool incremental = true;
+        Func<bool> previousIncremental = GcReport.IsIncremental;
+        Func<ulong> previousSlice = GcReport.SliceNanoseconds;
+        GcReport.IsIncremental = () => incremental;
+        GcReport.SliceNanoseconds = () => 3000000;
+        Check(Timing.CollectorText() == "; garbage collection is incremental, slice 3.0 ms", "timing: says that collection is incremental, and the slice");
         incremental = false;
         Check(Timing.CollectorText().Contains("NOT incremental"), "timing: says so when collection is not incremental");
-        GcPacing.Enabled = true;
-        incremental = true;
-        GcPacing.SetSlice = _ => throw new InvalidOperationException("no");
-        for (int i = 0; i < 5; i++) GcPacing.Frame(stamp += 8, 1000);
-        GcPacing.Enabled = false;   // reaching this line means the refusal was not thrown; it is logged once, checked at the end
-        Timing.CurrentSpeed = previousSpeed;
+        GcReport.IsIncremental = () => throw new InvalidOperationException("no Unity here");
+        Check(Timing.CollectorText() == "", "timing: a collector that cannot be asked leaves the line as it was");
+        GcReport.IsIncremental = previousIncremental;
+        GcReport.SliceNanoseconds = previousSlice;
+
+        // The main menu question: asked once, never when it is on or about to be, never again after "Not now".
+        Check(GcNotice.ShouldAsk(false, false, false, false), "gc notice: asks when collection is not incremental and nothing is set up");
+        Check(!GcNotice.ShouldAsk(false, true, false, false), "gc notice: 'Not now' is remembered, so it is not asked again");
+        Check(!GcNotice.ShouldAsk(false, false, true, false), "gc notice: nothing to ask when collection is incremental");
+        Check(!GcNotice.ShouldAsk(false, false, false, true), "gc notice: nothing to ask when only a restart is missing");
+        Check(!GcNotice.ShouldAsk(true, false, false, false), "gc notice: at most once per launch");
 
         // Re-adding the line after a game update: only through the path the ticked setting takes, once a launch.
         string directory = Path.Combine(Path.GetTempPath(), "lgp-reapply-" + Guid.NewGuid().ToString("N"));

@@ -389,13 +389,13 @@ namespace LateGamePerformance
         {
             try
             {
-                if (!GcPacing.IsIncremental())
+                if (!GcReport.IsIncremental())
                 {
                     return "; garbage collection is NOT incremental, so every collection freezes the game (setting: " +
                            "Incremental garbage collection)";
                 }
-                return string.Format(CultureInfo.InvariantCulture, "; garbage collection is incremental, slice {0:0.0} ms{1}",
-                    GcPacing.GetSlice() / 1e6, GcPacing.TakeText());
+                return string.Format(CultureInfo.InvariantCulture, "; garbage collection is incremental, slice {0:0.0} ms",
+                    GcReport.SliceNanoseconds() / 1e6);
             }
             catch (Exception)
             {
