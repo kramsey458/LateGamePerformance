@@ -72,7 +72,17 @@ namespace LateGamePerformance
             {
                 YielderSearch.Activate();
             }
-            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch));
+            bool terrainMaps = config.TerrainMaps && TerrainMaps.CreateFeature(config).Apply(HarmonyId);
+            if (terrainMaps)
+            {
+                TerrainMaps.Activate();
+            }
+            bool plantWater = config.PlantWater && PlantWater.CreateFeature(config).Apply(HarmonyId);
+            if (plantWater)
+            {
+                PlantWater.Activate();
+            }
+            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater));
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
                 Timing.Activate();
@@ -100,11 +110,13 @@ namespace LateGamePerformance
         // The parts that replace simulation code are not settings, so they can only differ between two players if
         // one failed to start (a game update moved something). One line, the same words for everyone, so two
         // players' logs can be compared at a glance.
-        internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch)
+        internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch,
+            bool terrainMaps, bool plantWater)
         {
             string line = "Simulation features: HaulCache " + (haulCache ? "on" : "OFF") + ", RouteMaps " +
-                          (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") + ".";
-            return haulCache && routeMaps && yielderSearch
+                          (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") +
+                          ", TerrainMaps " + (terrainMaps ? "on" : "OFF") + ", PlantWater " + (plantWater ? "on" : "OFF") + ".";
+            return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater
                 ? line + " These are the same for every player on this version."
                 : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
                   "own code for it. In multiplayer, check that the other players' logs show the same line.";
@@ -153,6 +165,16 @@ namespace LateGamePerformance
                 if (yielderLine != null)
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {yielderLine}");
+                }
+                string terrainLine = TerrainMaps.TakeStatsLine();
+                if (terrainLine != null)
+                {
+                    Log.Info($"Last {_config.StatsEveryTicks} ticks. {terrainLine}");
+                }
+                string plantWaterLine = PlantWater.TakeStatsLine();
+                if (plantWaterLine != null)
+                {
+                    Log.Info($"Last {_config.StatsEveryTicks} ticks. {plantWaterLine}");
                 }
                 string routeLine = RouteMaps.TakeStatsLine();
                 if (routeLine != null)

@@ -22,6 +22,10 @@ namespace LateGamePerformance
         // Keys that were settings up to 0.4.8. Still recognised so an old file can be told they are ignored.
         public static readonly string[] FixedKeys = { "HaulCache", "HaulCacheFlushEveryTicks", "RouteMaps", "YielderSearch" };
 
+        // Added after settings stopped deciding what runs, so these never were keys. Fixed for the same reason.
+        public bool TerrainMaps => true;
+        public bool PlantWater => true;
+
         public bool HaulCache => true;
         // Nothing cached survives a tick: the conservative choice, and the only one ever played.
         public int HaulCacheFlushEveryTicks => 1;
@@ -33,6 +37,7 @@ namespace LateGamePerformance
         public int RouteMapsMinFields = 4;
         public int RouteMapsWorkers = 0;
         public bool YielderSearchVerify = false;
+        public bool PlantWaterVerify = false;
         public bool Timing = true;
         public bool SaveTiming = true;
         public bool RecordTimings = false;
@@ -98,6 +103,7 @@ namespace LateGamePerformance
             RouteMapsMinFields = Math.Max(1, Int(values, nameof(RouteMapsMinFields), RouteMapsMinFields));
             RouteMapsWorkers = Math.Max(0, Int(values, nameof(RouteMapsWorkers), RouteMapsWorkers));
             YielderSearchVerify = Bool(values, nameof(YielderSearchVerify), YielderSearchVerify);
+            PlantWaterVerify = Bool(values, nameof(PlantWaterVerify), PlantWaterVerify);
             Timing = Bool(values, nameof(Timing), Timing);
             SaveTiming = Bool(values, nameof(SaveTiming), SaveTiming);
             RecordTimings = Bool(values, nameof(RecordTimings), RecordTimings);
@@ -110,9 +116,9 @@ namespace LateGamePerformance
         public override string ToString()
         {
             return $"(fixed: HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
-                   $"RouteMaps={RouteMaps}, YielderSearch={YielderSearch}) " +
+                   $"RouteMaps={RouteMaps}, YielderSearch={YielderSearch}, TerrainMaps={TerrainMaps}, PlantWater={PlantWater}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
-                   $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, Timing={Timing}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, Timing={Timing}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }

@@ -38,7 +38,7 @@ internal static class Program
                      "Timberborn.Navigation", "Timberborn.NeedBehaviorSystem", "Timberborn.BlockingSystem",
                      "Timberborn.Emptying", "Timberborn.StockpilePrioritySystem", "Timberborn.Workshops",
                      "Timberborn.GameSaveRuntimeSystem", "Timberborn.SaveSystem", "Timberborn.WorldPersistence", "Timberborn.WorldSerialization",
-                     "Timberborn.ThumbnailCapturing", "Timberborn.SingletonSystem", "Timberborn.YielderFinding" })
+                     "Timberborn.ThumbnailCapturing", "Timberborn.SingletonSystem", "Timberborn.YielderFinding", "Timberborn.WaterObjects" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -66,7 +66,8 @@ internal static class Program
         Feature[] features =
         {
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
-            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), YielderSearch.CreateFeature(new Config()), MetricsDump.CreateFeature(new Config()),
+            RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), YielderSearch.CreateFeature(new Config()), TerrainMaps.CreateFeature(new Config()),
+            PlantWater.CreateFeature(new Config()), MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -82,12 +83,13 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 43, $"43 patches declared (found {patchCount})");
+        Check(patchCount == 47, $"47 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
-        Check(warnings.Count == 1 && warnings[0].Contains("RouteMaps failed"),
-            $"only the expected warning from the forced failure was logged ({warnings.Count})");
+        TerrainAndWaterTests.Run(_managed, Check);
+        Check(warnings.Count == 2 && warnings[0].Contains("RouteMaps failed") && warnings[1].Contains("PlantWater failed"),
+            $"only the two expected warnings from the forced failures were logged ({warnings.Count})");
 
         Console.WriteLine(_failures == 0 ? "ALL PASSED" : _failures + " FAILED");
         return _failures == 0 ? 0 : 1;
@@ -107,11 +109,13 @@ internal static class Program
         Check(config.StatsEveryTicks == 0, "config: negative clamped to 0");
         Check(config.GcReport, "config: unparsable value keeps default");
         Check(config.RouteMapsMinFields == 1, "config: int parsed and clamped");
-        Check(Plugin.SimulationFeaturesLine(true, true, true) ==
-              "Simulation features: HaulCache on, RouteMaps on, YielderSearch on. These are the same for every player on this version.",
+        Check(Plugin.SimulationFeaturesLine(true, true, true, true, true) ==
+              "Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on. " +
+              "These are the same for every player on this version.",
             "startup: one line says which simulation features are running");
-        Check(Plugin.SimulationFeaturesLine(true, false, true).Contains("RouteMaps OFF") &&
-              Plugin.SimulationFeaturesLine(true, false, true).Contains("other players' logs"),
+        Check(Plugin.SimulationFeaturesLine(true, false, true, true, true).Contains("RouteMaps OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, false, true).Contains("TerrainMaps OFF") &&
+              Plugin.SimulationFeaturesLine(true, false, true, true, true).Contains("other players' logs"),
             "startup: a feature that could not start is called out");
         Check(!config.RecordTimings, "config: per-component timings are off unless asked for");
         config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true", "RecordTimings = true" }));

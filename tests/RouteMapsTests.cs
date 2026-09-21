@@ -346,12 +346,12 @@ internal static class RouteMapsTests
         check(!RouteMaps.IsInFlight && !RouteMaps.IsActive, "background: failing maps end the rebuild and switch the feature off");
     }
 
-    private static object GetField(object target, string name)
+    internal static object GetField(object target, string name)
     {
         return target.GetType().GetField(name, Any).GetValue(target);
     }
 
-    private static void SetField(object target, string name, object value)
+    internal static void SetField(object target, string name, object value)
     {
         target.GetType().GetField(name, Any).SetValue(target, value);
     }
@@ -408,7 +408,7 @@ internal static class RouteMapsTests
         return work;
     }
 
-    private static bool SameMap(object expected, object actual, ref long nodesCompared)
+    internal static bool SameMap(object expected, object actual, ref long nodesCompared)
     {
         IEnumerator a = ((IEnumerable)Call(expected, "GetAllNodes")).GetEnumerator();
         IEnumerator b = ((IEnumerable)Call(actual, "GetAllNodes")).GetEnumerator();
@@ -434,7 +434,7 @@ internal static class RouteMapsTests
         }
     }
 
-    private static object CreateNodeIdService(int numberOfNodes)
+    internal static object CreateNodeIdService(int numberOfNodes)
     {
         // Only NumberOfNodes is read by the graph and the heap factory; the real constructor needs map services.
         Type type = _navigation.GetType(Namespace + "NodeIdService", true);
@@ -444,18 +444,18 @@ internal static class RouteMapsTests
         return service;
     }
 
-    private static object Create(string typeName, params object[] arguments)
+    internal static object Create(string typeName, params object[] arguments)
     {
         Type type = _navigation.GetType(Namespace + typeName, true);
         return Activator.CreateInstance(type, Any, null, arguments, null);
     }
 
-    private static object Call(object target, string method, params object[] arguments)
+    internal static object Call(object target, string method, params object[] arguments)
     {
         return target.GetType().GetMethod(method, Any).Invoke(target, arguments);
     }
 
-    private static object Get(object target, string property)
+    internal static object Get(object target, string property)
     {
         return target.GetType().GetProperty(property, Any).GetValue(target);
     }

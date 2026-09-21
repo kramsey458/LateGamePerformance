@@ -14,12 +14,18 @@ namespace LateGamePerformance
     // Vanilla: every hauler decision asks every haul candidate (building with an inventory) in the district
     // for its weighted behaviors, which scans the building's inventories, then sorts the whole list.
     //
-    // Here: each building's weighted behaviors are kept until something that feeds them changes, and the
-    // sorted district list is kept until any building in it changed. A rebuilt list is assembled in the
-    // same candidate order and sorted with the same comparison as vanilla, so the result is the same list.
+    // Here: each building's weighted behaviors are kept until something that feeds them changes. The district's
+    // list is assembled from them on every request, in the same candidate order and sorted with the same
+    // comparison as vanilla, so the result is the same list.
     //
-    // Everything is also dropped every HaulCacheFlushEveryTicks ticks (default: every tick), so an input this
-    // mod does not know about (for example one added by another mod) can only be stale within that window.
+    // Up to 0.4.11 the sorted district list was kept as well, until any building in it changed. In every session
+    // measured, on two computers, that list was never served from cache once: a hauler that takes a job reserves
+    // stock, which changes a building, so the next request always found the list out of date. It was code and
+    // bookkeeping with no effect, and is gone. What does get reused is the per-building part, about a third of
+    // the time.
+    //
+    // Everything is also dropped every tick, so an input this mod does not know about (for example one added by
+    // another mod) can only be stale within a tick.
     internal static class HaulCache
     {
         private sealed class CandidateEntry
@@ -28,14 +34,6 @@ namespace LateGamePerformance
             public int Epoch = -1;
             public bool Dirty = true;
             public bool InputsRegistered;
-        }
-
-        private sealed class DistrictEntry
-        {
-            public readonly List<WeightedBehavior> Weighted = new List<WeightedBehavior>();
-            public readonly List<WorkplaceBehavior> Ordered = new List<WorkplaceBehavior>();
-            public int Epoch = -1;
-            public long DirtyVersion = -1;
         }
 
         private const string DistrictHaulCandidatesType = "Timberborn.Hauling.DistrictHaulCandidates";
@@ -51,7 +49,9 @@ namespace LateGamePerformance
         private static readonly Dictionary<object, CandidateEntry> EntryByInput =
             new Dictionary<object, CandidateEntry>();
 
-        private static readonly Dictionary<object, DistrictEntry> Districts = new Dictionary<object, DistrictEntry>();
+        // The list being assembled for the current request. Main thread only.
+        private static readonly List<WeightedBehavior> Weighted = new List<WeightedBehavior>();
+        private static readonly List<WorkplaceBehavior> Ordered = new List<WorkplaceBehavior>();
 
         private static readonly List<Inventory> InventoryScratch = new List<Inventory>();
         private static readonly List<WeightedBehavior> VerifyScratch = new List<WeightedBehavior>();
@@ -62,12 +62,10 @@ namespace LateGamePerformance
         private static bool _verify;
         private static int _flushEveryTicks;
         private static int _epoch;
-        private static long _dirtyVersion;
         private static long _ticks;
 
         // Stats since the last report.
         private static long _requests;
-        private static long _rebuilds;
         private static long _candidatesRecomputed;
         private static long _candidatesReused;
         private static long _rebuildStopwatchTicks;
@@ -138,9 +136,7 @@ namespace LateGamePerformance
         {
             Candidates.Clear();
             EntryByInput.Clear();
-            Districts.Clear();
             _epoch++;
-            _dirtyVersion++;
             _ticks = 0;
         }
 
@@ -163,15 +159,14 @@ namespace LateGamePerformance
             {
                 return null;
             }
-            double rebuildMs = _rebuildStopwatchTicks * 1000.0 / Stopwatch.Frequency;
-            double perRebuildMs = _rebuilds > 0 ? rebuildMs / _rebuilds : 0;
+            double buildMs = _rebuildStopwatchTicks * 1000.0 / Stopwatch.Frequency;
+            double perRequestMs = _requests > 0 ? buildMs / _requests : 0;
             long served = _candidatesRecomputed + _candidatesReused;
             string line =
-                $"HaulCache: {_requests} hauler list requests, {_requests - _rebuilds} served from cache, " +
-                $"{_rebuilds} rebuilt in {rebuildMs:0.0} ms ({perRebuildMs:0.000} ms each); " +
-                $"buildings recomputed {_candidatesRecomputed}/{served}" +
+                $"HaulCache: {_requests} hauler list requests built in {buildMs:0.0} ms ({perRequestMs:0.000} ms each); " +
+                $"buildings reused {_candidatesReused}/{served}, recomputed {_candidatesRecomputed}" +
                 (_verify ? $"; verify mismatches {_verifyMismatches}" : "");
-            _requests = _rebuilds = _candidatesRecomputed = _candidatesReused = _rebuildStopwatchTicks = 0;
+            _requests = _candidatesRecomputed = _candidatesReused = _rebuildStopwatchTicks = 0;
             return line;
         }
 
@@ -196,23 +191,14 @@ namespace LateGamePerformance
             try
             {
                 _requests++;
-                if (!Districts.TryGetValue(__instance, out DistrictEntry district))
-                {
-                    district = new DistrictEntry();
-                    Districts[__instance] = district;
-                }
-                if (district.Epoch != _epoch || district.DirtyVersion != _dirtyVersion)
-                {
-                    Rebuild(__instance, district);
-                }
+                Build(__instance);
                 if (_verify)
                 {
-                    Verify(__instance, district);
+                    Verify(__instance);
                 }
-                List<WorkplaceBehavior> ordered = district.Ordered;
-                for (int i = 0; i < ordered.Count; i++)
+                for (int i = 0; i < Ordered.Count; i++)
                 {
-                    workplaceBehaviors.Add(ordered[i]);
+                    workplaceBehaviors.Add(Ordered[i]);
                 }
                 return false;
             }
@@ -225,11 +211,10 @@ namespace LateGamePerformance
             }
         }
 
-        private static void Rebuild(object districtHaulCandidates, DistrictEntry district)
+        private static void Build(object districtHaulCandidates)
         {
             long started = Stopwatch.GetTimestamp();
-            long dirtyVersion = _dirtyVersion;
-            List<WeightedBehavior> weighted = district.Weighted;
+            List<WeightedBehavior> weighted = Weighted;
             weighted.Clear();
             foreach (HaulCandidate candidate in _haulCandidatesOf(districtHaulCandidates))
             {
@@ -257,14 +242,11 @@ namespace LateGamePerformance
                 weighted.AddRange(entry.Items);
             }
             weighted.Sort(ByWeightDescending);
-            district.Ordered.Clear();
+            Ordered.Clear();
             for (int i = 0; i < weighted.Count; i++)
             {
-                district.Ordered.Add(weighted[i].WorkplaceBehavior);
+                Ordered.Add(weighted[i].WorkplaceBehavior);
             }
-            district.Epoch = _epoch;
-            district.DirtyVersion = dirtyVersion;
-            _rebuilds++;
             _rebuildStopwatchTicks += Stopwatch.GetTimestamp() - started;
         }
 
@@ -300,7 +282,6 @@ namespace LateGamePerformance
             if (_active && EntryByInput.TryGetValue(__instance, out CandidateEntry entry))
             {
                 entry.Dirty = true;
-                _dirtyVersion++;
             }
         }
 
@@ -311,13 +292,11 @@ namespace LateGamePerformance
                 // Rare (a building finished or was removed). Dropping everything also releases destroyed objects.
                 Candidates.Clear();
                 EntryByInput.Clear();
-                Districts.Clear();
                 _epoch++;
-                _dirtyVersion++;
             }
         }
 
-        private static void Verify(object districtHaulCandidates, DistrictEntry district)
+        private static void Verify(object districtHaulCandidates)
         {
             VerifyScratch.Clear();
             foreach (HaulCandidate candidate in _haulCandidatesOf(districtHaulCandidates))
@@ -327,23 +306,23 @@ namespace LateGamePerformance
                 VerifyScratch.AddRange(VerifyItemScratch);
             }
             VerifyScratch.Sort(ByWeightDescending);
-            bool same = VerifyScratch.Count == district.Ordered.Count;
+            bool same = VerifyScratch.Count == Ordered.Count;
             for (int i = 0; same && i < VerifyScratch.Count; i++)
             {
-                same = ReferenceEquals(VerifyScratch[i].WorkplaceBehavior, district.Ordered[i]);
+                same = ReferenceEquals(VerifyScratch[i].WorkplaceBehavior, Ordered[i]);
             }
             if (!same)
             {
                 _verifyMismatches++;
                 if (_verifyMismatches <= 10)
                 {
-                    Log.Warning($"HaulCache verify: cached list differs from vanilla (cached {district.Ordered.Count}, " +
+                    Log.Warning($"HaulCache verify: cached list differs from vanilla (cached {Ordered.Count}, " +
                                 $"vanilla {VerifyScratch.Count}). Using the vanilla list.");
                 }
-                district.Ordered.Clear();
+                Ordered.Clear();
                 for (int i = 0; i < VerifyScratch.Count; i++)
                 {
-                    district.Ordered.Add(VerifyScratch[i].WorkplaceBehavior);
+                    Ordered.Add(VerifyScratch[i].WorkplaceBehavior);
                 }
             }
             VerifyScratch.Clear();

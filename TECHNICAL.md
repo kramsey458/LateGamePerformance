@@ -13,9 +13,13 @@ the jobs in order. That is repeated for every hauler decision, even when nothing
 
 This mod keeps each building's weighted jobs until something that feeds them changes (its stock, reservations,
 allowed goods, enabled inventories, blocked state, emptying mark, obtain/supply setting, recipe, or haul
-priority), and keeps the district's sorted list until any building in it changed. When a list is rebuilt it is
-assembled in the same building order and sorted with the same comparison as the game, so haulers get the same
-list the game would have produced.
+priority). The district's list is assembled from those on every request, in the same building order and sorted
+with the same comparison as the game, so haulers get the same list the game would have produced.
+
+Up to 0.4.11 the district's sorted list was kept as well, until any building in it changed. In every session
+measured, on two computers, it was never served from cache once: a hauler that takes a job reserves stock, which
+changes a building, so the next request always found the list out of date. It was removed in 0.4.12. What does
+get reused is the per-building part, about a third of the time.
 
 As a safety net, everything cached is dropped every tick. An input
 the mod does not track, such as one added by another mod, can then be out of date only within a single tick.
@@ -61,6 +65,63 @@ in range`.
   game's result. It is slower than no mod and only for testing.
 - If anything throws, the feature switches itself off for the session and the game's own code runs.
 - It is always on. Up to 0.4.8 it could be switched off in the settings file; see Settings for why not any more.
+
+### Plant water check on worker threads (always on, new in 0.4.12)
+
+Every tick the game asks, for every plant and every other object that cares about flooding (about 8000 in the
+colony this is measured in), how high the water stands at its tile, one after another on the main thread
+(`WaterObjectService.Tick`): 1.3 ms per tick, 8% of all tick time. Almost none of them change from one tick to
+the next.
+
+The question is a pure read: the object's fixed tile, looked up in the water map the game keeps for readers on
+other threads, which is only rewritten in its own tick and never during this one. So the reads are spread over
+worker threads, and then the main thread goes through the results in the game's own order and, for each object
+whose level changed, does exactly what the game does: stores the new level and raises the change event. Those
+handlers (a plant starting to drown, a building flooding) run on the main thread, in the same order, with the
+same values as without the mod.
+
+Reading first gives the same values because a handler cannot change the water map or an object's tile, and it
+cannot add or remove an object from the list: the game walks that list with `foreach` and would throw if one
+did. The result does not depend on the number of threads, so it is the same on every computer.
+
+- The tests build two identical sets of 6000 of the game's real `WaterObject`s over a stand-in water map that
+  moves between ticks, run one through the game's own loop and one through the mod, and require the same stored
+  levels and the same events in the same order with the same values, for six ticks (4316 level changes).
+- Below 512 objects the game's own loop runs; starting workers would cost more than it saves.
+- `PlantWaterVerify = true` reads everything again on the main thread and compares. For testing.
+- If anything throws (a handler included), the feature switches itself off and hands that tick to the game's
+  own loop. Objects already updated compare equal there and are passed over, so nothing is applied twice.
+
+### Terrain route maps on worker threads (always on, new in 0.4.12)
+
+Every building that works the land around it (lumberjack flag, gatherer, farmhouse, forester...) keeps a second
+route map next to its road one: the walking distance over open ground from its entrance to every tile within 20
+steps. Every search for a tree or a plant reads it. When the ground changes anywhere inside one, the game throws
+that map away and rebuilds it on the main thread the next time its building searches, one building at a time.
+
+At the end of every navigation tick the mod builds every terrain map that is cached and not built, with the
+game's own generator, one private instance per worker thread, and the main thread waits for the batch. It is a
+few tens of maps of at most a few thousand tiles (in the test harness 90 maps take 32 ms one by one and 7 ms on
+7 workers), so waiting costs little and needs none of the gates the road maps' background rebuild has. If the
+stats line ever shows the wait matter, the same background scheme can be put under it. **How often the ground
+changes in a real colony, and so how much this saves, has not been measured; the stats line is there to say.**
+
+- Ground changes are applied inside the navigation tick, and the main thread is inside the mod's call until
+  every worker is done, so nothing changes the terrain graph while it is read. Each map is written by exactly
+  one thread.
+- A map depends only on the terrain graph, its start tile and the range. The range is the game's own, read from
+  the game, and it is the only range the game ever builds these maps with.
+- Which maps are built is simulation state: a terrain map is cached exactly while its building is finished, and
+  unlike road maps nothing a player looks at builds one (the range overlay uses a map of its own). Every peer
+  ends every navigation tick with the same maps built, whatever the thread count.
+- The tests build a terrain graph with the game's `TerrainNavMeshGraph`, fill 90 maps one by one and in parallel
+  and require them identical node for node and in node order, then drive the hook against a real
+  `TerrainFlowFieldCache`: everything cached gets built, a map whose start is off the graph is left alone, a
+  second tick builds nothing, and after a ground change exactly the cleared maps are rebuilt.
+
+The same behaviour difference as the road maps: maps are built before the first request instead of on it, so the
+few code paths that use a terrain map only "if it is already filled" find it filled. Every player on the same
+version gets the same.
 
 ### Parallel route map rebuild (on by default, new in 0.2.0)
 
@@ -263,12 +324,20 @@ code, so switch it off again after collecting numbers.
 Every `StatsEveryTicks` ticks (default 1000) one line is logged, for example:
 
 ```
-[LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests, 251 served from cache,
-161 rebuilt in 96.3 ms (0.598 ms each); buildings recomputed 40211/61843
+[LateGamePerformance] Last 1000 ticks. HaulCache: 517 hauler list requests built in 310.0 ms (0.600 ms each);
+buildings reused 42010/129250, recomputed 87240
 ```
 
-"ms each" is roughly what the game pays on every request without the mod, so requests served from cache times
-that figure is the time saved.
+"buildings reused" is the work saved: each reused building is one the game would have scanned again.
+
+Two lines for the features added in 0.4.12:
+
+```
+[LateGamePerformance] Last 1000 ticks. PlantWater: 1000 passes over 8100 objects on 7 workers; reading 240.0 ms
+(0.240 ms per pass), 310 level changes applied in 1.2 ms
+[LateGamePerformance] Last 1000 ticks. TerrainMaps: 3 rebuilds of 96 terrain route maps on 7 workers; the main
+thread waited 9.5 ms in total, longest 4.1 ms; 5 more built directly in batches of fewer than 4
+```
 
 A second line reports route map rebuilds:
 
@@ -317,6 +386,7 @@ features, disable the mod.
 | `MetricsEveryTicks` | `3000` | While per-component timings are on: write them every N ticks. `0` = never (disables `RecordTimings` too). |
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
+| `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result. For testing. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
 One setting is on the in-game settings page (**Mods > Late Game Performance**), not in this file:
