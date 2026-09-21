@@ -41,7 +41,7 @@
   <table>
     <thead><tr><th>Message</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td><code>0.4.9 loading.</code></td><td>The mod started. Normal.</td></tr>
+      <tr><td><code><span data-release="version">0.4.9</span> loading.</code></td><td>The mod started. Normal.</td></tr>
       <tr><td><code>HaulCache: enabled (13/13 patches).</code> and similar for <code>RouteMaps</code>, <code>YielderSearch</code></td><td>A feature installed all its hooks. Normal.</td></tr>
       <tr><td><code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on.</code></td><td>All three features that affect the simulation are running. Normal, and it should read the same for every player.</td></tr>
       <tr><td><code>Simulation features: … OFF …</code></td><td>A feature could not start. <a href="#off">What to do</a>.</td></tr>
@@ -89,7 +89,7 @@
   <details id="crash">
     <summary>The game crashes while loading</summary>
     <div class="answer">
-      <p>Use the latest release. Version 0.4.3 is broken and crashes the game while loading; if that is what you have, replace it. If you are on 0.4.9 and it still crashes, <a href="#report">report it</a> with <code>Player.log</code>, and try the game once with only Harmony, Mod Settings and this mod enabled.</p>
+      <p>Use the latest release. Version 0.4.3 is broken and crashes the game while loading; if that is what you have, replace it. If you are on <span data-release="version">0.4.9</span> and it still crashes, <a href="#report">report it</a> with <code>Player.log</code>, and try the game once with only Harmony, Mod Settings and this mod enabled.</p>
     </div>
   </details>
 
@@ -188,9 +188,10 @@
   <div class="wrap foot">
     <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.9">Release v0.4.9</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.9</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>
+<script src="release.js" defer data-repo="timbermods/LateGamePerformance" data-asset="^LateGamePerformance-[\d.]+\.zip$"></script>
 </body>
 </html>

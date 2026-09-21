@@ -443,12 +443,18 @@ Disable the mod and restart. It stores nothing in saves.
 ## Website
 
 The website in `docs/` is plain HTML, CSS and JavaScript with no build step, served by GitHub Pages from `main` and
-`/docs`. The version number is written by hand in these places, so update them with each release:
+`/docs`.
 
-- `docs/index.html`: the eyebrow above the heading, the Download button, and the release link in the footer.
-- `docs/install.html`: the download link, the ZIP name in the check-that-it-works and checksum sections, the startup
-  line `0.4.9 loading.`, the SHA-256, and the release link in the footer.
-- `docs/troubleshooting.html` and `docs/faq.html`: the version in the log-line table and the release link in the
-  footer.
+**The version, the download links and the SHA-256 update themselves.** `docs/release.js` asks GitHub for the
+repository's latest official release (the one marked Latest, so pre-releases are ignored) and fills them in, so
+nothing has to be edited when a release is published. The script is configured by the `data-repo` and `data-asset`
+attributes on its `<script>` tag, and the pages mark what to fill in with `data-release` attributes; the header
+comment in the file lists them. The HTML keeps the values of the last release as a fallback and its links point at
+`/releases/latest`, so with no script, no network or a rate-limited lookup the page still works. The answer is
+cached in the browser for 30 minutes.
 
-The SHA-256 is in the release notes; check it against the published ZIP with `Get-FileHash`.
+**What is not automatic:** text that describes one specific build, such as the tested and not-yet-verified lists
+and "played as 0.4.8". Those elements carry `data-release-pinned="0.4.9"`. When the newest release is a different
+version, the script adds a note saying the text was written for 0.4.9. Rewrite the text for the new release and
+change the attribute. The fallback values in the HTML can be refreshed then too, but they only show without the
+script.

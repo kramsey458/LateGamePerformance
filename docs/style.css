@@ -216,3 +216,7 @@ figcaption { color: var(--ink-2); font-size: 0.9rem; margin-top: 0.5rem; }
 .compare th:first-child, .compare td:first-child { width: 34%; }
 .card .compare { margin-top: 0.4rem; }
 .card .compare td, .card .compare th { color: var(--ink); }
+
+/* Release script: a note on text that was written for an older release */
+.pinned-note { font-size: 0.92rem; color: var(--ink-2); border-left: 3px solid var(--warn-line); padding: 0.15rem 0 0.15rem 0.7rem; margin: 0.8rem 0 0; }
+.notice .pinned-note { color: inherit; border-left-color: currentColor; }

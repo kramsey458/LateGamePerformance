@@ -33,11 +33,11 @@
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow">Timberborn 1.1 mod &middot; Version 0.4.9</span>
+      <span class="eyebrow">Timberborn 1.1 mod &middot; Version <span data-release="version">0.4.9</span></span>
       <h1>Late-game colonies that keep up.</h1>
       <p class="lead">Big colonies make the game repeat the same work again and again: finding jobs for haulers, rebuilding routes, searching for trees, cleaning up memory. Late Game Performance removes that repeated work, so you get fewer lag spikes and freezes. It is built to change how quickly the game finds its answers, not what the answers are.</p>
       <div class="cta">
-        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/download/v0.4.9/LateGamePerformance-0.4.9.zip">Download v0.4.9</a>
+        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.9</span></span></a>
         <a class="btn ghost" href="install.html">Install guide</a>
       </div>
       <ul class="badges" aria-label="Facts">
@@ -45,7 +45,7 @@
         <li>Needs Harmony and Mod Settings</li>
         <li>Built against Timberborn 1.1.2.4</li>
       </ul>
-      <div class="notice ok" role="note">
+      <div class="notice ok" role="note" data-release-pinned="0.4.9">
         <p><strong>Played in a real late-game colony.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8; 0.4.9 runs the same code). <a href="#status">See exactly what is and isn't tested.</a></p>
       </div>
     </div>
@@ -259,7 +259,7 @@
 
 <section id="status">
   <div class="wrap">
-    <div class="section-head">
+    <div class="section-head" data-release-pinned="0.4.9">
       <span class="eyebrow">Status</span>
       <h2>What is tested, and what isn't</h2>
       <p class="lead">Tested extensively, but it is still a young mod, so here is the honest picture. Try it on a copy of a save first.</p>
@@ -300,9 +300,10 @@
   <div class="wrap foot">
     <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.9">Release v0.4.9</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.9</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>
+<script src="release.js" defer data-repo="timbermods/LateGamePerformance" data-asset="^LateGamePerformance-[\d.]+\.zip$"></script>
 </body>
 </html>
