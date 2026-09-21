@@ -28,6 +28,7 @@ namespace LateGamePerformance
         private readonly double _stopwatchFrequency;
         private readonly long[] _stageStopwatchTicks = new long[StageNames.Length];
         private string _what;
+        private string _note;
 
         public SaveBreakdown(double stopwatchFrequency)
         {
@@ -56,6 +57,16 @@ namespace LateGamePerformance
         {
             Array.Clear(_stageStopwatchTicks, 0, _stageStopwatchTicks.Length);
             _what = what;
+            _note = null;
+        }
+
+        // Something the line should say about this save, after the numbers.
+        public void Note(string note)
+        {
+            if (IsOpen)
+            {
+                _note = note;
+            }
         }
 
         public void Add(SaveStage stage, long stopwatchTicks)
@@ -84,7 +95,12 @@ namespace LateGamePerformance
             }
             string line = string.Format(c, "{0}: {1:0} ms total = {2}everything else {3:0} ms", _what,
                 totalStopwatchTicks * msPerStopwatchTick, parts, Math.Max(0, everythingElse) * msPerStopwatchTick);
+            if (_note != null)
+            {
+                line += " (" + _note + ")";
+            }
             _what = null;
+            _note = null;
             return line;
         }
     }
@@ -256,12 +272,18 @@ namespace LateGamePerformance
             }
         }
 
+        internal static void Note(string note)
+        {
+            Breakdown.Note(note);
+        }
+
         private static void StagePrefix(out long __state)
         {
             __state = 0;
             try
             {
-                if (Breakdown.IsOpen)
+                // A stage on BackgroundSave's worker thread is not part of what the game thread spends.
+                if (Breakdown.IsOpen && BackgroundSave.OnGameThread())
                 {
                     __state = Stopwatch.GetTimestamp();
                 }

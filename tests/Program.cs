@@ -38,7 +38,9 @@ internal static class Program
                      "Timberborn.Navigation", "Timberborn.NeedBehaviorSystem", "Timberborn.BlockingSystem",
                      "Timberborn.Emptying", "Timberborn.StockpilePrioritySystem", "Timberborn.Workshops",
                      "Timberborn.GameSaveRuntimeSystem", "Timberborn.SaveSystem", "Timberborn.WorldPersistence", "Timberborn.WorldSerialization",
-                     "Timberborn.ThumbnailCapturing", "Timberborn.SingletonSystem", "Timberborn.YielderFinding", "Timberborn.WaterObjects" })
+                     "Timberborn.ThumbnailCapturing", "Timberborn.SingletonSystem", "Timberborn.YielderFinding", "Timberborn.WaterObjects",
+                     "Timberborn.ResourceCountingSystem", "Timberborn.GameSaveRepositorySystem", "Timberborn.FileSystem",
+                     "Timberborn.Yielding", "Timberborn.Goods", "Timberborn.SerializationSystem" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -67,7 +69,8 @@ internal static class Program
         {
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
             RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), YielderSearch.CreateFeature(new Config()), TerrainMaps.CreateFeature(new Config()),
-            PlantWater.CreateFeature(new Config()), MetricsDump.CreateFeature(new Config()),
+            PlantWater.CreateFeature(new Config()), DistrictCounts.CreateFeature(new Config()), BackgroundSave.CreateFeature(),
+            MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -83,13 +86,23 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 47, $"47 patches declared (found {patchCount})");
+        Check(patchCount == 58, $"58 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
         TerrainAndWaterTests.Run(_managed, Check);
-        Check(warnings.Count == 2 && warnings[0].Contains("RouteMaps failed") && warnings[1].Contains("PlantWater failed"),
-            $"only the two expected warnings from the forced failures were logged ({warnings.Count})");
+        SaveAndCountsTests.Run(Check);
+        string[] expectedWarnings =
+        {
+            "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
+            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed"
+        };
+        bool asExpected = warnings.Count == expectedWarnings.Length;
+        for (int i = 0; asExpected && i < expectedWarnings.Length; i++)
+        {
+            asExpected = warnings[i].Contains(expectedWarnings[i]);
+        }
+        Check(asExpected, $"only the expected warnings from the forced failures were logged ({warnings.Count})");
 
         Console.WriteLine(_failures == 0 ? "ALL PASSED" : _failures + " FAILED");
         return _failures == 0 ? 0 : 1;
@@ -109,13 +122,14 @@ internal static class Program
         Check(config.StatsEveryTicks == 0, "config: negative clamped to 0");
         Check(config.GcReport, "config: unparsable value keeps default");
         Check(config.RouteMapsMinFields == 1, "config: int parsed and clamped");
-        Check(Plugin.SimulationFeaturesLine(true, true, true, true, true) ==
-              "Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on. " +
+        Check(Plugin.SimulationFeaturesLine(true, true, true, true, true, true) ==
+              "Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on. " +
               "These are the same for every player on this version.",
             "startup: one line says which simulation features are running");
-        Check(Plugin.SimulationFeaturesLine(true, false, true, true, true).Contains("RouteMaps OFF") &&
-              Plugin.SimulationFeaturesLine(true, true, true, false, true).Contains("TerrainMaps OFF") &&
-              Plugin.SimulationFeaturesLine(true, false, true, true, true).Contains("other players' logs"),
+        Check(Plugin.SimulationFeaturesLine(true, false, true, true, true, true).Contains("RouteMaps OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, false, true, true).Contains("TerrainMaps OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, true, true, false).Contains("DistrictCounts OFF") &&
+              Plugin.SimulationFeaturesLine(true, false, true, true, true, true).Contains("other players' logs"),
             "startup: a feature that could not start is called out");
         Check(!config.RecordTimings, "config: per-component timings are off unless asked for");
         config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true", "RecordTimings = true" }));
@@ -562,6 +576,12 @@ internal static class Program
         Check(line == "Save: 812 ms total = finishing the tick 14 ms + snapshot 190 ms + world JSON and compression 520 ms + " +
               "thumbnail 60 ms + everything else 28 ms", "save: stages and the remainder add up to the total");
         Check(!save.IsOpen && save.Close(812) == null, "save: closed after reporting; an outer nested save reports nothing");
+        save.Note("ignored, no save is open");
+        save.Open("Save");
+        save.Note("the rest follows on a worker thread");
+        Check(save.Close(10).EndsWith("everything else 10 ms (the rest follows on a worker thread)"), "save: a note is appended to the line");
+        save.Open("Save");
+        Check(save.Close(10).EndsWith("everything else 10 ms"), "save: and does not carry over to the next save");
         save.Open("Save");
         save.Add(SaveStage.Snapshot, 300);
         save.Open("Save");                     // the first save threw, so it was never closed

@@ -19,7 +19,7 @@ In a big late-game colony the game does the same work again and again: finding j
 ## What to expect
 
 - Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes. 0.4.9 runs the same code.
-- Preview 0.4.12 (pre-release, not yet played): one checkbox on the settings page; the tree search no longer measures the distance to every grown tree when the lumberjack flag is full (0.4.11); the water check on every plant is read on worker threads, terrain route maps are rebuilt on worker threads, and the hauling cache lost a part that never did anything (0.4.12); see [TECHNICAL.md](TECHNICAL.md).
+- Preview 0.4.13 (pre-release): one checkbox on the settings page; the tree search no longer measures the distance to every grown tree when the lumberjack flag is full (0.4.11); the water check on every plant is read on worker threads, terrain route maps are rebuilt on worker threads, and the hauling cache lost a part that never did anything (0.4.12, played); autosaves and menu saves finish on a worker thread so the freeze is roughly halved, and each district's resource count is added up on worker threads (0.4.13, not yet played); see [TECHNICAL.md](TECHNICAL.md).
 - Incremental garbage collection, in one 35-minute multiplayer session on two computers: 39 freezes with a median of 675 ms (about 30 s in total) on the computer without it, one collection frame over 50 ms on the computer with it.
 - It is aimed at large colonies. A small colony has little repeated work to remove, so you are unlikely to notice much.
 - How much you gain depends on your colony and your computer. There is no controlled frame rate benchmark yet.

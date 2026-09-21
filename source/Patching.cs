@@ -14,6 +14,8 @@ namespace LateGamePerformance
         public Func<MethodBase> Target;
         public MethodInfo Prefix;
         public MethodInfo Postfix;
+        // Runs whether the target returned or threw; the exception, if any, carries on unchanged.
+        public MethodInfo Finalizer;
     }
 
     internal sealed class Feature
@@ -37,7 +39,9 @@ namespace LateGamePerformance
                     }
                     harmony.Patch(target,
                         patch.Prefix != null ? new HarmonyMethod(patch.Prefix) : null,
-                        patch.Postfix != null ? new HarmonyMethod(patch.Postfix) : null);
+                        patch.Postfix != null ? new HarmonyMethod(patch.Postfix) : null,
+                        null,
+                        patch.Finalizer != null ? new HarmonyMethod(patch.Finalizer) : null);
                 }
                 catch (Exception exception)
                 {
@@ -96,6 +100,12 @@ namespace LateGamePerformance
                 }
                 CheckParameters(feature, patch, target, patch.Prefix, problems);
                 CheckParameters(feature, patch, target, patch.Postfix, problems);
+                CheckParameters(feature, patch, target, patch.Finalizer, problems);
+                if (patch.Finalizer != null && patch.Finalizer.ReturnType != typeof(void))
+                {
+                    // A finalizer that returns an exception replaces the target's; none here may.
+                    problems.Add($"{feature.Name}/{patch.Name}: the finalizer must return void");
+                }
             }
             return problems;
         }
@@ -157,6 +167,14 @@ namespace LateGamePerformance
                 if (match == null)
                 {
                     problems.Add($"{feature.Name}/{patch.Name}: target has no parameter '{parameter.Name}'");
+                }
+                else if (parameter.ParameterType.IsByRef)
+                {
+                    // "ref" hands the patch the target's own argument slot: the types must be the same.
+                    if (parameter.ParameterType.GetElementType() != match.ParameterType)
+                    {
+                        problems.Add($"{feature.Name}/{patch.Name}: ref parameter '{parameter.Name}' type mismatch");
+                    }
                 }
                 else if (!parameter.ParameterType.IsAssignableFrom(match.ParameterType))
                 {

@@ -82,7 +82,16 @@ namespace LateGamePerformance
             {
                 PlantWater.Activate();
             }
-            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater));
+            bool districtCounts = config.DistrictCounts && DistrictCounts.CreateFeature(config).Apply(HarmonyId);
+            if (districtCounts)
+            {
+                DistrictCounts.Activate();
+            }
+            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts));
+            if (config.BackgroundSave && BackgroundSave.CreateFeature().Apply(HarmonyId))
+            {
+                BackgroundSave.Activate();
+            }
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
                 Timing.Activate();
@@ -111,12 +120,13 @@ namespace LateGamePerformance
         // one failed to start (a game update moved something). One line, the same words for everyone, so two
         // players' logs can be compared at a glance.
         internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch,
-            bool terrainMaps, bool plantWater)
+            bool terrainMaps, bool plantWater, bool districtCounts)
         {
             string line = "Simulation features: HaulCache " + (haulCache ? "on" : "OFF") + ", RouteMaps " +
                           (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") +
-                          ", TerrainMaps " + (terrainMaps ? "on" : "OFF") + ", PlantWater " + (plantWater ? "on" : "OFF") + ".";
-            return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater
+                          ", TerrainMaps " + (terrainMaps ? "on" : "OFF") + ", PlantWater " + (plantWater ? "on" : "OFF") +
+                          ", DistrictCounts " + (districtCounts ? "on" : "OFF") + ".";
+            return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater && districtCounts
                 ? line + " These are the same for every player on this version."
                 : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
                   "own code for it. In multiplayer, check that the other players' logs show the same line.";
@@ -176,6 +186,11 @@ namespace LateGamePerformance
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {plantWaterLine}");
                 }
+                string districtLine = DistrictCounts.TakeStatsLine();
+                if (districtLine != null)
+                {
+                    Log.Info($"Last {_config.StatsEveryTicks} ticks. {districtLine}");
+                }
                 string routeLine = RouteMaps.TakeStatsLine();
                 if (routeLine != null)
                 {
@@ -192,6 +207,7 @@ namespace LateGamePerformance
         {
             // A new game or map editor scene: nothing cached from the previous one may survive.
             HaulCache.Reset();
+            BackgroundSave.SceneCreated();
             _ticksSinceReport = 0;
         }
     }

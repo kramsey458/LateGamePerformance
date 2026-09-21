@@ -123,6 +123,113 @@ The same behaviour difference as the road maps: maps are built before the first 
 few code paths that use a terrain map only "if it is already filled" find it filled. Every player on the same
 version gets the same.
 
+### District resource counts on worker threads (always on, new in 0.4.13)
+
+Every tick each district adds up, for every good, what all its storage holds and how much room it has
+(`DistrictResourceCounter.Tick`): 1.07 ms per tick in the colony this is measured in. The numbers feed the top
+bar and the stockpile tooltips and, inside the simulation, the automation resource counter, so they have to be
+the game's numbers at the game's moment. Counting less often, or only what changed, was looked at and dropped:
+what an inventory may hold depends on things with no reliable change signal, and a stale number would change
+what an automation building does.
+
+Most of the cost is the room question, which the game asks per inventory per allowed good with a linear search
+inside (a warehouse that allows 30 goods does some 900 string comparisons to report one number). Both questions
+are pure reads of the inventory, and the answer is a sum of whole numbers, which comes out the same in any
+order. So the inventories are dealt out to worker threads, each worker asks the game's own questions
+(`Inventory.Stock`, `Gives`, `PublicInput`, `GetCapacity`) and adds up into its own tables, and the main thread
+adds the workers' tables into the game's tables. The two steps that go through interfaces a mod may implement
+(goods inside workshops, goods being carried) then run as the game's own code on the main thread.
+
+- What may run on a worker is decided per inventory. `GetCapacity` asks the inventory's `IGoodDisallower`, which
+  a mod may implement; only the game's four implementations, which were read and are pure, go to workers. Any
+  other inventory is counted on the main thread by the same code.
+- If another mod has patched one of the methods the workers would call, the feature stands down with one log
+  line and the game's own count runs. The numbers are the same either way.
+- Districts with fewer than 96 storage inventories are left to the game's loop.
+- The tests fill one counter with the game's `UpdateCounters` and one with the mod over 700 real `Inventory`
+  objects with the game's own capacity rules (and one stand-in mod rule, which must only ever be asked on the
+  main thread), and compare every good through the game's public `GetResourceCount`, for six rounds with stock
+  moving in between. In the harness one count takes the game 1.9 ms and the mod 0.5 ms.
+- `DistrictCountsVerify = true` lets the game count as well and compares. If anything throws, the feature
+  switches itself off; the game's count starts by clearing every table, so nothing of the failed one is left.
+
+### Background save (on by default, new in 0.4.13)
+
+A save freezes the game for 0.8 s on a fast computer and up to 2.4 s on a slower one in the colony this is
+measured in. The save timing line (below) showed where that goes: about a third is the snapshot, which reads
+live game objects and has to be on the main thread, and more than half is turning the snapshot into JSON,
+compressing it and writing the file, which does not. The snapshot is plain data from the moment it is taken:
+every value is converted to a number, a string or a nested plain object when it is stored, and the game's JSON
+writer keeps no state. So for the saves the game queues (**autosaves and saves from the menu**), that second
+half runs on a worker thread and the game carries on.
+
+How it fits into the game's own save, without replacing it:
+
+```
+GameSaver.Save                         NOT patched (see "Save timing line"); BeaverBuddies hooks it to move the
+                                       save to a tick boundary, and everything below happens inside it
+  Ticker.FinishFullTick                the game's
+  SaveWriter.WriteToSaveStream         replaced for this save: the snapshot is taken and every other entry
+                                       (thumbnail, metadata, anything a mod adds) is written, on the main
+                                       thread, in the game's order. Only the world entry's JSON is left.
+  GameSaveRepository.CreateSave...     the game's: name validation, settlement directory
+    FileService.CreateFile             replaced for this save: opens "<name>.timber.saving", starts the worker
+  onSaveCompleted                      wrapped when the save was queued: the game's callback (autosave: delete
+                                       the oldest autosaves; menu: close the box) runs on the main thread once
+                                       the file is in place
+```
+
+The worker builds the archive exactly as the game does (same zip mode, entry order and compression level),
+reads it back and checks every entry, writes it to `<name>.timber.saving`, flushes it to the disk, and only then
+renames it over the target. The game lists saves by the `.timber` extension, so an unfinished file is never
+offered for loading, and **a save that is overwritten stays intact until its replacement is complete** (the
+game itself truncates the old file first and then writes). A `.saving` file left by a crash is cleared by a later
+save in that folder.
+
+What keeps a save safe:
+
+- **Only queued saves.** The save on exit, BeaverBuddies' rehost save (both "instant": the caller expects the
+  file on return) and saves to a stream (BeaverBuddies sends those to joining players) run as the game's own
+  code, untouched. The writer is only replaced when its caller is `GameSaver.Save` itself (or a detour's copy
+  of it), a queued save is pending, and the repository is then asked for that same save; any other caller gets
+  the game's writer.
+- **One job at a time.** Any save of any kind first waits for a job still running. So does anything that asks
+  the save repository about files (listing, opening, deleting, "does it exist"), a new scene, and quitting the
+  game; the worker is a foreground thread, so the process does not end under it.
+- **A prepared save never ends as an empty file.** If the `.saving` file cannot be opened, or another mod
+  supplies the file service, or the save turns out not to be the queued one, it is written into the stream the
+  game opened, there and then, errors included.
+- **If the worker fails**, the save is done again on the main thread from the same snapshot, the game's way. If
+  that fails too, the game's callback does not run (so no old autosave is deleted because of it), the game
+  gets the same `GameSaverException` it would have had, and the log says `SAVE FAILED`. After any worker failure
+  background saving stays off for the session.
+- **If preparing fails**, nothing has been written: the feature turns itself off and the game's own code
+  performs that save in full.
+
+In multiplayer nothing here touches the simulation, so it does not matter whether every player has it, and
+BeaverBuddies' own handling of saves (moving them to a tick boundary, not finishing a tick while saving) runs as
+before: it wraps `GameSaver.Save`, and this works inside it.
+
+Two log lines per background save:
+
+```
+[LateGamePerformance] Save: 310 ms total = finishing the tick 14 ms + snapshot 190 ms + world JSON and
+compression 0 ms + thumbnail 60 ms + everything else 46 ms (world JSON, compression and the file write follow on
+a worker thread)
+[LateGamePerformance] BackgroundSave: 2026-09-20 21h14m, Day 412.autosave.timber written (14.2 MB). Off the game
+thread: world JSON, compression and check 540 ms, file 35 ms. On the game thread: snapshot and the other entries
+262 ms.
+```
+
+(Illustrations, not measurements.) `BackgroundSave = false` in the settings file switches it off.
+
+Tested in the harness: the file writer against every failure above with real files; the game's real
+`WorldSerializer` writing the same bytes on a worker thread as on the main thread, and the game's reader loading
+the result; and the whole chain of hooks in the order `GameSaver.Save` calls them, with a real `SaveWriter` and
+the real `WorldEntryWriter` type. **Not tested: inside the game.** In particular, whether BeaverBuddies' detour
+leaves `GameSaver.Save` recognisable as the caller can only be seen there; if it does not, saves simply stay the
+game's own and one log line (`the writer was called by ...`) says what was seen.
+
 ### Parallel route map rebuild (on by default, new in 0.2.0)
 
 Every building with an entrance keeps a route map: the road distance from its entrance to every road tile it
@@ -235,8 +342,9 @@ compression 520 ms + thumbnail 60 ms + everything else 28 ms
 - **thumbnail**: rendering and encoding the save's picture.
 - **everything else**: the small entries, writing the file, and whatever runs when the save completes.
 
-This is measurement only. The hooks read a clock around the game's own methods, run only during a save, and do
-not change how or when the game saves. The game's own `Saved game in 0.80s` line starts its clock after the tick
+These hooks are measurement only: they read a clock around the game's own methods and run only during a save.
+(From 0.4.13 a separate feature, "Background save" above, moves the JSON stage of queued saves to a worker
+thread; this line then shows what the main thread still spends and says so.) The game's own `Saved game in 0.80s` line starts its clock after the tick
 is finished, so it can be a little lower than the total here. A line starting `Save to a stream` is a save that
 is not written to a file, which a multiplayer mod uses for a joining player; `Save (writing only...)` is one
 started in a way the mod does not know, so only the writing part is covered. The numbers are there to decide
@@ -347,6 +455,16 @@ A second line reports route map rebuilds:
 alongside the game; 6 more built directly on the main thread in batches of fewer than 4
 ```
 
+One for the district counts (0.4.13):
+
+```
+[LateGamePerformance] Last 1000 ticks. DistrictCounts: 1000 counts of 640 inventories on 7 workers in 310.0 ms
+(0.310 ms each); 0 inventories per count on the main thread; 0 counts of small districts left to the game
+```
+
+"ms each" is to be compared with the 1.07 ms the game's own count was measured at. "on the main thread" counts
+inventories whose capacity rule comes from a mod.
+
 A third reports the tree and plant search:
 
 ```
@@ -387,6 +505,8 @@ features, disable the mod.
 | `GcReport` | `true` | Startup garbage collector report. |
 | `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
 | `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result. For testing. |
+| `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare. For testing. |
+| `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
 One setting is on the in-game settings page (**Mods > Late Game Performance**), not in this file:
