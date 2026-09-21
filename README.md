@@ -13,13 +13,14 @@ In a big late-game colony the game does the same work again and again: finding j
 - **Hauling job list cache.** Every time a hauler looks for work, the game rebuilds and sorts a list of every hauling job in the district. The mod keeps each list until something that feeds it changes, and hands haulers the same list, in the same order.
 - **Route maps rebuilt in the background.** After a road, stair or platform is finished, the game rebuilds the route map of every building with an entrance on the main thread. The mod spreads that over up to 7 worker threads. In the test harness, 420 maps took about 1.8 s one at a time and about 0.23 s on 7 workers.
 - **Faster tree and plant search.** The game measures the path to every marked tree before asking whether it has anything to take, though in a late-game colony most are still growing. The mod leaves out the measurements that cannot change the answer: in a test forest of 2,000 marked trees with 50 grown, 51 lookups instead of 2,000.
+- **More work on other CPU cores.** The water check on every plant, terrain route maps, each district's resource count, the water map copy and most of each save's work run on worker threads; the soil moisture and contamination scans skip tiles where nothing changed; water rendering stops re-sending what the graphics card already has. Each gives the game's own result.
 - **Incremental garbage collection (optional, one tick-box).** The game cleans up memory with everything stopped, which in a big colony can freeze it for most of a second about once a minute. Incremental collection spreads the same work over many frames.
 - **Timing lines in the game log**, so you can measure your own colony.
 
 ## What to expect
 
-- Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes. 0.4.9 runs the same code.
-- Preview 0.4.14 (pre-release): one checkbox on the settings page; the tree search no longer measures the distance to every grown tree when the lumberjack flag is full (0.4.11); the water check on every plant is read on worker threads, terrain route maps are rebuilt on worker threads, and the hauling cache lost a part that never did anything (0.4.12, played); autosaves and menu saves finish on a worker thread so the freeze is roughly halved, and each district's resource count is added up on worker threads (0.4.13, not yet played); the water map copy moves to a worker thread, the soil moisture and contamination scans skip unchanged tiles, and water rendering stops re-sending what the graphics card already has (0.4.14, not yet played); see [TECHNICAL.md](TECHNICAL.md).
+- Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes. 0.4.14 has been played since and reported as working well.
+- 0.4.10 to 0.4.14 (all in this release): one checkbox on the settings page; a faster tree search when lumberjack flags are full; plant water checks, terrain route maps and district resource counts on worker threads; autosaves and menu saves finish on a worker thread, so the freeze is roughly halved; the water map copy on a worker thread, faster soil scans and less water rendering work (0.4.14). See [TECHNICAL.md](TECHNICAL.md).
 - Incremental garbage collection, in one 35-minute multiplayer session on two computers: 39 freezes with a median of 675 ms (about 30 s in total) on the computer without it, one collection frame over 50 ms on the computer with it.
 - It is aimed at large colonies. A small colony has little repeated work to remove, so you are unlikely to notice much.
 - How much you gain depends on your colony and your computer. There is no controlled frame rate benchmark yet.
@@ -39,12 +40,12 @@ One difference is documented: route maps are filled before the game first asks f
 
 Tested extensively against the game's own code and in play:
 
-- 133 automated checks pass against the installed game's assemblies, including 44 patch targets.
+- 215 automated checks pass against the installed game's assemblies, including 73 patch targets.
 - Rebuilt route maps are identical to the game's, node for node (9.5 million compared), and every map is complete when it is asked for.
 - The tree and plant search matches a model of the game's search in 4,000 random forests, with 0 differences.
 - Played in multiplayer sessions on two computers, and in the 350-beaver late-game save.
 
-Not yet done: this exact 0.4.9 build has not been reported as played, and the tree search has not been compared against the game's own search inside a running game. It is still a young mod, so try it on a copy of a save first. The full list is on the [website](https://timbermods.github.io/LateGamePerformance/#status).
+Not yet done: no stats lines from a 0.4.14 session have been read yet, and the tree search has not been compared against the game's own search inside a running game. It is still a young mod, so try it on a copy of a save first. The full list is on the [website](https://timbermods.github.io/LateGamePerformance/#status).
 
 ## Install
 

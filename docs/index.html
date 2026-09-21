@@ -33,11 +33,11 @@
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow">Timberborn 1.1 mod &middot; Version <span data-release="version">0.4.9</span></span>
+      <span class="eyebrow">Timberborn 1.1 mod &middot; Version <span data-release="version">0.4.14</span></span>
       <h1>Late-game colonies that keep up.</h1>
       <p class="lead">Big colonies make the game repeat the same work again and again: finding jobs for haulers, rebuilding routes, searching for trees, cleaning up memory. Late Game Performance removes that repeated work, so you get fewer lag spikes and freezes. It is built to change how quickly the game finds its answers, not what the answers are.</p>
       <div class="cta">
-        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.9</span></span></a>
+        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.14</span></span></a>
         <a class="btn ghost" href="install.html">Install guide</a>
       </div>
       <ul class="badges" aria-label="Facts">
@@ -45,8 +45,8 @@
         <li>Needs Harmony and Mod Settings</li>
         <li>Built against Timberborn 1.1.2.4</li>
       </ul>
-      <div class="notice ok" role="note" data-release-pinned="0.4.9">
-        <p><strong>Played in a real late-game colony.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8; 0.4.9 runs the same code). <a href="#status">See exactly what is and isn't tested.</a></p>
+      <div class="notice ok" role="note" data-release-pinned="0.4.14">
+        <p><strong>Played in a real late-game colony.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8; 0.4.14 has been played since and reported as working well). <a href="#status">See exactly what is and isn't tested.</a></p>
       </div>
     </div>
     <figure class="diagram">
@@ -259,7 +259,7 @@
 
 <section id="status">
   <div class="wrap">
-    <div class="section-head" data-release-pinned="0.4.9">
+    <div class="section-head" data-release-pinned="0.4.14">
       <span class="eyebrow">Status</span>
       <h2>What is tested, and what isn't</h2>
       <p class="lead">Tested extensively, but it is still a young mod, so here is the honest picture. Try it on a copy of a save first.</p>
@@ -270,7 +270,8 @@
         <ul class="checks">
           <li>Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes.</li>
           <li>Played in multiplayer sessions on two computers, including a 35-minute session logged on both.</li>
-          <li>133 automated checks pass against the installed game's own assemblies, including 44 patch targets.</li>
+          <li>215 automated checks pass against the installed game's own assemblies, including 73 patch targets.</li>
+          <li>The water map copy made on a worker thread holds the same bytes as the game's own, and the soil scans update the same cells in the same order, tested against the game's real classes.</li>
           <li>Rebuilt route maps are identical to the game's, node for node, whoever built them, and every map is complete at the moment it is asked for (25 shuffled rounds with workers busy).</li>
           <li>The tree and plant search gives the same answer as a model of the game's search in 4,000 random forests, with unreachable, dead and destroyed plants and ties.</li>
           <li>Nothing that affects the simulation can be changed from a file.</li>
@@ -279,10 +280,9 @@
       <div class="notice" style="margin:0">
         <p><strong>Not yet verified</strong></p>
         <ul class="checks no">
-          <li>This exact 0.4.9 build has not been reported as played yet. It runs the same code paths as 0.4.8 with its default settings.</li>
+          <li>0.4.14 has been played and reported as working well, but no stats lines from that session have been read yet, so the in-game savings are not measured.</li>
           <li>The tree search against the game's own search inside a running game (the model comes from reading the game's code).</li>
           <li>A controlled frame rate benchmark. The improvement is reported from play and logs, and it depends on your colony.</li>
-          <li>Whether adaptive garbage collection pacing helps at all: it is experimental, and one session each way showed no difference. It is off by default.</li>
           <li>The main menu notice about incremental collection, because the test computers already have it on.</li>
         </ul>
       </div>
@@ -300,7 +300,7 @@
   <div class="wrap foot">
     <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.9</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.14</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>
