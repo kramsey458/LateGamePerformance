@@ -352,6 +352,31 @@ internal static class Program
         public bool Exists = true, Yielding, Alive, Reachable;
         public string Good = "Log";
         public float Distance;
+        public int Order;
+    }
+
+    // The whole of the game's search, from ClosestYielderFinder: what was found at all, the closest yielding plant
+    // of each good (strictly closer wins, so the first of two equally close ones stays), then those tried by
+    // distance, ties by instantiation order, and the first whose good the building has room for is the answer.
+    private static string GamesResult(IEnumerable<Plant> reachedCandidates, Func<string, bool> roomFor)
+    {
+        bool foundSomething = false;
+        var closest = new Dictionary<string, Plant>();
+        foreach (Plant plant in reachedCandidates)
+        {
+            if (plant == null || !plant.Exists) continue;
+            foundSomething = foundSomething || plant.Yielding || plant.Alive;
+            if (plant.Yielding && (!closest.TryGetValue(plant.Good, out Plant best) || plant.Distance < best.Distance))
+            {
+                closest[plant.Good] = plant;
+            }
+        }
+        if (!foundSomething) return "nothing in range";
+        foreach (Plant plant in closest.Values.OrderBy(candidate => candidate.Distance).ThenBy(candidate => candidate.Order))
+        {
+            if (roomFor(plant.Good)) return "plant " + plant.Order;
+        }
+        return "nothing to take";
     }
 
     // What ClosestYielderFinder.FindClosestYielders makes of a sequence of looked-up candidates: whether it found
@@ -407,6 +432,55 @@ internal static class Program
         Check(differences == 0, $"yielder search: same answer as the game's search in {cases} random forests ({differences} differences)");
         Check(firstNotLookedUp == 0, "yielder search: the first candidate is always looked up, so the route map is filled on the same tick");
         Check(lookupsSaved > 10000, $"yielder search: lookups are actually left out ({lookupsSaved})");
+
+        // With the building's room for each good taken into account (0.4.11): the answer, not just the candidates
+        // fed to the search, must be the game's, whatever there is room for.
+        int resultDifferences = 0, asked = 0, askedAboutNotYielding = 0; long savedByRoom = 0;
+        for (int round = 0; round < 4000; round++)
+        {
+            int count = random.Next(0, 40);
+            double yielding = random.NextDouble(), alive = random.NextDouble(), reachable = round % 5 == 0 ? 0.1 : random.NextDouble();
+            var room = new Dictionary<string, bool> { ["Log"] = random.Next(3) > 0, ["Pine"] = random.Next(3) > 0, ["Resin"] = random.Next(2) > 0 };
+            string[] goods = { "Log", "Pine", "Resin" };
+            List<Plant> plants = new List<Plant>();
+            for (int i = 0; i < count; i++)
+            {
+                plants.Add(new Plant
+                {
+                    Exists = random.NextDouble() > 0.03, Yielding = random.NextDouble() < yielding, Alive = random.NextDouble() < alive,
+                    Reachable = random.NextDouble() < reachable, Good = goods[random.Next(3)], Distance = random.Next(1, 8), Order = i
+                });
+            }
+            Func<Plant, Plant> lookUp = plant => plant.Reachable ? plant : null;
+            var with = new YielderSearch.Counters();
+            var without = new YielderSearch.Counters();
+            string games = GamesResult(plants.Select(lookUp), good => room[good]);
+            string mods = GamesResult(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding,
+                plant => plant.Alive, lookUp, reached => reached != null, with,
+                plant => { asked++; if (!plant.Yielding) askedAboutNotYielding++; return room[plant.Good]; }),
+                good => room[good]);
+            GamesResult(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding, plant => plant.Alive,
+                lookUp, reached => reached != null, without), good => room[good]);
+            if (games != mods) resultDifferences++;
+            savedByRoom += without.Lookups - with.Lookups;
+        }
+        Check(resultDifferences == 0, $"yielder search: same result as the game with full and part-full buildings in 4000 random forests ({resultDifferences} differences)");
+        Check(askedAboutNotYielding == 0, "yielder search: room is only asked about for yielding plants");
+        Check(savedByRoom > 5000 && asked > 0, $"yielder search: lookups for goods there is no room for are left out ({savedByRoom})");
+
+        // The measured case: a full lumberjack flag and 1300 grown, reachable trees. One lookup instead of 1300.
+        List<Plant> grown = new List<Plant>();
+        for (int i = 0; i < 1300; i++) grown.Add(new Plant { Yielding = true, Alive = true, Reachable = true, Distance = i % 53, Order = i });
+        var full = new YielderSearch.Counters();
+        string fullFlag = GamesResult(YielderSearch.LazyCandidates(grown, plant => plant.Exists, plant => plant.Yielding,
+            plant => plant.Alive, plant => plant, reached => reached != null, full, plant => false), good => false);
+        Check(fullFlag == "nothing to take" && fullFlag == GamesResult(grown, good => false) && full.Lookups == 1,
+            $"yielder search: a full building among 1300 grown trees needs {full.Lookups} lookup instead of 1300");
+        var hasRoom = new YielderSearch.Counters();
+        string working = GamesResult(YielderSearch.LazyCandidates(grown, plant => plant.Exists, plant => plant.Yielding,
+            plant => plant.Alive, plant => plant, reached => reached != null, hasRoom, plant => true), good => true);
+        Check(working == GamesResult(grown, good => true) && working == "plant 0" && hasRoom.Lookups == 1300,
+            "yielder search: with room, every grown tree is looked up as before and the same tree is chosen");
 
         // A forest like the one measured: 2000 marked trees, 50 grown, everything reachable and alive.
         List<Plant> forest = new List<Plant>();

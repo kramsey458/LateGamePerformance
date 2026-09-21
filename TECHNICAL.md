@@ -40,6 +40,21 @@ same order. The answer is the game's answer, not an approximation: the tests run
 game's search on 4000 random forests (unreachable, dead and destroyed plants and ties included) and require the
 same result every time. In a forest of 2000 marked trees with 50 grown, 51 lookups are left of 2000.
 
+**Full buildings (new in 0.4.11).** A session on 0.4.9 showed the search still cost 4.3 ms per tick, with only 7% of
+the lookups left out: in that colony nearly every marked tree is grown (6208 of 6263 in the save), so the rule above
+had little to skip. The reason the search ran about 5 times per tick was in the save too: all 20 lumberjack flags
+held 20 logs, which is full, so 18 lumberjacks asked for work again on every decision and were told "nothing to do"
+after the game had measured the distance to about 1300 trees. The game's last step takes the closest plant of each
+good and accepts the first whose carry amount is above zero; that amount is the smallest of what the worker can
+lift, what the plant yields and the room left in the building, and the first two are at least 1 for any grown
+plant. So it is zero exactly when the building has no room for that good, whichever plant it is, and then the
+distance to plants of that good cannot change the answer. From 0.4.11 those lookups are left out too (the mod asks
+the game's own `CarryAmountCalculator`, once per good per search). A full flag among 1300 grown trees needs one
+lookup. The tests check the whole result, not only the candidates, against a model of the game's search on a
+further 4000 random forests with full and part-full buildings. The stats line now also says how searches ended:
+`outcomes: 12 found work, 5188 found nothing the building has room for or the worker can take, 0 found nothing
+in range`.
+
 - The first candidate of a search is always looked up, because that lookup is also what refills the building's
   terrain route map after a terrain change, and that has to happen on the same tick as without the mod.
 - `YielderSearchVerify = true` runs the game's own search as well, compares, logs any difference and uses the

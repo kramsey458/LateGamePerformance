@@ -14,9 +14,8 @@ namespace LateGamePerformance
     // Every time a lumberjack (or a gatherer, or a farmer looking for a harvest) looks for work, the game walks
     // every candidate plant, and for each one first looks up the path distance from the building and only then
     // asks whether the plant has anything to take (YielderFinder.FindLivingYielderWithoutAccessible feeding
-    // ClosestYielderFinder). For lumberjacks the candidates are every unreserved marked tree on the map. In a
-    // late game colony most of those are still growing, so nearly all of the distance lookups are thrown away.
-    // Measured: 2.9 ms per tick, 16% of all tick time, on a fast computer.
+    // ClosestYielderFinder). For lumberjacks the candidates are every unreserved marked tree on the map, more
+    // than a thousand in a late game colony. Measured: 3.8 ms per tick, 22% of all tick time, on a fast computer.
     //
     // What the game does with each candidate, in order:
     //   1. distance lookup; a plant that cannot be reached is dropped and plays no further part
@@ -26,8 +25,19 @@ namespace LateGamePerformance
     //
     // So the distance of a plant that is not yielding matters for one thing only: whether it can be reached, and
     // that only until "found something" is true. After that, a plant that is not yielding cannot change the
-    // answer whatever its distance is, and LazyCandidates leaves it out. Plants that are yielding are always
-    // looked up, exactly as before, and in the same order. The result is the game's result, not an approximation.
+    // answer whatever its distance is, and LazyCandidates leaves it out. The result is the game's result, not an
+    // approximation.
+    //
+    // The same holds for a yielding plant whose good the building cannot take (0.4.11). The game's last step tries
+    // the closest plant of each good in order of distance and takes the first whose carry amount is above zero.
+    // That amount is min(what the worker can lift, what the plant yields, the room left in the building for
+    // that good), and the first two are at least 1 for any yielding plant, so it is zero exactly when the
+    // building has no room for the good, whichever plant it is. A good with no room is passed over whatever its
+    // closest plant's distance, so that distance need not be known. This is the case that was measured: all 20
+    // lumberjack flags of a late game colony were full (20 logs each, read from the save), so 18 lumberjacks
+    // each asked again on every decision, and every time the game looked up the distance to about 1300 grown
+    // trees to conclude "nothing to do": 3.8 ms per tick, 22% of all tick time. Plants whose good can be taken are looked
+    // up exactly as before, in the same order.
     //
     // One side effect is kept on purpose: the first lookup of a search fills the building's terrain route map if
     // it was thrown away. The first candidate is always looked up ("found something" starts false), so that
@@ -46,7 +56,8 @@ namespace LateGamePerformance
         // The rule, free of game types so the tests can check it against a model of the game's search.
         internal static IEnumerable<TReached> LazyCandidates<TPlant, TReached>(IEnumerable<TPlant> plants,
             Func<TPlant, bool> exists, Func<TPlant, bool> isYielding, Func<TPlant, bool> isAlive,
-            Func<TPlant, TReached> lookUp, Func<TReached, bool> wasReached, Counters counters)
+            Func<TPlant, TReached> lookUp, Func<TReached, bool> wasReached, Counters counters,
+            Func<TPlant, bool> canBeTaken = null)
         {
             bool foundSomething = false;
             foreach (TPlant plant in plants)
@@ -55,7 +66,8 @@ namespace LateGamePerformance
                 // A destroyed plant goes through the game's own path, whatever that does with it.
                 bool known = exists(plant);
                 bool yielding = known && isYielding(plant);
-                if (known && !yielding && foundSomething)
+                // Only asked about yielding plants, and only once it can make a difference.
+                if (known && foundSomething && !(yielding && (canBeTaken == null || canBeTaken(plant))))
                 {
                     continue;
                 }
@@ -74,11 +86,17 @@ namespace LateGamePerformance
         private static Func<object, object> _closestFinderOf;
         private static Func<object, object> _finderScratchOf;
         private static Func<object, object> _finderOrderedScratchOf;
+        private static Func<object, object> _carryCalculatorOf;
+        // Room for a good in the building of the current search. Main thread only, emptied per search.
+        private static readonly Dictionary<string, bool> RoomForGood = new Dictionary<string, bool>();
         private static bool _active;
         private static bool _verify;
         private static long _searches;
         private static long _stopwatchTicks;
         private static long _verifyMismatches;
+        private static long _found;
+        private static long _nothingToTake;
+        private static long _nothingInRange;
 
         public static Feature CreateFeature(Config config)
         {
@@ -93,6 +111,7 @@ namespace LateGamePerformance
                     _closestFinderOf = Reflect.FieldGetter<object>(typeof(YielderFinder), "_closestYielderFinder");
                     _finderScratchOf = Reflect.FieldGetter<object>(typeof(ClosestYielderFinder), "_yielders");
                     _finderOrderedScratchOf = Reflect.FieldGetter<object>(typeof(ClosestYielderFinder), "_orderedYielders");
+                    _carryCalculatorOf = Reflect.FieldGetter<object>(typeof(ClosestYielderFinder), "_carryAmountCalculator");
                     return HarmonyLib.AccessTools.Method(typeof(YielderFinder), "FindLivingYielderWithoutAccessible");
                 },
                 Prefix = Reflect.Own(typeof(YielderSearch), nameof(FindPrefix))
@@ -114,13 +133,14 @@ namespace LateGamePerformance
             long skipped = Totals.Candidates - Totals.Lookups;
             string line = string.Format(CultureInfo.InvariantCulture,
                 "YielderSearch: {0} searches for trees and plants over {1} candidates; {2} distance lookups, {3} left " +
-                "out ({4:0}%); {5:0.0} ms in total ({6:0.000} ms each){7}",
+                "out ({4:0}%); {5:0.0} ms in total ({6:0.000} ms each); outcomes: {8} found work, {9} found nothing the " +
+                "building has room for or the worker can take, {10} found nothing in range{7}",
                 _searches, Totals.Candidates, Totals.Lookups, skipped,
                 Totals.Candidates > 0 ? 100.0 * skipped / Totals.Candidates : 0,
                 _stopwatchTicks * 1000.0 / Stopwatch.Frequency,
                 _searches > 0 ? _stopwatchTicks * 1000.0 / Stopwatch.Frequency / _searches : 0,
-                _verify ? $"; verify mismatches {_verifyMismatches}" : "");
-            _searches = _stopwatchTicks = 0;
+                _verify ? $"; verify mismatches {_verifyMismatches}" : "", _found, _nothingToTake, _nothingInRange);
+            _searches = _stopwatchTicks = _found = _nothingToTake = _nothingInRange = 0;
             Totals.Candidates = Totals.Lookups = 0;
             return line;
         }
@@ -138,10 +158,16 @@ namespace LateGamePerformance
             {
                 long started = Stopwatch.GetTimestamp();
                 finder = (ClosestYielderFinder)_closestFinderOf(__instance);
+                var calculator = (Timberborn.Carrying.CarryAmountCalculator)_carryCalculatorOf(finder);
+                RoomForGood.Clear();
                 YielderSearchResult result = finder.FindLivingYielder(receivingInventory, liftingCapacity,
-                    LazyCandidates(yielders, Exists, IsYielding, IsAlive, plant => LookUp(start, plant), WasReached, Totals));
+                    LazyCandidates(yielders, Exists, IsYielding, IsAlive, plant => LookUp(start, plant), WasReached, Totals,
+                        plant => CanBeTaken(calculator, liftingCapacity, receivingInventory, plant)));
                 _searches++;
                 _stopwatchTicks += Stopwatch.GetTimestamp() - started;
+                if (result.HasYielder) _found++;
+                else if (result.NoYielderInRange) _nothingInRange++;
+                else _nothingToTake++;
                 if (_verify)
                 {
                     YielderSearchResult games = finder.FindLivingYielder(receivingInventory, liftingCapacity,
@@ -180,6 +206,21 @@ namespace LateGamePerformance
         private static bool IsAlive(Yielder plant)
         {
             return plant.IsAlive();
+        }
+
+        // The game's own question, asked with this plant's own yield: would the finder's last step accept this good?
+        // The answer does not depend on which plant of the good is asked about (see the top of the file), so it is
+        // kept per good for the length of one search.
+        private static bool CanBeTaken(Timberborn.Carrying.CarryAmountCalculator calculator, int liftingCapacity,
+            Inventory receivingInventory, Yielder plant)
+        {
+            var yield = plant.Yield;
+            if (!RoomForGood.TryGetValue(yield.GoodId, out bool room))
+            {
+                room = calculator.AmountToCarry(liftingCapacity, yield, receivingInventory).Amount > 0;
+                RoomForGood[yield.GoodId] = room;
+            }
+            return room;
         }
 
         // YielderFinder.RegularYielderAsReachable, which is private.
