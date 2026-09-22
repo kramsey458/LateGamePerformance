@@ -31,6 +31,8 @@ namespace LateGamePerformance
         public bool TerrainSearch => true;
         public bool IdleEntities => true;
         public bool HomeSearch => true;
+        public bool PathFollow => true;
+        public bool Reachability => true;
 
         public bool HaulCache => true;
         // 0 from 0.4.28: nothing is dropped on a timer, a building's hauling jobs are kept until one of their inputs
@@ -50,6 +52,8 @@ namespace LateGamePerformance
         public bool SoilScansVerify = false;
         public bool TerrainSearchVerify = false;
         public bool HomeSearchVerify = false;
+        public bool PathFollowVerify = false;
+        public bool ReachabilityVerify = false;
         // Every verify mode at once, for the one correctness session. Also a box on the settings page.
         public bool VerifyAll = false;
         // Rendering only, so it may differ between players. A way out, not a setting.
@@ -148,6 +152,8 @@ namespace LateGamePerformance
             SoilScansVerify = Bool(values, nameof(SoilScansVerify), SoilScansVerify);
             TerrainSearchVerify = Bool(values, nameof(TerrainSearchVerify), TerrainSearchVerify);
             HomeSearchVerify = Bool(values, nameof(HomeSearchVerify), HomeSearchVerify);
+            PathFollowVerify = Bool(values, nameof(PathFollowVerify), PathFollowVerify);
+            ReachabilityVerify = Bool(values, nameof(ReachabilityVerify), ReachabilityVerify);
             VerifyAll = Bool(values, nameof(VerifyAll), VerifyAll);
             WaterRendering = Bool(values, nameof(WaterRendering), WaterRendering);
             BackgroundSave = Bool(values, nameof(BackgroundSave), BackgroundSave);
@@ -173,6 +179,7 @@ namespace LateGamePerformance
             {
                 HaulCacheVerify = YielderSearchVerify = PlantWaterVerify = DistrictCountsVerify = WaterMapCopyVerify = true;
                 SoilScansVerify = TerrainSearchVerify = HomeSearchVerify = SaveSnapshotVerify = true;
+                PathFollowVerify = ReachabilityVerify = true;
             }
         }
 
@@ -185,6 +192,7 @@ namespace LateGamePerformance
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
                    $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, HomeSearchVerify={HomeSearchVerify}, VerifyAll={VerifyAll}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, AnimatorLod={AnimatorLod}, AnimatorLodDistance={AnimatorLodDistance}, SaveSnapshot={SaveSnapshot}, SaveSnapshotVerify={SaveSnapshotVerify}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"DeferPhysicsSync={DeferPhysicsSync}, ShaftAnimators={ShaftAnimators}, " +
+                   $"(fixed: PathFollow={PathFollow}, Reachability={Reachability}) PathFollowVerify={PathFollowVerify}, ReachabilityVerify={ReachabilityVerify}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, UnityMarkers={UnityMarkers}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }
