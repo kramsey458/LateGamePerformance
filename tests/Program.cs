@@ -239,6 +239,14 @@ internal static class Program
         Check(two.Contains("HaulCache OFF") && two.Contains("TerrainMaps OFF") && two.Contains("TerrainSearch OFF") &&
               two.Contains("RouteMaps on") && two.Contains("TerrainMaps, HaulCache turned themselves off"),
             "turned off: several at once, and a feature that never started stays OFF");
+        bool eachInPlace = true;
+        foreach (string name in Plugin.SimulationFeatureNames)
+        {
+            string line = Plugin.TurnedOffLine(all, new[] { name });
+            eachInPlace &= line.Contains(", " + name + " OFF") || line.StartsWith("Simulation features: " + name + " OFF");
+            eachInPlace &= line.Split(new[] { "OFF" }, StringSplitOptions.None).Length == 2;
+        }
+        Check(eachInPlace, "turned off: each feature's name reported turns exactly that feature OFF in the line");
         string notice = TurnedOff.NoticeText(new[] { "RouteMaps", "TerrainMaps" });
         Check(notice.Contains("RouteMaps, TerrainMaps") && notice.Contains("Every player should quit and restart the game"),
             "turned off: the in-game notice names the features and asks every player to restart");
@@ -268,6 +276,36 @@ internal static class Program
                   attribute.AttributeType.Name == "ContextAttribute" &&
                   (string)attribute.ConstructorArguments[0].Value == "Game"),
             "turned off notice: constructed from the dialog shower, updated every frame, bound in the game scene");
+
+        // When the notice shows: not while nothing is off, once when a feature turns itself off, not on the frames
+        // after, again when another one does, and once at the start of a new game scene (a new notice) while any is.
+        int shown = 0;
+        bool nothingOff = !TurnedOffNotice.ShouldShow(ref shown, 0);
+        bool first = TurnedOffNotice.ShouldShow(ref shown, 1);
+        bool nextFrame = !TurnedOffNotice.ShouldShow(ref shown, 1);
+        bool another = TurnedOffNotice.ShouldShow(ref shown, 2) && !TurnedOffNotice.ShouldShow(ref shown, 2);
+        int newScene = 0;
+        bool inNewScene = TurnedOffNotice.ShouldShow(ref newScene, 2) && !TurnedOffNotice.ShouldShow(ref newScene, 2);
+        Check(nothingOff && first && nextFrame && another && inNewScene,
+            "turned off notice: shown once per feature turning itself off and once per new game scene, never every frame");
+
+        // The line is said right away when a feature reports, not only on the stats intervals (which can be off),
+        // and only the first time that feature reports.
+        List<string> infos = new List<string>();
+        List<string> reportWarnings = new List<string>();
+        Action<string> warningSink = Log.WarningSink;
+        Log.Sink = infos.Add;
+        Log.WarningSink = reportWarnings.Add;
+        int before = TurnedOff.Version;
+        TurnedOff.Report("IdleEntities", "IdleEntities failed (forced by the test)");
+        int afterFirst = infos.Count(IsTurnedOffLine);
+        TurnedOff.Report("IdleEntities", "IdleEntities failed again (forced by the test)");
+        Log.Sink = sink;
+        Log.WarningSink = warningSink;
+        Check(reportWarnings.Count == 2 && afterFirst == 1 && infos.Count(IsTurnedOffLine) == 1 &&
+              infos[0].Contains(string.Join(", ", off) + ", IdleEntities turned themselves off") &&
+              TurnedOff.Version == before + 1,
+            $"turned off: the line is said at once when a feature reports, and only the first time ({afterFirst}, {infos.Count(IsTurnedOffLine)})");
     }
 
     private static bool IsTurnedOffLine(string line)

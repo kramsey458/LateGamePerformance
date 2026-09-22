@@ -20,12 +20,10 @@ namespace LateGamePerformance
 
         public void UpdateSingleton()
         {
-            int version = TurnedOff.Version;
-            if (version == _shownVersion)
+            if (!ShouldShow(ref _shownVersion, TurnedOff.Version))
             {
                 return;
             }
-            _shownVersion = version;
             try
             {
                 _dialogBoxShower.Create().SetMessage(TurnedOff.NoticeText(TurnedOff.Names())).Show();
@@ -34,6 +32,19 @@ namespace LateGamePerformance
             {
                 Log.Warning("The notice that a feature turned itself off could not be shown: " + exception.Message);
             }
+        }
+
+        // Whether to show the dialog on this frame, given the version this scene's notice last showed (0 in a new
+        // scene): once when a feature turns itself off, once at the start of every later game scene while one is
+        // off, never while none is, and not again on the frames after. Free of UI so the tests can drive it.
+        internal static bool ShouldShow(ref int shownVersion, int version)
+        {
+            if (version == shownVersion)
+            {
+                return false;
+            }
+            shownVersion = version;
+            return true;
         }
     }
 

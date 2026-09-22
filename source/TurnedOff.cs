@@ -9,7 +9,8 @@ namespace LateGamePerformance
     // on this computer runs the game's own code for it where the other players may run the mod's, so a multiplayer
     // game can drift apart. A warning in Player.log is not something anyone reads in time, so it is said three ways:
     // the warning itself, a dialog in the game asking every player to restart (TurnedOffNotice), and the
-    // Simulation features line said again, with OFF, on every stats interval and in every new game scene (Plugin).
+    // Simulation features line said again, with OFF, right away, then on every stats interval and in every new game
+    // scene (Plugin).
     //
     // Only failures report here. A feature that stands down by design (DistrictCounts beside another mod's patch it
     // has not read) does the same on every computer with the same mods, and says so in its own line.
@@ -22,17 +23,24 @@ namespace LateGamePerformance
         // Goes up each time another feature turns itself off.
         public static int Version => Volatile.Read(ref _version);
 
-        // Logs the feature's warning and remembers the feature. Any thread.
+        // Logs the feature's warning, remembers the feature and, the first time it reports, says the Simulation
+        // features line again with it OFF (the stats intervals that repeat it can be switched off). Any thread.
         public static void Report(string feature, string warning)
         {
             Log.Warning(warning);
+            bool added = false;
             lock (Lock)
             {
                 if (!Features.Contains(feature))
                 {
                     Features.Add(feature);
                     Interlocked.Increment(ref _version);
+                    added = true;
                 }
+            }
+            if (added)
+            {
+                Log.Info(Plugin.TurnedOffLine());
             }
         }
 

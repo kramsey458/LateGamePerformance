@@ -280,9 +280,13 @@ internal static class TerrainAndWaterTests
         // and the feature stays on.
         foreach (object field in CachedFields(cache, cachedStarts)) RouteMapsTests.PoisonOffThisThread(field);
         int reports = TurnedOff.Version;
+        int maximum = TickWorkers.Maximum;
         foreach (int count in new[] { 5, 7 })
         {
+            // Set up as Plugin.Start does it, and each count starts with the feature on.
+            TickWorkers.Configure(count);
             TerrainMaps.CreateFeature(new Config { RouteMapsWorkers = count });
+            TerrainMaps.Activate();
             TerrainMaps.PathfindingServiceCreatedPostfix(service);
             TerrainMaps.SetRangeForTests(Range);
             foreach (object field in CachedFields(cache, cachedStarts)) RouteMapsTests.Call(field, "Clear");
@@ -297,6 +301,7 @@ internal static class TerrainAndWaterTests
                 $"terrain hook, {count} workers that cannot build: every cached map is built on the main thread instead, " +
                 $"identical to the game's, feature still on ({wrong} wrong)");
         }
+        TickWorkers.Configure(maximum);
 
         // A map that throws wherever it is built, in a batch small enough for the main thread: the other maps are
         // still built, and the feature turns itself off (on every computer alike: the game's code failed on the

@@ -440,7 +440,7 @@ The harness poisons a map so that it throws on any thread but the test's own: wi
 left unbuilt by the batch are the same, all but that one (0.4.26 left maps 3, 8, 13... unbuilt with 5 workers and
 3, 10, 17... with 7). Through the navigation tick hook, with every map throwing on the workers, every map is built
 on the main thread instead, identical to the game's, with the feature still on, for road and terrain maps and for the
-background rebuild. A map that throws wherever it is built, in a small batch, leaves the maps after it built and
+background rebuild (there also for a map asked for while a worker still holds the flight open). A map that throws wherever it is built, in a small batch, leaves the maps after it built and
 turns the feature off.
 
 **Scanned only after a change (0.4.25).** Walking every cached map on every navigation tick to find the unbuilt
@@ -910,7 +910,8 @@ maximum and a maximum below one.
 ### A simulation feature that turns itself off (always on, new after 0.4.26)
 
 Each of the eleven simulation features hands its call to the game's own code and stays off for the rest of the
-session if something throws inside it. From then on this computer runs the game's code for it where the other players
+session if something throws inside it that it cannot recover from (road and terrain maps first build a map that threw
+again on the main thread, and turn off only if that throws too: see When a map build throws). From then on this computer runs the game's code for it where the other players
 may still run the mod's, and a multiplayer game can drift apart; a new game scene (a BeaverBuddies rehost included)
 does not bring the feature back, only a restart does. Up to 0.4.26 all a player got was one warning in `Player.log`.
 Now a feature that turns itself off after an error is also said:
@@ -918,8 +919,9 @@ Now a feature that turns itself off after an error is also said:
 - **in the game:** a dialog names the feature and asks every player to quit and restart the game before playing on
   together. It is shown from the frame loop, not from inside the tick where the failure happened, when the failure
   happens and again at the start of every later game scene while a feature is off;
-- **in the log:** the `Simulation features:` line is written again with that feature `OFF` and the same request, on
-  every stats interval and in every new game scene, so two players' logs still compare at a glance:
+- **in the log:** the `Simulation features:` line is written again with that feature `OFF` and the same request,
+  right after the warning, then on every stats interval (when `StatsEveryTicks` is above 0) and in every new game
+  scene, so two players' logs still compare at a glance:
 
 ```
 [LateGamePerformance] Simulation features: HaulCache on, RouteMaps OFF, YielderSearch on, TerrainMaps on, ...,
@@ -931,6 +933,10 @@ together.
 A feature that stands down by design is not a failure and is not reported: DistrictCounts beside another mod's patch
 it has not read does the same on every computer with the same mods, and says so in its own line. The dialog changes
 nothing in the simulation.
+
+The harness checks which features the forced failures above turned off, that each name turns exactly that feature
+`OFF` in the line, that the line is said at once, in a new game scene and on the next stats interval, and when the
+dialog shows: once per feature turning itself off and once per new game scene, never on every frame.
 
 ### Route map caches scanned only after a change (always on, new in 0.4.25)
 
