@@ -298,7 +298,8 @@ namespace LateGamePerformance
         {
             _active = false;
             State.Valid = false;
-            Log.Warning("TerrainSearch failed and turned itself off for this session; the game's own search runs: " + exception);
+            TurnedOff.Report("TerrainSearch", "TerrainSearch failed and turned itself off for this session; the game's " +
+                                              "own search runs: " + exception);
         }
 
         // The algorithm, generic over the game's two internal structs so that nothing is boxed per tile.

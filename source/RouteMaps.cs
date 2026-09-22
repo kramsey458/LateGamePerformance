@@ -39,6 +39,14 @@ namespace LateGamePerformance
     //  - Each map is written by exactly one thread. The road graph and district maps are only read.
     //  - How the work is split (worker count, background or not, the small-batch limit) changes who builds a
     //    map and when, never which maps end up built, so those settings may differ between peers.
+    //  - That holds when a build throws, too. A map that throws does not stop the others, and before the game can
+    //    see it, it is built once more on the main thread, so a failure only one computer's worker threads have (a
+    //    patch by another mod that works only on the main thread, say) leaves it with the same maps built as
+    //    everyone else. Only if the main thread's build throws as well, which is then the game's generator failing
+    //    on the game's data and so the same on every peer, does the feature turn itself off, and it says so in the
+    //    game (TurnedOff). Up to 0.4.26 a worker gave up the rest of its share at the first exception, and the
+    //    small batch on the main thread the rest of the batch, so which maps were left depended on the worker
+    //    count and the small-batch limit, and any failure turned the feature off on that computer only.
     //
     // Difference from the unmodded game: maps are filled before the first request instead of on it, so the
     // "if it is already filled" paths take the cached route more often. Every peer needs RouteMaps on or off
@@ -103,6 +111,8 @@ namespace LateGamePerformance
         private static long _fieldsFilled;
         private static long _builtDirectly;
         private static long _wallStopwatchTicks;
+        private static long _rebuiltAfterFailure;
+        private static bool _workerFailureLogged;
 
         public static int WorkerCount => _workerCount;
 
@@ -165,7 +175,11 @@ namespace LateGamePerformance
             string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}; " +
                           $"{_cachedMaps} maps cached, the largest {_largestMapNodes} tiles; the cache was scanned {_scans} times and " +
                           $"left alone {_scansSkipped} times because nothing had changed, {_missedByHooks} unbuilt maps were found by " +
-                          "the periodic check alone (left to the game)";
+                          "the periodic check alone (left to the game)" +
+                          (_rebuiltAfterFailure > 0
+                              ? $"; {_rebuiltAfterFailure} maps whose first build threw were built again on the main " +
+                                "thread"
+                              : "");
             string line = _background
                 ? $"RouteMaps: {_batches} background rebuilds of {_fieldsFilled} route maps; main thread spent " +
                   $"{_mainStopwatchTicks * msPerTick:0.0} ms on them, longest single pause " +
@@ -176,7 +190,7 @@ namespace LateGamePerformance
             _batches = _fieldsFilled = _builtDirectly = _wallStopwatchTicks = 0;
             _mainStopwatchTicks = _backgroundStopwatchTicks = _builtOnMain = _waitedOnMain = 0;
             _longestPauseStopwatchTicks = 0;
-            _scans = _scansSkipped = _missedByHooks = 0;
+            _scans = _scansSkipped = _missedByHooks = _rebuiltAfterFailure = 0;
             return line;
         }
 
@@ -228,19 +242,69 @@ namespace LateGamePerformance
 
         // Fills every work item with the game's own generator, spread over the worker generators. Returns the
         // first exception any worker hit, or null. Public to the test harness, which runs it against the real
-        // navigation assembly and compares the result with sequential fills.
+        // navigation assembly and compares the result with sequential fills. A map whose fill throws is left
+        // unfilled and its worker goes on with the next one, so which maps are left never depends on the worker
+        // count.
         public static Exception FillParallel(object graph, IReadOnlyList<Work> work, object[] workerGenerators)
         {
             int workers = Math.Min(workerGenerators.Length, work.Count);
-            // This mod's own worker threads; strided split: no shared counters, one generator per worker.
-            return TickWorkers.Run(workers, (worker, sharing) =>
+            Exception failure = null;
+            // This mod's own worker threads; strided split: no shared counters, one generator per worker. The
+            // generator clears its scratch state at the start of every fill, so one that threw is fit for the next.
+            Exception thrown = TickWorkers.Run(workers, (worker, sharing) =>
             {
                 object generator = workerGenerators[worker];
                 for (int i = worker; i < work.Count; i += sharing)
                 {
-                    Fill(generator, graph, work[i]);
+                    try
+                    {
+                        Fill(generator, graph, work[i]);
+                    }
+                    catch (Exception exception)
+                    {
+                        Interlocked.CompareExchange(ref failure, exception, null);
+                    }
                 }
             });
+            return failure ?? thrown;
+        }
+
+        // Fills, on the calling thread, every work item that is not filled yet, going on past a map that throws.
+        // Returns the first exception, or null. Every work item can be built (the conditions are checked when it is
+        // listed), so after a call that returns null all of them are.
+        internal static Exception FillUnfilledHere(object generator, object graph, IReadOnlyList<Work> work,
+            ref int built)
+        {
+            Exception failure = null;
+            for (int i = 0; i < work.Count; i++)
+            {
+                try
+                {
+                    if (!_isFilled(work[i].Field))
+                    {
+                        Fill(generator, graph, work[i]);
+                        built++;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    failure = failure ?? exception;
+                }
+            }
+            return failure;
+        }
+
+        // A map's first build threw and its second, on the main thread, did not: the feature stays on. Said once
+        // per session; the stats line counts the rest.
+        private static void NoteRecovered(Exception failure)
+        {
+            if (!_workerFailureLogged)
+            {
+                _workerFailureLogged = true;
+                Log.Warning("RouteMaps: a route map could not be built on the first try; it was built again on the " +
+                            "main thread and the feature stays on (later ones are only counted on the stats line): " +
+                            failure);
+            }
         }
 
         public static object[] CreateWorkerGenerators(object binaryHeapFactory, int count)
@@ -364,33 +428,43 @@ namespace LateGamePerformance
                 // One per worker, plus one for the main thread when it builds a map itself.
                 _workerGenerators = CreateWorkerGenerators(binaryHeapFactory, _workerCount + 1);
             }
+            object mainGenerator = _workerGenerators[_workerGenerators.Length - 1];
+            Exception failure;
             if (WorkScratch.Count < _minFields)
             {
                 // A new building or two: starting workers costs more than building these here. They are still
                 // built now, not left for later, so every peer ends the tick with the same maps built.
-                object mainGenerator = _workerGenerators[_workerGenerators.Length - 1];
-                for (int i = 0; i < WorkScratch.Count; i++)
-                {
-                    Fill(mainGenerator, graph, WorkScratch[i]);
-                }
+                int built = 0;
+                failure = FillUnfilledHere(mainGenerator, graph, WorkScratch, ref built);
                 _builtDirectly += WorkScratch.Count;
-                return;
             }
-            if (_background)
+            else if (_background)
             {
                 BeginBackground(graph, districtMap, WorkScratch, _workerGenerators);
                 return;
             }
-
-            long started = Stopwatch.GetTimestamp();
-            Exception failure = FillParallel(graph, WorkScratch, _workerGenerators);
-            _wallStopwatchTicks += Stopwatch.GetTimestamp() - started;
-            _batches++;
-            _fieldsFilled += WorkScratch.Count;
+            else
+            {
+                long started = Stopwatch.GetTimestamp();
+                failure = FillParallel(graph, WorkScratch, _workerGenerators);
+                _wallStopwatchTicks += Stopwatch.GetTimestamp() - started;
+                _batches++;
+                _fieldsFilled += WorkScratch.Count;
+            }
             if (failure != null)
             {
-                // A map that was not finished is simply not marked as filled; the game builds it on demand.
-                Disable(failure);
+                // Every map whose build threw is built once more here, so that every peer ends the tick with every
+                // buildable map built, whatever went wrong on its worker threads and whichever way its settings
+                // split the batch. If the main thread's build throws too, the exception turns the feature off (in
+                // the navigation tick hook), with the maps after it still built.
+                int rebuilt = 0;
+                Exception again = FillUnfilledHere(mainGenerator, graph, WorkScratch, ref rebuilt);
+                _rebuiltAfterFailure += rebuilt;
+                if (again != null)
+                {
+                    throw again;
+                }
+                NoteRecovered(failure);
             }
         }
 
@@ -422,7 +496,7 @@ namespace LateGamePerformance
                     // Workers never throw; nothing more can be done here either way.
                 }
             }
-            Log.Warning("RouteMaps failed and turned itself off for this session: " + exception);
+            TurnedOff.Report("RouteMaps", "RouteMaps failed and turned itself off for this session: " + exception);
         }
     }
 }

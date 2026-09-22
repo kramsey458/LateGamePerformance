@@ -222,7 +222,8 @@ namespace LateGamePerformance
                 // Nothing has been changed unless the game's own AssignDweller threw, which it would have thrown
                 // for the same beaver in the game's own walk; the game's walk now runs.
                 _active = false;
-                Log.Warning("HomeSearch failed and turned itself off for this session: " + exception);
+                TurnedOff.Report("HomeSearch",
+                    "HomeSearch failed and turned itself off for this session: " + exception);
                 return true;
             }
         }

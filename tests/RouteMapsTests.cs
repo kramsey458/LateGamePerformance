@@ -2,8 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using LateGamePerformance;
 
 // Runs the parallel route map rebuild against the installed game's real Timberborn.Navigation classes: a road
@@ -93,6 +95,33 @@ internal static class RouteMapsTests
         Exception expected = RouteMaps.FillParallel(graph, brokenWork, pool);
         check(expected != null, "a worker failure is returned instead of thrown");
         check(!(bool)Get(brokenWork[1].Field, "IsFilled"), "the failed map stays unfilled");
+
+        // One map that throws must not take other maps with it: up to 0.4.26 a worker gave up the rest of its share
+        // at the first exception, so which maps stayed unbuilt depended on the worker count, which differs between
+        // computers. Item 3 throws on any thread but this one and lands on a worker with 5 workers and with 7.
+        int[] some = new int[70];
+        Array.Copy(starts, some, some.Length);
+        List<int>[] filledWith = new List<int>[2];
+        bool reported = true;
+        int run = 0;
+        foreach (int count in new[] { 5, 7 })
+        {
+            List<RouteMaps.Work> work = CreateWork(some, limiting);
+            PoisonOffThisThread(work[3].Field);
+            reported &= RouteMaps.FillParallel(graph, work, RouteMaps.CreateWorkerGenerators(heapFactory, count)) != null;
+            filledWith[run++] = FilledIndices(work);
+        }
+        List<int> allButThree = new List<int>();
+        for (int i = 0; i < some.Length; i++)
+        {
+            if (i != 3)
+            {
+                allButThree.Add(i);
+            }
+        }
+        check(reported && filledWith[0].SequenceEqual(filledWith[1]) && filledWith[0].SequenceEqual(allButThree),
+            "one map fails on a worker: 5 and 7 workers leave the same maps built, all but that one " +
+            $"(unbuilt with 5: {Missing(filledWith[0], some.Length)}; with 7: {Missing(filledWith[1], some.Length)})");
 
         RunOrchestration(graph, heapFactory, limiting, starts, sequentialWork, check);
         RunBackground(graph, heapFactory, limiting, starts, sequentialWork, workers, parallelTimer.ElapsedMilliseconds, check);
@@ -300,6 +329,62 @@ internal static class RouteMapsTests
               scanStats.Contains("3 unbuilt maps were found by the periodic check alone") && scanStats.Contains("left alone 200 times"),
             "orchestration scan: the periodic check counts what the hooks missed and leaves it to the game; the next flag builds it");
         RouteMaps.ScanOnlyWhenChanged = false;
+
+        // Every cached map throws on a worker thread and builds on this one. The maps the workers could not build
+        // are built again on the main thread, with 5 workers and with 7 alike, and the feature stays on.
+        foreach (int start in cached)
+        {
+            PoisonOffThisThread(fieldAt[start]);
+        }
+        int reports = TurnedOff.Version;
+        int maximum = TickWorkers.Maximum;
+        foreach (int count in new[] { 5, 7 })
+        {
+            // Set up as Plugin.Start does it: RouteMapsWorkers threads in all, the calling one included. Each count
+            // starts with the feature on, so neither run leans on the other.
+            TickWorkers.Configure(count);
+            RouteMaps.CreateFeature(new Config { RouteMapsMinFields = 16, RouteMapsWorkers = count });
+            RouteMaps.Activate();
+            RouteMaps.PathfindingServiceCreatedPostfix(service);
+            for (int i = 1; i < cached.Count; i++)
+            {
+                Call(fieldAt[cached[i]], "Clear");
+            }
+            RouteMaps.NavigationTickedPostfix();
+            int wrongAfterWorkers = 0;
+            for (int i = 1; i < cached.Count; i++)
+            {
+                object field = fieldAt[cached[i]];
+                if (!(bool)Get(field, "IsFilled") || !SameMap(expected[indexOfStart[cached[i]]].Field, field, ref nodesCompared))
+                {
+                    wrongAfterWorkers++;
+                }
+            }
+            check(wrongAfterWorkers == 0 && RouteMaps.IsActive && TurnedOff.Version == reports,
+                $"orchestration, {count} workers that cannot build: every cached map is built on the main thread instead, " +
+                $"identical to the game's, feature still on ({wrongAfterWorkers} wrong)");
+        }
+        TickWorkers.Configure(maximum);
+
+        // A map that throws wherever it is built, in a batch small enough for the main thread: the maps after it
+        // are still built, and the feature turns itself off (on every computer alike: the game's code failed on
+        // the game's data).
+        for (int i = 20; i <= 22; i++)
+        {
+            Call(fieldAt[cached[i]], "Clear");
+        }
+        PoisonEverywhere(fieldAt[cached[20]]);
+        RouteMaps.NavigationTickedPostfix();
+        check((bool)Get(fieldAt[cached[21]], "IsFilled") && (bool)Get(fieldAt[cached[22]], "IsFilled") && !RouteMaps.IsActive &&
+              TurnedOff.Version == reports + 1 && TurnedOff.Names().Last() == "RouteMaps",
+            "orchestration, a map that fails on the main thread too: the maps after it in the batch are still built, and " +
+            "the feature turns itself off and says so");
+        string stats = RouteMaps.TakeStatsLine();
+        Console.WriteLine("     " + stats);
+        check(stats.Contains("maps whose first build threw were built again on the main thread"),
+            "orchestration stats: the maps built again on the main thread are counted");
+        RouteMaps.CreateFeature(new Config());
+        RouteMaps.Activate();
     }
 
     // Background rebuild: workers fill while this thread plays the game's part, asking for maps in a shuffled
@@ -401,6 +486,69 @@ internal static class RouteMapsTests
                           $"{distinct.Length} maps and built {RouteMaps.BuiltOnMainSinceReport / pacedRounds} of them itself; " +
                           $"longest single pause {RouteMaps.LongestPauseMsSinceReport:0.0} ms (waiting for the whole batch: about {waitForAllMs} ms)");
 
+        // Workers that cannot build (every map throws on any thread but this one): each map is complete when the
+        // game asks for it, the rest are built when the flight lands, and the feature stays on.
+        List<RouteMaps.Work> offThread = CreateWork(distinct, limiting);
+        foreach (RouteMaps.Work item in offThread)
+        {
+            PoisonOffThisThread(item.Field);
+        }
+        int reports = TurnedOff.Version;
+        RouteMaps.BeginBackground(graph, districtMapStandIn, offThread, generators);
+        int notReadyOffThread = 0;
+        for (int i = 0; i < distinct.Length; i += 2)
+        {
+            RouteMaps.MapRequestedPrefix(offThread[i].StartNodeId);
+            if (!(bool)Get(offThread[i].Field, "IsFilled"))
+            {
+                notReadyOffThread++;
+            }
+        }
+        RouteMaps.Land();
+        int wrongOffThread = 0;
+        for (int i = 0; i < offThread.Count; i++)
+        {
+            if (!(bool)Get(offThread[i].Field, "IsFilled") ||
+                !SameMap(expected[indexOfStart[offThread[i].StartNodeId]].Field, offThread[i].Field, ref nodesCompared))
+            {
+                wrongOffThread++;
+            }
+        }
+        check(notReadyOffThread == 0 && wrongOffThread == 0 && RouteMaps.IsActive && TurnedOff.Version == reports,
+            "background, workers that cannot build: every map is complete when asked for and after landing, identical " +
+            $"to the game's, feature still on ({notReadyOffThread} not ready, {wrongOffThread} wrong)");
+
+        // A map the game asks for while the flight is still open, after a worker failed to build it: it is built on
+        // the main thread there and then, not only when the flight lands. Map 0 throws on any thread but this one;
+        // map 1 holds its worker until released, so the flight cannot land before map 0 is asked for.
+        List<RouteMaps.Work> held = CreateWork(distinct, limiting);
+        PoisonOffThisThread(held[0].Field);
+        ManualResetEventSlim release = new ManualResetEventSlim(false);
+        FieldInfo heldNodes = held[1].Field.GetType().GetField("_nodes", Any);
+        heldNodes.SetValue(held[1].Field, Activator.CreateInstance(heldNodes.FieldType, new HoldOffThisThread(release)));
+        RouteMaps.BeginBackground(graph, districtMapStandIn, held, generators);
+        object heldFlight = typeof(RouteMaps).GetField("_flight", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+        int[] heldState = (int[])heldFlight.GetType().GetField("State", Any).GetValue(heldFlight);
+        const int done = 2;
+        Stopwatch waited = Stopwatch.StartNew();
+        while (Volatile.Read(ref heldState[0]) != done && waited.ElapsedMilliseconds < 10000)
+        {
+            Thread.Yield();
+        }
+        bool workerTried = Volatile.Read(ref heldState[0]) == done && !(bool)Get(held[0].Field, "IsFilled");
+        int remaining = (int)heldFlight.GetType().GetField("Remaining", Any).GetValue(heldFlight);
+        RouteMaps.MapRequestedPrefix(held[0].StartNodeId);
+        bool readyWhenAsked = (bool)Get(held[0].Field, "IsFilled") &&
+                              SameMap(expected[indexOfStart[held[0].StartNodeId]].Field, held[0].Field, ref nodesCompared);
+        bool stillInFlight = RouteMaps.IsInFlight;
+        release.Set();
+        RouteMaps.Land();
+        check(workerTried && remaining > 0 && stillInFlight && readyWhenAsked && RouteMaps.IsActive &&
+              TurnedOff.Version == reports,
+            "background: a map a worker could not build is built on the main thread when it is asked for while the " +
+            $"flight is still open, identical to the game's (tried {workerTried}, remaining {remaining}, in flight " +
+            $"{stillInFlight}, ready {readyWhenAsked})");
+
         // A worker that fails must be contained: nobody waits forever, and the feature switches itself off.
         List<RouteMaps.Work> broken = CreateWork(distinct, limiting);
         for (int i = 0; i < broken.Count; i += 9)
@@ -414,6 +562,104 @@ internal static class RouteMapsTests
         }
         RouteMaps.Land();
         check(!RouteMaps.IsInFlight && !RouteMaps.IsActive, "background: failing maps end the rebuild and switch the feature off");
+    }
+
+    // Makes a map throw whenever it is touched from any thread but this one, the way a patch by another mod that
+    // calls Unity would on a worker thread: its node table gets a key comparer that checks the thread.
+    internal static void PoisonOffThisThread(object field)
+    {
+        FieldInfo nodes = field.GetType().GetField("_nodes", Any);
+        nodes.SetValue(field, Activator.CreateInstance(nodes.FieldType, new ThisThreadOnly()));
+    }
+
+    // Makes a map throw wherever it is built: its node table is gone.
+    internal static void PoisonEverywhere(object field)
+    {
+        field.GetType().GetField("_nodes", Any).SetValue(field, null);
+    }
+
+    internal static List<int> FilledIndices<T>(List<T> work)
+    {
+        List<int> filled = new List<int>();
+        for (int i = 0; i < work.Count; i++)
+        {
+            object field = typeof(T).GetField("Field").GetValue(work[i]);
+            if ((bool)Get(field, "IsFilled"))
+            {
+                filled.Add(i);
+            }
+        }
+        return filled;
+    }
+
+    internal static string Missing(List<int> filled, int count)
+    {
+        List<int> missing = new List<int>();
+        for (int i = 0; i < count; i++)
+        {
+            if (!filled.Contains(i))
+            {
+                missing.Add(i);
+            }
+        }
+        return missing.Count == 0 ? "none" : string.Join(",", missing);
+    }
+
+    // Holds any thread but this one inside the map's node table until released: a worker that stays busy.
+    private sealed class HoldOffThisThread : IEqualityComparer<int>
+    {
+        private readonly Thread _owner = Thread.CurrentThread;
+        private readonly ManualResetEventSlim _release;
+
+        public HoldOffThisThread(ManualResetEventSlim release)
+        {
+            _release = release;
+        }
+
+        public bool Equals(int x, int y)
+        {
+            Hold();
+            return x == y;
+        }
+
+        public int GetHashCode(int value)
+        {
+            Hold();
+            return value;
+        }
+
+        private void Hold()
+        {
+            if (Thread.CurrentThread != _owner)
+            {
+                _release.Wait();
+            }
+        }
+    }
+
+    private sealed class ThisThreadOnly : IEqualityComparer<int>
+    {
+        private readonly Thread _owner = Thread.CurrentThread;
+
+        public bool Equals(int x, int y)
+        {
+            Check();
+            return x == y;
+        }
+
+        public int GetHashCode(int value)
+        {
+            Check();
+            return value;
+        }
+
+        private void Check()
+        {
+            if (Thread.CurrentThread != _owner)
+            {
+                throw new InvalidOperationException("this map can only be built on the main thread");
+            }
+        }
     }
 
     internal static object GetField(object target, string name)

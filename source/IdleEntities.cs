@@ -414,7 +414,8 @@ namespace LateGamePerformance
         private static void Fail(object reason)
         {
             _active = false;
-            Log.Warning("IdleEntities failed and turned itself off for this session; the game's own tick loop runs: " + reason);
+            TurnedOff.Report("IdleEntities",
+                "IdleEntities failed and turned itself off for this session; the game's own tick loop runs: " + reason);
         }
     }
 }

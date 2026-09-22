@@ -299,7 +299,8 @@ namespace LateGamePerformance
             {
                 _active = false;
                 ClearScratch(finder);
-                Log.Warning("YielderSearch failed and turned itself off for this session: " + exception);
+                TurnedOff.Report("YielderSearch",
+                    "YielderSearch failed and turned itself off for this session: " + exception);
                 return true;
             }
         }

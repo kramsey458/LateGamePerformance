@@ -224,7 +224,7 @@ namespace LateGamePerformance
             {
                 // Nothing was added to workplaceBehaviors before this point, so vanilla can take over cleanly.
                 _active = false;
-                Log.Warning("HaulCache failed and turned itself off for this session: " + exception);
+                TurnedOff.Report("HaulCache", "HaulCache failed and turned itself off for this session: " + exception);
                 return true;
             }
         }

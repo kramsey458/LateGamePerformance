@@ -12,7 +12,8 @@ namespace LateGamePerformance
     // there is nothing to configure. It stays quiet when the line is already in boot.config and only a restart
     // is missing. The checkbox on the settings page remains for a player who changes their mind.
     //
-    // The only class besides PerformanceSettings that touches UI types; nothing else in the mod depends on it.
+    // One of the three classes that touch UI types, with PerformanceSettings and TurnedOffNotice; nothing else in
+    // the mod depends on it.
     public class GcNotice : IPostLoadableSingleton
     {
         internal const string DeclinedKey = "LateGamePerformance.IncrementalGcNoticeDeclined";

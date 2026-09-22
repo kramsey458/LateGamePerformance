@@ -171,6 +171,7 @@ changes in a real colony, and so how much this saves, has not been measured; the
 - Which maps are built is simulation state: a terrain map is cached exactly while its building is finished, and
   unlike road maps nothing a player looks at builds one (the range overlay uses a map of its own). Every peer
   ends every navigation tick with the same maps built, whatever the thread count.
+- That holds when a build throws, too (see When a map build throws, under the parallel route map rebuild).
 - The tests build a terrain graph with the game's `TerrainNavMeshGraph`, fill 90 maps one by one and in parallel
   and require them identical node for node and in node order, then drive the hook against a real
   `TerrainFlowFieldCache`: everything cached gets built, a map whose start is off the graph is left alone, a
@@ -414,6 +415,9 @@ worker threads (up to 7).
   between peers.
 - Fewer than `RouteMapsMinFields` unbuilt maps (a new building or two) are built directly on the main thread,
   because starting workers would cost more. They are still built straight away, not left for later.
+- **When a map build throws**, the other maps are still built, and the one that threw is built once more on the
+  main thread with the game's generator before anything can see it, so every peer still ends the tick with the
+  same maps built. See When a map build throws below.
 - **Changed in 0.4.5.** Earlier versions rebuilt "the maps that were filled before the road change". That was
   wrong for multiplayer: a map also gets filled when a player's range overlay asks for a route, on that
   player's computer only, so two peers could rebuild different sets and then disagree about which maps are
@@ -426,6 +430,31 @@ game would have searched again. That is why route maps are not a setting: every 
 
 In the test harness, 420 maps on a 22,600-tile road network took about 1.8 s one by one and about 0.23 s on
 7 workers.
+
+**When a map build throws (road and terrain maps).** A map whose build throws on a worker no longer takes other
+maps with it. Up to 0.4.26 a worker gave up the rest of its share of the batch at the first exception, and the
+small batch on the main thread gave up the rest of the batch, so which maps were left unbuilt depended on the worker
+count and on `RouteMapsMinFields` and `RouteMapsBackground`, which differ between computers; and whether a map is
+built changes path results (a few of the game's paths use a map only "if it is already filled"). Any exception also
+turned the feature off, on that computer only. Now:
+
+- Every map of the batch is tried; one that throws is left unbuilt and its worker goes on with the next. The game's
+  generators clear their scratch state at the start of every build, so a generator that threw is fit for the next.
+- After the batch, every map that threw is built once more on the main thread, with the main thread's own copy of
+  the game's generator. In the background rebuild that happens before the game can see the map: when it is asked
+  for, or when the flight lands. A failure only one computer's worker threads have (a patch by another mod that works
+  only on the main thread, say) therefore leaves that computer with the same maps built as everyone else. The first
+  such failure of the session is logged as a warning, and the stats line counts the maps built again.
+- Only if the main thread's build throws as well does the feature turn itself off. That is then the game's generator
+  failing on the game's data, which happens alike on every peer (and would happen on demand in the unmodded game),
+  with the same maps built before it. It is said loudly: see A simulation feature that turns itself off.
+
+The harness poisons a map so that it throws on any thread but the test's own: with 5 and with 7 workers, the maps
+left unbuilt by the batch are the same, all but that one (0.4.26 left maps 3, 8, 13... unbuilt with 5 workers and
+3, 10, 17... with 7). Through the navigation tick hook, with every map throwing on the workers, every map is built
+on the main thread instead, identical to the game's, with the feature still on, for road and terrain maps and for the
+background rebuild (there also for a map asked for while a worker still holds the flight open). A map that throws wherever it is built, in a small batch, leaves the maps after it built and
+turns the feature off.
 
 **Scanned only after a change (0.4.25).** Walking every cached map on every navigation tick to find the unbuilt
 ones cost 0.27 ms per tick in the logged colony, on ticks where nothing had changed. `MapChanges` hooks the events
@@ -459,7 +488,8 @@ whenever the game looks at a map from the batch it is complete. That is exactly 
 batch had been waited for, so results are identical to 0.2.0: timing decides who builds a map and when, never
 what the game observes. Anything that changes what the workers read (the road graph, the district maps) first
 finishes the rebuild, as does the start of the next navigation tick. If any gate cannot be installed, the mod
-falls back to waiting for the whole batch.
+falls back to waiting for the whole batch. A map whose build threw on a worker is built again on the main thread
+when it is asked for or when the rebuild lands, so the game never sees one of these maps unbuilt.
 
 What to expect: the total main-thread time does not drop much, because a map the game needs right now has to be
 built by someone. What changes is its shape: many short pauses of at most about one map build, spread over the
@@ -893,6 +923,37 @@ stats line counts jobs shared, threads, wakes while still spinning and from slee
 harness runs strided sums over four workers, a throwing worker, a job started inside a job, more workers than the
 maximum and a maximum below one.
 
+### A simulation feature that turns itself off (always on, new in 0.4.27)
+
+Each of the eleven simulation features hands its call to the game's own code and stays off for the rest of the
+session if something throws inside it that it cannot recover from (road and terrain maps first build a map that threw
+again on the main thread, and turn off only if that throws too: see When a map build throws). From then on this computer runs the game's code for it where the other players
+may still run the mod's, and a multiplayer game can drift apart; a new game scene (a BeaverBuddies rehost included)
+does not bring the feature back, only a restart does. Up to 0.4.26 all a player got was one warning in `Player.log`.
+Now a feature that turns itself off after an error is also said:
+
+- **in the game:** a dialog names the feature and asks every player to quit and restart the game before playing on
+  together. It is shown from the frame loop, not from inside the tick where the failure happened, when the failure
+  happens and again at the start of every later game scene while a feature is off;
+- **in the log:** the `Simulation features:` line is written again with that feature `OFF` and the same request,
+  right after the warning, then on every stats interval (when `StatsEveryTicks` is above 0) and in every new game
+  scene, so two players' logs still compare at a glance:
+
+```
+[LateGamePerformance] Simulation features: HaulCache on, RouteMaps OFF, YielderSearch on, TerrainMaps on, ...,
+HomeSearch on. RouteMaps turned itself off during this session after an error (see the warning above), so this
+computer runs the game's own code for it. In multiplayer every player should restart the game before playing on
+together.
+```
+
+A feature that stands down by design is not a failure and is not reported: DistrictCounts beside another mod's patch
+it has not read does the same on every computer with the same mods, and says so in its own line. The dialog changes
+nothing in the simulation.
+
+The harness checks which features the forced failures above turned off, that each name turns exactly that feature
+`OFF` in the line, that the line is said at once, in a new game scene and on the next stats interval, and when the
+dialog shows: once per feature turning itself off and once per new game scene, never on every frame.
+
 ### Route map caches scanned only after a change (always on, new in 0.4.25)
 
 See *Scanned only after a change* under the parallel route map rebuild: `MapChanges` hooks the events after which
@@ -990,6 +1051,9 @@ A second line reports route map rebuilds:
 61.0 ms on them, longest single pause 1.9 ms (built 70 itself, waited for 12), workers were busy 180.4 ms
 alongside the game; 6 more built directly on the main thread in batches of fewer than 4
 ```
+
+Both map lines end with `; N maps whose first build threw were built again on the main thread` when that happened
+(see When a map build throws).
 
 One for the district counts (0.4.13):
 
@@ -1163,7 +1227,7 @@ and require it to come last, so that other mods' prefixes on the same methods (B
 filter) run first on every computer whatever the mod load order. They also build a road
 network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
-contained. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers
+contained: the maps a failing build leaves do not depend on the worker count, and the main thread builds them again. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers
 are busy: every map must be complete and correct at the moment it is asked for. They do not run the game.
 
 `dotnet run --project tests -c Release -- --hashes` prints the current hash of every listed snapshot component's
