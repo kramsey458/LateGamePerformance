@@ -62,7 +62,7 @@
   <ol class="steps">
     <li><div><strong>Back up your save</strong><p>Copy the save you want to use from <code>Documents\Timberborn\Saves</code>.</p></div></li>
     <li><div><strong>Get Harmony and Mod Settings</strong><p>Subscribe to both on the Steam Workshop if you have not already. This mod will not start without them.</p></div></li>
-    <li><div><strong>Download the mod</strong><p>Get <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><code><span data-release="asset-name">LateGamePerformance-0.4.27.zip</span></code></a> from the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">release page</a>. On the release page choose that file under <strong>Assets</strong>, not <strong>Source code</strong>. A preview, when there is one, is on the same Releases page marked <strong>Pre-release</strong>. It installs the same way but has not been played yet.</p></div></li>
+    <li><div><strong>Download the mod</strong><p>Get <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><code><span data-release="asset-name">LateGamePerformance-0.4.29.zip</span></code></a> from the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">release page</a>. On the release page choose that file under <strong>Assets</strong>, not <strong>Source code</strong>. A preview, when there is one, is on the same Releases page marked <strong>Pre-release</strong>. It installs the same way but has not been played yet.</p></div></li>
     <li><div><strong>Close Timberborn</strong><p>Make sure the game is fully closed before you copy files into its Mods folder.</p></div></li>
     <li><div><strong>Extract into your Mods folder</strong><p>Delete any older <code>LateGamePerformance</code> folder first. Then extract the ZIP into <code>Documents\Timberborn\Mods</code>. It contains one folder, <code>LateGamePerformance</code>, and you should end up with the layout <a href="#layout">shown below</a>. If you extracted into a new folder you may have a doubled <code>LateGamePerformance\LateGamePerformance</code>. Move the inner one up.</p></div></li>
     <li><div><strong>Enable it and restart</strong><p>Start Timberborn, open <strong>Mods</strong> from the main menu, tick <strong>Harmony</strong>, <strong>Mod Settings</strong> and <strong>Late Game Performance</strong>, and restart the game when it asks. Menu wording can differ a little between game versions.</p></div></li>
@@ -86,7 +86,7 @@
   <ol>
     <li>Quit the game, then open <code>%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log</code>. If you have already restarted, the previous session is in <code>Player-prev.log</code>.</li>
     <li>Search for <code>[LateGamePerformance]</code>. At startup you should see a line for the version and one for the features:
-<pre><code class="log-line">[LateGamePerformance] <span data-release="version">0.4.27</span> loading.</code><code class="log-line">[LateGamePerformance] Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on. These are the same for every player on this version.</code></pre></li>
+<pre><code class="log-line">[LateGamePerformance] <span data-release="version">0.4.29</span> loading.</code><code class="log-line">[LateGamePerformance] Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on, Reachability on. These are the same for every player on this version.</code></pre></li>
     <li>Another startup line reports the garbage collector. <code>GC: incremental=False</code> means memory clean-ups stop the whole game while they run. <a href="#gc">You can change that</a>.</li>
     <li>While you play, a stats line appears every 1,000 ticks (10 minutes at normal speed). The numbers in this example are an illustration of the format, and yours will differ:
 <pre><code class="log-line">[LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests built in 96.3 ms (0.234 ms each); buildings reused 21632/61843, recomputed 40211</code></pre></li>
@@ -123,9 +123,9 @@
 
   <h2 id="checksum">Verify the download (optional)</h2>
   <p>In PowerShell, from the folder you downloaded to:</p>
-<pre><code>Get-FileHash .\<span data-release="asset-name">LateGamePerformance-0.4.27.zip</span> -Algorithm SHA256</code></pre>
+<pre><code>Get-FileHash .\<span data-release="asset-name">LateGamePerformance-0.4.29.zip</span> -Algorithm SHA256</code></pre>
   <p>The hash should be:</p>
-<pre><code><span data-release="sha256">fc204e558aefa5facf515ab92193c7bc7d014ac3ab4ee0ea1ebf256585ed1837</span></code></pre>
+<pre><code><span data-release="sha256">652e6f527fccd8f9b0de1e7e81e662ce8350fd11c9a2b673e2c0783a252f6e3e</span></code></pre>
 </div>
 </main>
 

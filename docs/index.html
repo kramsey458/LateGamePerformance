@@ -33,11 +33,11 @@
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow">Timberborn 1.1 mod &middot; Version <span data-release="version">0.4.27</span></span>
+      <span class="eyebrow">Timberborn 1.1 mod &middot; Version <span data-release="version">0.4.29</span></span>
       <h1>Late-game colonies that keep up.</h1>
       <p class="lead">Big colonies make the game repeat the same work again and again: finding jobs for haulers, rebuilding routes, searching for trees, cleaning up memory. Late Game Performance removes that repeated work, so you get fewer lag spikes and freezes. It is built to change how quickly the game finds its answers, not what the answers are.</p>
       <div class="cta">
-        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.27</span></span></a>
+        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.29</span></span></a>
         <a class="btn ghost" href="install.html">Install guide</a>
       </div>
       <ul class="badges" aria-label="Facts">
@@ -45,8 +45,8 @@
         <li>Needs Harmony and Mod Settings</li>
         <li>Built against Timberborn 1.1.2.4</li>
       </ul>
-      <div class="notice ok" role="note" data-release-pinned="0.4.27">
-        <p><strong>Played in a real late-game colony as 0.4.23; 0.4.26 and 0.4.27 are the next rounds, not yet played.</strong> In a save of about 350 beavers, 0.4.8 gave noticeably fewer lag spikes, 0.4.14 was reported as working well, and 0.4.23 as working amazingly well. The stats lines of that 0.4.23 session were turned into 0.4.26, which was reviewed twice for production safety. 0.4.27, the current release, adds co-op safety fixes on top. Both are tested against the game's own classes, but neither has had its first colony session yet. Try it on a copy of a save. <a href="#status">See exactly what is and isn't tested.</a></p>
+      <div class="notice ok" role="note" data-release-pinned="0.4.29">
+        <p><strong>Played in a real late-game colony, most recently as 0.4.28 (0.4.29 is the same without one walking change).</strong> In a save of about 350 beavers, 0.4.8 gave noticeably fewer lag spikes, 0.4.14 was reported as working well, and 0.4.23 as working amazingly well. With 0.4.28 in a 362-beaver colony, saves froze for about a third of a second instead of a second, and with the verify box ticked every feature gave exactly the game&rsquo;s own result. Try it on a copy of a save. <a href="#status">See exactly what is and isn't tested.</a></p>
       </div>
     </div>
     <figure class="diagram">
@@ -289,7 +289,7 @@
       </div>
       <div class="tiles wide" style="grid-template-columns:repeat(2,1fr)">
         <div class="tile"><div class="t-value">about 350</div><div class="t-label">beavers in the late-game save it was played in</div><div class="t-note">noticeably fewer lag spikes</div></div>
-        <div class="tile"><div class="t-value">393</div><div class="t-label">automated checks pass</div><div class="t-note">including 121 patch targets checked against the game</div></div>
+        <div class="tile"><div class="t-value">509</div><div class="t-label">automated checks pass</div><div class="t-note">including 129 patch targets checked against the game</div></div>
         <div class="tile"><div class="t-value">0</div><div class="t-label">differences from the game's tree search</div><div class="t-note">in 4,000 random forests</div></div>
         <div class="tile"><div class="t-value">9.5 million</div><div class="t-label">route map nodes compared with the game's own</div><div class="t-note">every one identical</div></div>
       </div>
@@ -299,7 +299,7 @@
 
 <section id="status">
   <div class="wrap">
-    <div class="section-head" data-release-pinned="0.4.27">
+    <div class="section-head" data-release-pinned="0.4.29">
       <span class="eyebrow">Status</span>
       <h2>What is tested, and what isn't</h2>
       <p class="lead">Tested extensively, but it is still a young mod, so here is the honest picture. Try it on a copy of a save first.</p>
@@ -310,7 +310,8 @@
         <ul class="checks">
           <li>Played in a late-game save of about 350 beavers: noticeably fewer lag spikes as 0.4.8, reported as working well as 0.4.14 and as working amazingly well as 0.4.23, the last release played.</li>
           <li>Played in multiplayer sessions on two computers, including a 35-minute session logged on both.</li>
-          <li>393 automated checks pass against the installed game's own assemblies, including 121 patch targets.</li>
+          <li>509 automated checks pass against the installed game's own assemblies, including 129 patch targets.</li>
+          <li>Played as 0.4.28 in a 362-beaver colony with <strong>Verify every feature</strong> ticked: the hauling cache, tree search, plant water, district counts, water map copy, soil scans, terrain search, home search and reachability all reported 0 differences from the game&rsquo;s own code. Timed alongside it, the hauling lists took 0.24 ms per request against the game&rsquo;s 0.94 ms.</li>
           <li>0.4.26 was reviewed twice for production safety (crashes, conflicts with the mods it is played alongside, multiplayer determinism, save-file identity) and every finding was fixed before release. Each change in 0.4.27 had three adversarial reviews (co-op determinism, save and cross-mod compatibility, whether the tests are real) before it was merged.</li>
           <li>The tick loop that passes over entities with nothing to tick, the save snapshot on worker threads, the plant water levels from the water worker and the soil lists from the soil workers are each tested against the game's real classes: the same ticks in the same order, the same save entity for entity, the same levels and events, the same cells.</li>
           <li>Resumed terrain searches run against the game's real search classes on a random terrain: every search from scratch is identical node for node, and 1,200 searches in pricing runs all give the game's distance.</li>
@@ -323,11 +324,11 @@
       <div class="notice" style="margin:0">
         <p><strong>Not yet verified</strong></p>
         <ul class="checks no">
-          <li>0.4.27 has not been played in a colony yet, and neither has 0.4.26. 0.4.27 makes the verify settings only measure, builds a route map that failed on a worker thread again on the main thread, and shows a dialog if a feature turns itself off. 0.4.26 is the round built from the recorded 0.4.23 session: fewer tree-search lookups (dead plants and plants a route map cannot reach), plant water ticks that no longer fall back when a plant is planted or cut, the mod&rsquo;s own worker threads, route map caches walked only after a change, behavior log strings formatted only when read, far-away animated objects posed every second or fourth frame, 64 more component types in the worker-thread save snapshot guarded by hashes of their saving code and (0.4.26) by a look at Harmony&rsquo;s registry for other mods&rsquo; patches, and the 0.4.24 removal of the clean-up that froze every save. Its first colony session is still to come.</li>
+          <li>0.4.29 has been played only as 0.4.28 (the same code plus the removed walking change), for about an hour in one colony. Its save snapshot check has not run in the game yet: it needs an autosave with the verify box on.</li>
+          <li>Two 0.4.28 changes showed no measurable gain in that colony: the per-frame physics sync it skips costs only about 0.27 ms, so the frames that get slower each evening are still unexplained, and the district counts on the main thread are only about a fifth faster than the game&rsquo;s.</li>
           <li>The stats lines of one 0.4.23 session have been read, but no feature has been measured before and after in the same save; the improvement is reported from play.</li>
-          <li>The verify settings, which run the game's own code alongside the mod's and compare, have not been run inside the game; every comparison so far is in the harness against the game's real classes. A co-op game where one player has them on and another has them off has not been tested either.</li>
-          <li>The tree search against the game's own search inside a running game (the model comes from reading the game's code).</li>
-          <li>A controlled frame rate benchmark. The improvement is reported from play and logs, and it depends on your colony.</li>
+          <li>A co-op game where one player has the verify settings on and another has them off has not been tested.</li>
+                    <li>A controlled frame rate benchmark. The improvement is reported from play and logs, and it depends on your colony.</li>
           <li>The main menu notice about incremental collection, because the test computers already have it on.</li>
         </ul>
       </div>
