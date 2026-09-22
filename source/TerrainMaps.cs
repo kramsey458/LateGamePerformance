@@ -78,8 +78,10 @@ namespace LateGamePerformance
         private static object[] _workerGenerators;
         private static object _mainGenerator;
         private static float _maxDistance;
-        // Scanning the cache only after something could have changed (MapChanges), with a full scan every so many
-        // ticks that reports anything the hooks missed.
+        // Scanning the cache only after something could have changed (MapChanges). Every so many ticks a full walk
+        // counts anything the hooks missed and says so in the log, but builds nothing: a map the hooks missed is
+        // left to the game to build on demand, which every peer does alike, whereas building it on a cadence of
+        // this machine's own could fill it on one peer before another.
         internal static bool ScanOnlyWhenChanged;
         private const int SelfCheckEveryTicks = 200;
         private static bool _changed = true;
@@ -87,6 +89,7 @@ namespace LateGamePerformance
         private static long _scans;
         private static long _scansSkipped;
         private static long _missedByHooks;
+        private static bool _missLogged;
         private static int _cachedMaps;
         private static int _largestMapNodes;
 
@@ -161,7 +164,7 @@ namespace LateGamePerformance
                 "TerrainMaps: {0} rebuilds of {1} terrain route maps on {2} workers; the main thread waited {3:0.0} ms " +
                 "in total, longest {4:0.0} ms; {5} more built directly in batches of fewer than {6}; {7} maps cached, the " +
                 "largest {8} tiles; the cache was scanned {9} times and left alone {10} times because nothing had changed, " +
-                "{11} unbuilt maps were found by the periodic check alone",
+                "{11} unbuilt maps were found by the periodic check alone (left to the game)",
                 _batches, _mapsBuilt, _workerCount, _stopwatchTicks * msPerTick, _longestStopwatchTicks * msPerTick,
                 _builtDirectly, MinMapsForWorkers, _cachedMaps, _largestMapNodes, _scans, _scansSkipped, _missedByHooks);
             _batches = _mapsBuilt = _builtDirectly = _stopwatchTicks = _longestStopwatchTicks = 0;
@@ -287,11 +290,21 @@ namespace LateGamePerformance
             _ticksSinceScan = 0;
             try
             {
-                int found = BuildUnbuiltMaps(_pathfindingService, _maxDistance);
-                _scans++;
                 if (selfCheck)
                 {
-                    _missedByHooks += found;
+                    int missed = BuildUnbuiltMaps(_pathfindingService, _maxDistance, true);
+                    _missedByHooks += missed;
+                    if (missed > 0 && !_missLogged)
+                    {
+                        _missLogged = true;
+                        Log.Info($"TerrainMaps: the periodic check found {missed} cached terrain route maps unbuilt that no hook had " +
+                                 "flagged; they are left to the game to build on demand, as without the mod. Please report this line.");
+                    }
+                }
+                else
+                {
+                    BuildUnbuiltMaps(_pathfindingService, _maxDistance);
+                    _scans++;
                 }
             }
             catch (Exception exception)
@@ -306,7 +319,7 @@ namespace LateGamePerformance
         // ReSharper restore InconsistentNaming
 
         // Internal so the test harness can drive it with a stand-in for the pathfinding service.
-        internal static int BuildUnbuiltMaps(object pathfindingService, float maxDistance)
+        internal static int BuildUnbuiltMaps(object pathfindingService, float maxDistance, bool countOnly = false)
         {
             object graph = _graphOf(pathfindingService);
 
@@ -340,9 +353,9 @@ namespace LateGamePerformance
             _cachedMaps = cached;
             _largestMapNodes = largest;
             int found = WorkScratch.Count;
-            if (found == 0)
+            if (found == 0 || countOnly)
             {
-                return 0;
+                return found;
             }
             if (_workerGenerators == null)
             {

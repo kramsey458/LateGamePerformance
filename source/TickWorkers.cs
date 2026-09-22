@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 
 namespace LateGamePerformance
@@ -18,8 +19,10 @@ namespace LateGamePerformance
     {
         public delegate void Job(int worker, int workers);
 
-        // Spinning rounds before a worker goes to sleep: about 100 to 200 microseconds on a desktop core.
-        private const int SpinRounds = 4000;
+        // How long a worker spins before it goes to sleep, and how long the caller waits for a job before giving
+        // it up as failed (a worker thread that died would otherwise hang the game).
+        private const long SpinMicroseconds = 150;
+        private const int WaitMilliseconds = 10000;
 
         private sealed class Worker
         {
@@ -89,7 +92,12 @@ namespace LateGamePerformance
                 {
                     Interlocked.CompareExchange(ref _failure, exception, null);
                 }
-                Done.Wait();
+                if (!Done.Wait(WaitMilliseconds))
+                {
+                    // A worker did not report back: its result cannot be trusted, and nor can the threads from now on.
+                    _maximum = 1;
+                    Interlocked.CompareExchange(ref _failure, new TimeoutException("a worker thread did not finish its share of a job"), null);
+                }
                 _runs++;
                 return _failure;
             }
@@ -158,10 +166,31 @@ namespace LateGamePerformance
 
         private static void Loop(Worker worker)
         {
+            try
+            {
+                Serve(worker);
+            }
+            catch (Exception exception)
+            {
+                // Something outside a job (the runtime interrupting the thread): the job in hand is reported as
+                // failed, and no job is shared with the threads again this session.
+                _maximum = 1;
+                Interlocked.CompareExchange(ref _failure, exception, null);
+                if (Interlocked.Decrement(ref _pending) == 0)
+                {
+                    Done.Set();
+                }
+            }
+        }
+
+        private static void Serve(Worker worker)
+        {
+            long spinTicks = Stopwatch.Frequency * SpinMicroseconds / 1000000;
             while (true)
             {
                 bool woke = false;
-                for (int round = 0; round < SpinRounds && !woke; round++)
+                long started = Stopwatch.GetTimestamp();
+                while (!woke && Stopwatch.GetTimestamp() - started < spinTicks)
                 {
                     if (worker.Go.IsSet)
                     {

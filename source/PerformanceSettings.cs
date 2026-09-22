@@ -104,9 +104,9 @@ namespace LateGamePerformance
             Diagnostics.Enabled = DiagnosticsTimers.Value;
             DiagnosticsTimers.ValueChanged += (_, value) => Diagnostics.Enabled = value;
             TerrainSearch.VerifyEnabled = VerifyTerrainSearches.Value;
-            VerifyTerrainSearches.ValueChanged += (_, value) => TerrainSearch.VerifyEnabled = value;
+            VerifyTerrainSearches.ValueChanged += (_, value) => TerrainSearch.VerifyEnabled = value || VerifyEverything.Value;
             SaveSnapshot.VerifyEnabled = VerifySaveSnapshots.Value;
-            VerifySaveSnapshots.ValueChanged += (_, value) => SaveSnapshot.VerifyEnabled = value;
+            VerifySaveSnapshots.ValueChanged += (_, value) => SaveSnapshot.VerifyEnabled = value || VerifyEverything.Value;
             if (VerifyEverything.Value)
             {
                 Plugin.SetVerifyAll(true);

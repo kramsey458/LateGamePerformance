@@ -71,6 +71,7 @@ namespace LateGamePerformance
         private static Func<object, object> _dayNightCycle;
         private static Func<object, float> _partialDay;
         private static Func<object, string> _componentName;
+        private static Func<object, object> _fragmentManager;
 
         private static bool _active;
         private static long _deferred;
@@ -98,6 +99,23 @@ namespace LateGamePerformance
                 Required = true,
                 Target = () => Reflect.Method(ManagerType, "Save"),
                 Prefix = Reflect.Own(self, nameof(FlushPrefix))
+            });
+            // The panel's own refresh as well, in case the runtime inlines the short getter into it.
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "BehaviorManagerDebugFragment.UpdateDescriptions",
+                Required = false,
+                Target = () =>
+                {
+                    Type fragment = Reflect.GameType("Timberborn.BehaviorSystemUI.BehaviorManagerDebugFragment");
+                    if (fragment == null)
+                    {
+                        throw new TypeLoadException("BehaviorManagerDebugFragment not found");
+                    }
+                    _fragmentManager = Reflect.FieldGetter<object>(fragment, "_behaviorManager");
+                    return Reflect.Method("Timberborn.BehaviorSystemUI.BehaviorManagerDebugFragment", "UpdateDescriptions");
+                },
+                Prefix = Reflect.Own(self, nameof(FragmentPrefix))
             });
             feature.Patches.Add(new PatchSpec
             {
@@ -178,6 +196,23 @@ namespace LateGamePerformance
                 _active = false;
                 Log.Warning("BehaviorLog failed and is off for this session: " + exception);
                 return true;
+            }
+        }
+
+        internal static void FragmentPrefix(object __instance)
+        {
+            try
+            {
+                object manager = _fragmentManager?.Invoke(__instance);
+                if (manager != null)
+                {
+                    FlushPrefix(manager);
+                }
+            }
+            catch (Exception exception)
+            {
+                _active = false;
+                Log.Warning("BehaviorLog failed while writing a beaver's log for the panel and is off for this session: " + exception);
             }
         }
 

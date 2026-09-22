@@ -276,18 +276,29 @@ internal static class RouteMapsTests
             }
         }
         RouteMaps.NavigationTickedPostfix();
-        int builtByCheck = 0;
+        int stillUnbuiltAfterCheck = 0;
+        for (int i = 11; i <= 13; i++)
+        {
+            if (!(bool)Get(fieldAt[cached[i]], "IsFilled"))
+            {
+                stillUnbuiltAfterCheck++;
+            }
+        }
+        RouteMaps.MarkChanged();
+        RouteMaps.NavigationTickedPostfix();
+        int builtAfterFlag = 0;
         for (int i = 11; i <= 13; i++)
         {
             if ((bool)Get(fieldAt[cached[i]], "IsFilled"))
             {
-                builtByCheck++;
+                builtAfterFlag++;
             }
         }
         string scanStats = RouteMaps.TakeStatsLine();
         Console.WriteLine("     " + scanStats);
-        check(stillUnbuilt == 3 && builtByCheck == 3 && scanStats.Contains("3 unbuilt maps were found by the periodic check alone") &&
-              scanStats.Contains("left alone 200 times"), "orchestration scan: the periodic check builds what the hooks missed and says so");
+        check(stillUnbuilt == 3 && stillUnbuiltAfterCheck == 3 && builtAfterFlag == 3 &&
+              scanStats.Contains("3 unbuilt maps were found by the periodic check alone") && scanStats.Contains("left alone 200 times"),
+            "orchestration scan: the periodic check counts what the hooks missed and leaves it to the game; the next flag builds it");
         RouteMaps.ScanOnlyWhenChanged = false;
     }
 

@@ -58,6 +58,45 @@ internal static class SaveSnapshotTests
         public int B;
     }
 
+    // A Save that reaches other code: an interface call whose implementation could be patched, and static calls
+    // three and four deep.
+    private interface IHelper
+    {
+        void Help();
+    }
+
+    private sealed class HelperImpl : IHelper
+    {
+        public void Help()
+        {
+        }
+    }
+
+    private static class Chain
+    {
+        public static void Level1() => Level2();
+        public static void Level2() => Level3();
+        public static void Level3() => Level4();
+        public static void Level4()
+        {
+        }
+    }
+
+    private sealed class Reaching : IPersistentEntity
+    {
+        private readonly IHelper _helper = new HelperImpl();
+
+        public void Save(IEntitySaver entitySaver)
+        {
+            _helper.Help();
+            Chain.Level1();
+        }
+
+        public void Load(IEntityLoader entityLoader)
+        {
+        }
+    }
+
     private sealed class PairSerializer : IValueSerializer<Pair>
     {
         private static readonly PropertyKey<int> A = new PropertyKey<int>("A");
@@ -132,7 +171,8 @@ internal static class SaveSnapshotTests
         // The hash guard (0.4.25): a listed type is used only while its Save is the one that was read. Harmony's registry
         // cannot run here, so the guard sees an empty one.
         SaveGuard.PatchesOn = _ => null;
-        SaveGuard.PatchedMethodCount = () => 0;
+        SaveGuard.PatchedMethods = () => new MethodBase[0];
+        SaveGuard.PatchCount = () => 0;
         SaveGuard.ResetForTests();
         SaveSnapshot.ForgetVerdictsForTests();
         Program.LoadEveryGameAssembly();
@@ -210,19 +250,45 @@ internal static class SaveSnapshotTests
             "save guard: another mod's patch on a Save, on a method it calls or on its serializer keeps the type on the main thread; a reviewed one or this mod's own does not");
         MethodBase saverConstructor = typeof(EntitySaver).GetConstructors()[0];
         SaveGuard.PatchesOn = m => m == saverConstructor ? new[] { ("some.other.mod", "Other.Mod.SaverPatch.Prefix") } : null;
-        SaveGuard.PatchedMethodCount = () => 1;
+        SaveGuard.PatchCount = () => 1;
         bool registryChanged = SaveGuard.RegistryChanged();
         string parked = SaveGuard.ParkedReason;
         check(registryChanged && parked != null && parked.Contains("EntitySaver..ctor") && parked.Contains("some.other.mod"),
             "save guard: another mod's patch on a shared saving helper leaves the whole save to the game, naming the patch");
         SaveGuard.PatchesOn = _ => null;
-        SaveGuard.PatchedMethodCount = () => 2;
+        SaveGuard.PatchCount = () => 2;
         check(SaveGuard.RegistryChanged() && SaveGuard.ParkedReason == null && !SaveGuard.RegistryChanged(),
             "save guard: when the number of patched methods changes everything is judged again; unchanged, nothing is");
-        SaveGuard.PatchedMethodCount = () => throw new InvalidOperationException("no registry");
+        SaveGuard.PatchCount = () => throw new InvalidOperationException("no registry");
         check(SaveGuard.RegistryChanged() && SaveGuard.ParkedReason == null, "save guard: a registry that cannot be counted still lets the helpers be judged");
-        SaveGuard.PatchedMethodCount = () => 0;
+        SaveGuard.PatchCount = () => 0;
         SaveSnapshot.Allowed.Remove(typeof(Part).FullName);
+        SaveSnapshot.ForgetVerdictsForTests();
+        SaveGuard.ResetForTests();
+
+        // Reached code (0.4.26 review): a patched implementation of an interface the Save calls, and a patch three
+        // calls deep, are refused; four deep is beyond the bound, and this mod's own patch on an implementation is fine.
+        SaveSnapshot.Allowed[typeof(Reaching).FullName] = SaveSnapshot.SaveHash(typeof(Reaching));
+        MethodBase help = typeof(HelperImpl).GetMethod("Help");
+        SaveGuard.PatchedMethods = () => new[] { help };
+        SaveGuard.PatchesOn = m => m == help ? new[] { ("some.other.mod", "Other.Mod.HelpPatch.Prefix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool refusedImplementation = !SaveSnapshot.IsAllowed(typeof(Reaching));
+        SaveGuard.PatchesOn = m => m == help ? new[] { (Plugin.HarmonyId, "LateGamePerformance.Something.Prefix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool allowedOwnImplementation = SaveSnapshot.IsAllowed(typeof(Reaching));
+        SaveGuard.PatchedMethods = () => new MethodBase[0];
+        MethodBase level3 = typeof(Chain).GetMethod("Level3"), level4 = typeof(Chain).GetMethod("Level4");
+        SaveGuard.PatchesOn = m => m == level3 ? new[] { ("some.other.mod", "Other.Mod.DeepPatch.Prefix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool refusedDeep = !SaveSnapshot.IsAllowed(typeof(Reaching));
+        SaveGuard.PatchesOn = m => m == level4 ? new[] { ("some.other.mod", "Other.Mod.DeeperPatch.Prefix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool beyondBound = SaveSnapshot.IsAllowed(typeof(Reaching));
+        check(refusedImplementation && allowedOwnImplementation && refusedDeep && beyondBound,
+            "save guard: a patched implementation of an interface a Save calls, or a patch three calls deep, keeps the type on the main thread; four deep is beyond the bound");
+        SaveGuard.PatchesOn = _ => null;
+        SaveSnapshot.Allowed.Remove(typeof(Reaching).FullName);
         SaveSnapshot.ForgetVerdictsForTests();
         SaveGuard.ResetForTests();
         // The deep comparison tells a changed value apart, which the game's reference comparison of lists cannot.

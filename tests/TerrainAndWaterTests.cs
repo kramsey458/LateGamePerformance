@@ -186,13 +186,18 @@ internal static class TerrainAndWaterTests
         int stillUnbuilt = 0;
         for (int i = 6; i <= 8; i++) if (!(bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) stillUnbuilt++;
         TerrainMaps.NavigationTickedPostfix();
-        int builtByCheck = 0;
-        for (int i = 6; i <= 8; i++) if ((bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) builtByCheck++;
+        int stillUnbuiltAfterCheck = 0;
+        for (int i = 6; i <= 8; i++) if (!(bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) stillUnbuiltAfterCheck++;
+        TerrainMaps.MarkChanged();
+        TerrainMaps.NavigationTickedPostfix();
+        int builtAfterFlag = 0;
+        for (int i = 6; i <= 8; i++) if ((bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) builtAfterFlag++;
         string scanStats = TerrainMaps.TakeStatsLine();
         Console.WriteLine("     " + scanStats);
-        check(stillUnbuilt == 3 && builtByCheck == 3 && scanStats.Contains("3 unbuilt maps were found by the periodic check alone") &&
-              scanStats.Contains("left alone 200 times") && scanStats.Contains($"{distinct.Count + 1} maps cached"),
-            "terrain scan: the periodic check builds what the hooks missed, and the line counts the cache");
+        check(stillUnbuilt == 3 && stillUnbuiltAfterCheck == 3 && builtAfterFlag == 3 &&
+              scanStats.Contains("3 unbuilt maps were found by the periodic check alone") && scanStats.Contains("left alone 200 times") &&
+              scanStats.Contains($"{distinct.Count + 1} maps cached"),
+            "terrain scan: the periodic check counts what the hooks missed and leaves it to the game; the next flag builds it; the line counts the cache");
         TerrainMaps.ScanOnlyWhenChanged = false;
 
         // The reach pre-filter (TerrainReach, 0.4.25): each built map's box, measured with the game's own node ids,

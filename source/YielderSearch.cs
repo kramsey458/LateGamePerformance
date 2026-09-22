@@ -191,7 +191,17 @@ namespace LateGamePerformance
             {
                 return null;
             }
-            Vector3? access = start.UnblockedSingleAccess;
+            Vector3? access;
+            try
+            {
+                access = start.UnblockedSingleAccess;
+            }
+            catch (InvalidOperationException)
+            {
+                // A building with no access or several (Single() throws): the game's own lookup throws the same
+                // at the first candidate; no pre-filter, and no verdict of this feature's own.
+                return null;
+            }
             if (!access.HasValue)
             {
                 // The game's lookup answers "unreachable" for every candidate of a building with no access.

@@ -12,14 +12,15 @@ namespace LateGamePerformance
     // What else could run on a snapshot worker besides the code this mod has read: another mod's Harmony patch.
     // The IL hash of a component's Save (SaveSnapshot.Allowed) tells a game or fork update from the code that
     // was read, but a Harmony patch leaves that IL untouched and runs inside the call all the same, on whichever
-    // thread makes it. So before a type is used on a worker, the patches on its Save, on every method that Save
-    // calls directly and on every value serializer it loads from a field are read from Harmony's registry, and
+    // thread makes it. So before a type is used on a worker, the patches on its Save, on every method the Save reaches
+    // through the game's own code (three calls deep, implementations of the interface and virtual methods it
+    // calls included) and on every value serializer it loads from a field are read from Harmony's registry, and
     // the shared saving helpers every type goes through (the entity and object savers, the serialized objects
     // they write into, the keys, the common serializers) are checked once per session, for patches and for their
     // IL. A patch by this mod, or one that was read and listed as safe (ReviewedPatches), is fine; any other
     // keeps that type on the main thread, or, on a helper, leaves the whole save to the game, with one log line
-    // each. The registry is read again whenever the number of patched methods changes, so a mod that patches
-    // late is seen at the next save. Main thread only.
+    // each. The registry is read again whenever the number of patches changes, so a mod that patches late is
+    // seen at the next save. Main thread only.
     internal static class SaveGuard
     {
         // The helpers, with the assembly each lives in.
@@ -58,23 +59,29 @@ namespace LateGamePerformance
                 ("SingleGoodAllower.Save", "kyler.mixedstorage", "MixedStorage.SavePatch.Postfix")
             };
 
-        // Harmony's registry, as (Harmony id, "Namespace.Type.Method" of the patch) per method, and the number of
-        // patched methods; swapped by the tests, where the Workshop Harmony cannot run.
+        // Harmony's registry: the patches on a method as (Harmony id, "Namespace.Type.Method" of the patch), every
+        // patched method, and the number of patches in all; swapped by the tests, where the Workshop Harmony
+        // cannot run.
         internal static Func<MethodBase, IEnumerable<(string Owner, string Patch)>> PatchesOn = HarmonyPatchesOn;
-        internal static Func<int> PatchedMethodCount = () => Harmony.GetAllPatchedMethods().Count();
+        internal static Func<IEnumerable<MethodBase>> PatchedMethods = Harmony.GetAllPatchedMethods;
+        internal static Func<int> PatchCount = HarmonyPatchCount;
+
+        // How far into the game's code a Save is followed from its own calls.
+        private const int MaxDepth = 3;
+        private const int MaxMethods = 600;
 
         private static readonly Dictionary<short, OpCode> OpCodeTable = BuildOpCodeTable();
         private static int _lastPatchedCount = -1;
         private static bool _helpersJudged;
         private static string _parkedReason;
 
-        // Called at every save: when the number of patched methods changed, every verdict is taken again.
+        // Called at every save: when the number of patches changed, every verdict is taken again.
         internal static bool RegistryChanged()
         {
             int count;
             try
             {
-                count = PatchedMethodCount();
+                count = PatchCount();
             }
             catch (Exception)
             {
@@ -111,7 +118,10 @@ namespace LateGamePerformance
             }
         }
 
-        // Why this type has to stay on the main thread although its Save is the one that was read, or null.
+        // Why this type has to stay on the main thread although its Save is the one that was read, or null. The
+        // Save's calls are followed through the game's code (and the type's own assembly) up to MaxDepth deep; a
+        // patched method that implements or overrides an interface or virtual method reached on the way counts too.
+        // The shared helpers are judged separately (ParkedReason) and are not followed here.
         internal static string Refusal(Type type)
         {
             MethodInfo save = SaveMethod(type);
@@ -124,33 +134,136 @@ namespace LateGamePerformance
             {
                 return "another mod patches its Save: " + foreign;
             }
+            Assembly own = type.Assembly;
+            HashSet<MethodBase> seen = new HashSet<MethodBase> { save };
+            Queue<(MethodBase Method, int Depth)> queue = new Queue<(MethodBase, int)>();
+            string failure = Follow(save, 1, own, seen, queue);
+            if (failure != null)
+            {
+                return failure;
+            }
+            while (queue.Count > 0)
+            {
+                (MethodBase method, int depth) = queue.Dequeue();
+                foreign = ForeignPatchOn(method);
+                if (foreign != null)
+                {
+                    return $"another mod patches {Describe(method)}, which its Save reaches: {foreign}";
+                }
+                foreign = ForeignPatchOnImplementations(method, out MethodBase implementation);
+                if (foreign != null)
+                {
+                    return $"another mod patches {Describe(implementation)}, an implementation of {Describe(method)}, which its Save reaches: {foreign}";
+                }
+                if (depth < MaxDepth && seen.Count < MaxMethods && Followed(method, own))
+                {
+                    failure = Follow(method, depth + 1, own, seen, queue);
+                    if (failure != null)
+                    {
+                        return failure;
+                    }
+                }
+            }
+            return null;
+        }
+
+        // Reads what the method calls and queues the calls not seen before; a read that fails is a refusal.
+        private static string Follow(MethodBase method, int depth, Assembly own, HashSet<MethodBase> seen,
+            Queue<(MethodBase Method, int Depth)> queue)
+        {
             List<MethodBase> callees;
             List<Type> serializers;
             try
             {
-                Read(save, out callees, out serializers);
+                Read(method, out callees, out serializers);
             }
             catch (Exception exception)
             {
-                return "the calls its Save makes could not be read: " + exception.Message;
+                return $"the calls of {Describe(method)}, which its Save reaches, could not be read: {exception.Message}";
             }
             foreach (MethodBase callee in callees)
             {
-                foreign = ForeignPatchOn(callee);
-                if (foreign != null)
+                if (seen.Add(callee))
                 {
-                    return $"another mod patches {Describe(callee)}, which its Save calls: {foreign}";
+                    queue.Enqueue((callee, depth));
                 }
             }
             foreach (Type serializer in serializers)
             {
-                foreach (MethodBase method in Methods(serializer))
+                foreach (MethodBase serializerMethod in Methods(serializer))
                 {
-                    foreign = ForeignPatchOn(method);
-                    if (foreign != null)
+                    if (seen.Add(serializerMethod))
                     {
-                        return $"another mod patches {Describe(method)}, a serializer its Save uses: {foreign}";
+                        queue.Enqueue((serializerMethod, depth));
                     }
+                }
+            }
+            return null;
+        }
+
+        // Whether a reached method's own calls are followed: game code and the judged type's own assembly, but not
+        // the runtime, Unity, or the shared helpers, which are judged on their own.
+        private static bool Followed(MethodBase method, Assembly own)
+        {
+            Type type = method.DeclaringType;
+            if (type == null)
+            {
+                return false;
+            }
+            string assembly = type.Assembly.GetName().Name ?? "";
+            if (type.Assembly != own && !assembly.StartsWith("Timberborn.", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            string name = (type.IsGenericType ? type.GetGenericTypeDefinition() : type).FullName;
+            foreach ((string helper, _) in HelperTypeNames)
+            {
+                if (helper == name)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // A reached interface or virtual method: any patched method that implements or overrides it counts as
+        // patched too, since the call lands there.
+        private static string ForeignPatchOnImplementations(MethodBase method, out MethodBase implementation)
+        {
+            implementation = null;
+            Type declaring = method.DeclaringType;
+            if (declaring == null || !(declaring.IsInterface || method.IsVirtual))
+            {
+                return null;
+            }
+            ParameterInfo[] parameters = method.GetParameters();
+            foreach (MethodBase patched in PatchedMethods() ?? Enumerable.Empty<MethodBase>())
+            {
+                Type owner = patched.DeclaringType;
+                if (owner == null || owner == declaring || patched.Name != method.Name || !declaring.IsAssignableFrom(owner))
+                {
+                    continue;
+                }
+                ParameterInfo[] theirs = patched.GetParameters();
+                if (theirs.Length != parameters.Length)
+                {
+                    continue;
+                }
+                bool same = true;
+                for (int i = 0; same && i < parameters.Length; i++)
+                {
+                    same = theirs[i].ParameterType == parameters[i].ParameterType ||
+                           theirs[i].ParameterType.IsGenericParameter || parameters[i].ParameterType.IsGenericParameter;
+                }
+                if (!same)
+                {
+                    continue;
+                }
+                string foreign = ForeignPatchOn(patched);
+                if (foreign != null)
+                {
+                    implementation = patched;
+                    return foreign;
                 }
             }
             return null;
@@ -292,6 +405,22 @@ namespace LateGamePerformance
         private static string Describe(MethodBase method)
         {
             return $"{method.DeclaringType?.Name}.{method.Name}";
+        }
+
+        // Every prefix, postfix, transpiler and finalizer in the process, so that a second patch on an already
+        // patched method is a change too.
+        private static int HarmonyPatchCount()
+        {
+            int count = 0;
+            foreach (MethodBase method in Harmony.GetAllPatchedMethods())
+            {
+                Patches info = Harmony.GetPatchInfo(method);
+                if (info != null)
+                {
+                    count += info.Prefixes.Count + info.Postfixes.Count + info.Transpilers.Count + info.Finalizers.Count;
+                }
+            }
+            return count;
         }
 
         private static IEnumerable<(string Owner, string Patch)> HarmonyPatchesOn(MethodBase method)

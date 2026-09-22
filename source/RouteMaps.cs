@@ -83,8 +83,10 @@ namespace LateGamePerformance
         private static int _workerCount;
         private static object _pathfindingService;
         private static object[] _workerGenerators;
-        // Scanning the cache only after something could have changed (MapChanges), with a full scan every so many
-        // ticks that reports anything the hooks missed.
+        // Scanning the cache only after something could have changed (MapChanges). Every so many ticks a full walk
+        // counts anything the hooks missed and says so in the log, but builds nothing: a map the hooks missed is
+        // left to the game to build on demand, which every peer does alike, whereas building it on a cadence of
+        // this machine's own could fill it on one peer before another.
         internal static bool ScanOnlyWhenChanged;
         private const int SelfCheckEveryTicks = 200;
         private static bool _changed = true;
@@ -92,6 +94,7 @@ namespace LateGamePerformance
         private static long _scans;
         private static long _scansSkipped;
         private static long _missedByHooks;
+        private static bool _missLogged;
         private static int _cachedMaps;
         private static int _largestMapNodes;
         private static int _lastFound;
@@ -162,7 +165,7 @@ namespace LateGamePerformance
             string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}; " +
                           $"{_cachedMaps} maps cached, the largest {_largestMapNodes} tiles; the cache was scanned {_scans} times and " +
                           $"left alone {_scansSkipped} times because nothing had changed, {_missedByHooks} unbuilt maps were found by " +
-                          "the periodic check alone";
+                          "the periodic check alone (left to the game)";
             string line = _background
                 ? $"RouteMaps: {_batches} background rebuilds of {_fieldsFilled} route maps; main thread spent " +
                   $"{_mainStopwatchTicks * msPerTick:0.0} ms on them, longest single pause " +
@@ -282,11 +285,21 @@ namespace LateGamePerformance
             _lastFound = 0;
             try
             {
-                BuildUnbuiltMaps();
-                _scans++;
                 if (selfCheck)
                 {
+                    BuildUnbuiltMaps(true);
                     _missedByHooks += _lastFound;
+                    if (_lastFound > 0 && !_missLogged)
+                    {
+                        _missLogged = true;
+                        Log.Info($"RouteMaps: the periodic check found {_lastFound} cached route maps unbuilt that no hook had flagged; " +
+                                 "they are left to the game to build on demand, as without the mod. Please report this line.");
+                    }
+                }
+                else
+                {
+                    BuildUnbuiltMaps();
+                    _scans++;
                 }
             }
             catch (Exception exception)
@@ -300,7 +313,7 @@ namespace LateGamePerformance
         }
         // ReSharper restore InconsistentNaming
 
-        private static void BuildUnbuiltMaps()
+        private static void BuildUnbuiltMaps(bool countOnly = false)
         {
             object roadCache = _roadFlowFieldCacheOf(_pathfindingService);
             object districtMap = _districtMapOf(_pathfindingService);
@@ -341,7 +354,7 @@ namespace LateGamePerformance
             _cachedMaps = cached;
             _largestMapNodes = largest;
             _lastFound = WorkScratch.Count;
-            if (WorkScratch.Count == 0)
+            if (WorkScratch.Count == 0 || countOnly)
             {
                 return;
             }

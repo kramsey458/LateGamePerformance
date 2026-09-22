@@ -420,14 +420,15 @@ after which a map can be unbuilt or newly buildable: a new cache entry (`FlowFie
 building finished), a nav-mesh update on the road or terrain cache (which clears the maps it touches), and a
 district centre added or removed, an obstacle changed or the district map's own nav-mesh update (which decide
 whether a road map has a district map to be limited by). Each hook sets a flag; the walk itself is unchanged and
-runs on the next navigation tick after a flag, and on every 200th tick regardless, counting any unbuilt map it
-finds then as missed by the hooks (`... 0 unbuilt maps were found by the periodic check alone` on the stats line).
-A missed event costs at most 200 ticks of delay before a map is built ahead of its first use, never a wrong map,
-and the game builds on demand in between as it always did. Every peer runs the same hooks on the same events, so
-the walks happen on the same ticks everywhere. If any hook cannot be installed, both features walk every tick as
+runs on the next navigation tick after a flag. Every 200th tick a full walk counts any unbuilt map the hooks
+missed and logs it once (`... 0 unbuilt maps were found by the periodic check alone (left to the game)` on the
+stats line), but builds nothing: such a map is left to the game to build on demand, as without the mod, which
+every peer does alike, whereas building it on a cadence of this machine's own could have filled it on one peer
+before another (a review of 0.4.26 caught that). Every peer runs the same hooks on the same events, so the
+walks happen on the same ticks everywhere. If any hook cannot be installed, both features walk every tick as
 before. The harness drives both features through their navigation tick hooks: flagged, a tick with nothing marked
-leaves cleared maps alone, a marked one builds them, and the 200th tick builds three maps cleared behind the
-hooks' back and says so. The batch that is not in the background runs on this mod's own worker threads (see
+leaves cleared maps alone, a marked one builds them, and the 200th tick counts three maps cleared behind the
+hooks' back, says so and leaves them until the next flag. The batch that is not in the background runs on this mod's own worker threads (see
 Worker threads).
 
 #### Background rebuild (on by default, new in 0.3.0)
@@ -740,15 +741,17 @@ would have written; only the thread that wrote part of it down differs.
   every listed type against the installed game and fork on each run.
 - **Guarded against other mods' patches (0.4.26).** A Harmony patch leaves a method's IL untouched and runs
   inside the call all the same, on whichever thread makes it, so the hash cannot see one. Before a type is used
-  on a worker, `SaveGuard` reads Harmony's registry for its `Save`, for every method that `Save` calls directly
-  (read from its IL: calls, virtual calls, constructors, delegates) and for every value serializer it loads from
-  a field; the shared helpers every entity goes through (`EntitySaver`, `ObjectSaver`, `ValueSaver`, the keys,
+  on a worker, `SaveGuard` reads Harmony's registry for its `Save`, for every method the `Save` reaches through
+  the game's code up to three calls deep (read from the IL: calls, virtual calls, constructors, delegates; a
+  patched method that implements or overrides an interface or virtual method reached on the way counts too)
+  and for every value serializer it loads from a field; the shared helpers every entity goes through (`EntitySaver`, `ObjectSaver`, `ValueSaver`, the keys,
   `SerializedEntity`, `SerializedObject`, `SaveConversions`, `PrimitiveTypeSerialization`, the common number,
   date and good serializers) are checked once per session, for patches and, with one hash over all their IL,
   for changes. A patch by this mod, or one that was read and listed as safe in `SaveGuard.ReviewedPatches`, is
   fine; any other keeps that type on the main thread with one log line, or, on a helper, leaves the whole save
   to the game (`SaveSnapshot:` then counts the saves left to it). The registry is read again whenever the number
-  of patched methods changes, so a mod that patches late is seen at the next save. Reviewed so far: MixedStorage's
+  of patches changes, so a mod that patches late is seen at the next save. Deeper than three calls, or a
+  patched implementation that is only reached through an interface call inside another mod's code, is not seen. Reviewed so far: MixedStorage's
   postfix on `SingleGoodAllower.Save` (it writes its storage's allocation into the same entity from a
   ConditionalWeakTable lookup; read at 1.0.0, the same since 0.5.8), which in 0.4.25 ran on the workers unchecked.
   The harness reads the IL of every listed `Save` in the installed game (386 calls, 7 serializers), and with a
