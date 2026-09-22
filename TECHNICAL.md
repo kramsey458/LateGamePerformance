@@ -607,13 +607,14 @@ and drop entities. An entity whose tick components are all disabled does nothing
 game's. The game's own list is left untouched; BeaverBuddies reads it for its per-tick hash.
 
 Changes in the middle of a pass follow the game's own index rule: the game walks its list by index, so an entity
-that becomes eligible (or is added) before the entity being ticked shifts it and is not reached this pass, while
-one after it is reached. The mirror adds an entity that wakes up mid-pass at once when its id sorts after the
-entity being ticked, and after the pass when it sorts before. Entities that fall asleep or are removed mid-pass
-leave after the pass (ticking a sleeping entity does nothing), and the game's own deferred removals
-(`_entitiesToRemove`) are applied at the end of the pass as the game does. Until then an entity removed mid-pass
-is ticked through the game's own `Tick`, which checks each of its parts, so a part switched on after the removal
-is still reached in that pass, as in the game's loop (up to 0.4.26 it was not). If an entity's tick throws, the
+added before the entity being ticked shifts it and is not reached this pass, while one added after it is reached.
+The mirror holds every entity of the bucket at the same index as the game's list, each with a flag that says
+whether any of its tick components is enabled. An entity is added to it at once, even mid-pass, and a component
+switched on or off sets the flag at once, so an entity that wakes up mid-pass is reached in that pass when its
+index is still ahead, as in the game's loop; one that falls asleep is skipped (ticking a sleeping entity does
+nothing). The game's own deferred removals (`_entitiesToRemove`) are applied at the end of the pass, on both lists,
+as the game does. Until then an entity removed mid-pass is ticked through the game's own `Tick`, which checks each
+of its parts, so a part switched on after the removal is still reached in that pass, as in the game's loop. If an entity's tick throws, the
 pass is left exactly as the game leaves it (mid-pass, removals pending); should the mirror stop being trusted in the middle
 of a pass, every remaining entity is ticked, which is the game's loop. The prefix runs at Harmony's last priority,
 so BeaverBuddies' own prefix on the same method, which hashes the game's list before the pass, still runs first. The harness
