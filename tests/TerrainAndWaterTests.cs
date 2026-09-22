@@ -475,6 +475,7 @@ internal static class TerrainAndWaterTests
             events[1].Clear();
             RouteMapsTests.Call(services[0], "Tick");                       // the game's own loop
             bool runOriginal = PlantWater.TickPrefix(services[1]);           // the mod's replacement
+            PlantWater.TickPostfix();                                        // and its postfix, as Harmony runs them
             sameEvents &= !runOriginal && events[0].Count == events[1].Count;
             for (int i = 0; sameEvents && i < events[0].Count; i++) sameEvents &= events[0][i] == events[1][i];
             for (int i = 0; i < count; i++) sameLevels &= (int)level.GetValue(objects[0][i]) == (int)level.GetValue(objects[1][i]);
@@ -486,6 +487,93 @@ internal static class TerrainAndWaterTests
         string stats = PlantWater.TakeStatsLine();
         Console.WriteLine("     " + stats);
         check(stats.Contains("6 passes over 6000 objects") && PlantWater.IsActive, "plant water: every pass went through the mod, which is still active");
+
+        // Known levels (0.4.28): the mod compares the new levels with the ones its last pass left and looks only at the
+        // objects whose level differs. Four objects get tiles of their own (x = 250, beyond the others) whose water the
+        // test sets. Stored levels and events must stay the game's through a tick where the game's own loop ran in
+        // place of the mod (the postfix notices, as it does for the fallback or another mod's prefix), a level change
+        // whose handler updates a later object itself (the public UpdateWaterAboveBase), and an object registered twice.
+        int s1 = 3, s2 = 0, s3 = 0, s4 = 0;
+        bool handlerOn = false;
+        Func<int, int, int> moving = height;
+        height = (x, y) => x == 250 ? (y == 1 ? s1 : y == 2 ? s2 : y == 3 ? s3 : s4) : moving(x, y);
+        MethodInfo updateNow = objectType.GetMethod("UpdateWaterAboveBase", Type.EmptyTypes);
+        for (int world = 0; world < 2; world++)
+        {
+            for (int k = 1; k <= 4; k++)
+            {
+                tileField.SetValue(objects[world][k], Activator.CreateInstance(vector, 250, k, 0));
+            }
+            object later = objects[world][3];
+            changed.AddEventHandler(objects[world][2], new EventHandler((_, _) =>
+            {
+                if (handlerOn) updateNow.Invoke(later, null);
+            }));
+        }
+        bool knownSame = true;
+        void Both(bool modRuns, bool postfix = true)
+        {
+            events[0].Clear();
+            events[1].Clear();
+            RouteMapsTests.Call(services[0], "Tick");
+            if (modRuns) knownSame &= !PlantWater.TickPrefix(services[1]);
+            else RouteMapsTests.Call(services[1], "Tick");                  // the game's own loop in place of the mod
+            if (postfix) PlantWater.TickPostfix();                          // as Harmony runs it after either
+            knownSame &= events[0].SequenceEqual(events[1]);
+            for (int i = 0; i < count; i++) knownSame &= (int)level.GetValue(objects[0][i]) == (int)level.GetValue(objects[1][i]);
+        }
+        Both(true);
+        s1 = 5;
+        Both(false);                                                        // stores 5 behind the mod's known 3
+        s1 = 3;
+        Both(true);                                                         // 5 back to 3: the game raises the event, so must the mod
+        handlerOn = true;
+        s2 = 2;
+        s3 = 4;
+        Both(true);                                                         // object 2's handler updates object 3 first
+        handlerOn = false;
+        for (int world = 0; world < 2; world++)
+        {
+            RouteMapsTests.Call(services[world], "RegisterWaterObject", objects[world][4]);   // twice in the list
+            if (world == 1) PlantWater.RegisterPostfix((Timberborn.WaterObjects.WaterObject)objects[world][4]);
+        }
+        Both(true);
+        s4 = 6;
+        Both(true);                                                         // both entries: the game changes it once
+        for (int world = 0; world < 2; world++)
+        {
+            RouteMapsTests.Call(services[world], "UnregisterWaterObject", objects[world][4]);   // the first entry goes
+            if (world == 1) PlantWater.UnregisterPostfix((Timberborn.WaterObjects.WaterObject)objects[world][4]);
+        }
+        s4 = 1;
+        Both(true);
+        string knownStats = PlantWater.TakeStatsLine();
+        Console.WriteLine("     " + knownStats);
+        check(knownSame && (int)level.GetValue(objects[1][1]) == 3 && (int)level.GetValue(objects[1][3]) == 4 &&
+              (int)level.GetValue(objects[1][4]) == 1,
+            "plant water known levels: the same events and stored levels as the game's loop after a tick the game's own loop ran, " +
+            "a handler that updates a later object, and an object in the list twice");
+        check(knownStats.Contains("6 passes over 6000 objects") && knownStats.Contains("6001 stored levels read from the objects themselves") &&
+              knownStats.Contains("which happened 1 times"),
+            "plant water known levels: after the game's own loop ran every level was read from the objects once; otherwise only " +
+            "the duplicate entry was");
+
+        // Nothing noticed the game's loop (no postfix): the mod still knows 3 for object 1, which now stores 7, and
+        // passes it over when its water is back at 3. Verify mode compares every known level with the stored one and
+        // logs the difference; it only measures, so the level stays as the mod left it.
+        PlantWater.SetVerifyForTests(true);
+        s1 = 7;
+        Both(false, postfix: false);
+        s1 = 3;
+        knownSame = true;
+        Both(true);
+        string unnoticed = PlantWater.TakeStatsLine();
+        Console.WriteLine("     " + unnoticed);
+        check(!knownSame && (int)level.GetValue(objects[1][1]) == 7 && (int)level.GetValue(objects[0][1]) == 3 &&
+              unnoticed.Contains("known levels that differed from the stored ones 1"),
+            "plant water verify: a level stored behind the mod's back is found by comparing the known levels, and verify leaves it as " +
+            "the mod did (forced here by skipping the postfix)");
+        PlantWater.SetVerifyForTests(false);
 
         // A handler that throws: the game's loop would throw into the game. The mod hands over to the game's loop,
         // which meets the same handler; nothing is applied twice on the way.

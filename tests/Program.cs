@@ -188,7 +188,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 121, $"121 patches declared (found {patchCount})");
+        Check(patchCount == 124, $"124 patches declared (found {patchCount})");
         TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
         TestHaulCacheFlush();
@@ -208,12 +208,13 @@ internal static class Program
             "HaulCache verify: cached list differs from vanilla (cached 2, vanilla 2).",
             "CatchUp failed", "RouteMaps: a route map could not be built on the first try", "RouteMaps failed",
             "RouteMaps failed", "TerrainMaps: a terrain route map could not be built on the first try", "TerrainMaps failed",
+            "PlantWater verify: object 1 stores level 7 where the mod knew 3",
             "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
             "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing",
             "DistrictCounts verify: output capacity of Good0: the mod counted", "DistrictCounts failed",
             "WaterMapCopy verify: the copy made on a worker differs from the game's.",
             "PlantWater verify: object 3 read", "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
-            "HomeSearch verify: the mod moves in", "HomeSearch failed"
+            "HomeSearch verify: the mod moves in", "HomeSearch verify: the kept answer for", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
         for (int i = 0; asExpected && i < expectedWarnings.Length; i++)

@@ -134,6 +134,30 @@ Reading first gives the same values because a handler cannot change the water ma
 cannot add or remove an object from the list: the game walks that list with `foreach` and would throw if one
 did. The result does not depend on the number of threads, so it is the same on every computer.
 
+Since 0.4.28 the main thread no longer reads every object's stored level (`WaterAboveBase`, 6,800 objects spread
+over memory) to find the few that changed: in the 0.4.23 session 0 to 146 levels changed per 1000 ticks. It keeps
+the level each object was left at by its last pass, in an int array index-aligned with the game's list as it was
+then, compares the new levels with that array, and looks only at the objects whose level differs or is not known,
+in list order, exactly as the game's loop does: the stored level is read at that moment and, if the new level
+differs, the game's own `UpdateWaterAboveBase(int)` stores it and raises the event. This is exact because the
+stored level has one writer, the private `UpdateWaterAboveBase(int)`, reached from `WaterObjectService.Tick` (through
+the public `UpdateWaterAboveBase()`) and from registration (`OnEnterFinishedPostLoadState`), and both store what the
+water map shows at that moment. So an object passed over has a new level equal to the one this mod left it at, and
+still stores that level, except in three cases, each handled:
+
+- It registered since the last pass. The list only appends, so those objects are the last entries; as many
+  entries as registrations were seen (the register hook counts them) are treated as unknown and read.
+- The game's own loop ran in between: fewer than 512 objects, a failure, or another mod's prefix skipping this
+  one. A postfix on the same method runs after every call whether the prefix ran or not, and counts the calls the
+  prefix did not handle; every known level is then forgotten and the next pass reads them all, as 0.4.27 did on
+  every pass.
+- An earlier handler in the same pass called the public `UpdateWaterAboveBase()` on it: that stores what the map
+  shows, which is the level this pass computed, so the game's loop finds it equal and so does the mod (the stored
+  level is read before anything is changed). The same holds for an object that is in the list twice.
+
+While the list's own change counter (`List<T>._version`) has not moved since the last pass the array is used as it
+is; otherwise the list and the list as it was are walked side by side, and every object found keeps its known level.
+
 - The tests build two identical sets of 6000 of the game's real `WaterObject`s over a stand-in water map that
   moves between ticks, run one through the game's own loop and one through the mod's fallback, and require the
   same stored levels and the same events in the same order with the same values, for six ticks (4316 level
@@ -143,11 +167,18 @@ did. The result does not depend on the number of threads, so it is the same on e
   which use the worker's levels, among them the tick an object left the list after the snapshot, the tick one left
   without the hook seeing it, the tick one joined after the snapshot (read on the main thread beside the worker's
   levels) and the tick a thousand joined (the mirror is rebuilt); one falls back because the water layout changed;
-  three run in verify mode; levels and events identical throughout, verify mismatches 0.
+  three run in verify mode; levels and events identical throughout, verify mismatches 0. Since 0.4.28 the second
+  test also registers objects as the game does (level stored from the map at once), registers the last object
+  again, and runs one tick of the game's own loop over the mod's world (21 ticks); and the first test puts four
+  objects on tiles whose water it sets, to check the known levels through a tick of the game's own loop (the level
+  goes 3, 5 behind the mod, back to 3: the event must be raised), a handler that updates a later object itself, and
+  an object in the list twice. With the postfix left out on purpose, the mod passes the level 3 over while the
+  object stores 7, and verify mode reports it.
 - Below 512 objects the game's own loop runs; starting workers would cost more than it saves.
 - `PlantWaterVerify = true` reads everything again on the main thread with the game's own method and compares,
-  which also checks the worker's lookup against the game's map. A difference is logged and counted, and the levels
-  read ahead are stored all the same (up to 0.4.26 the main thread's were). For testing.
+  which also checks the worker's lookup against the game's map, and compares every known level with the level the
+  object stores. A difference is logged and counted, and the levels read ahead are stored all the same (up to
+  0.4.26 the main thread's were); an object whose known level is wrong is still passed over. For testing.
 - If anything throws (a handler included), the feature switches itself off and hands that tick to the game's
   own loop. Objects already updated compare equal there and are passed over, so nothing is applied twice.
 
@@ -299,6 +330,20 @@ have read flags that are not set, so the same cells are updated in the same orde
   game's per-cell method is called for the same cells, coordinates and levels, in the same order. (The game's
   per-cell method itself cannot run in the harness because the soil texture map it updates calls into Unity.)
 - `SoilScansVerify = true` walks every cell the game's way as well and compares the list of cells updated.
+
+Looked at in 0.4.28 and not built: a fast path for a changed contamination cell (about 5,360 per tick at ~47 ns in
+the 0.4.23 session) that stays on the same side of zero and whose soil colour value is bit for bit unchanged,
+writing only the level. The game's `SetContaminationLevel` does three things: the contaminated object's enter or
+exit call when the cell crosses zero, `TerrainMaterialMap.SetSoilContamination`, and the level write. The second
+compares the new colour value with the pixel the texture map holds at those coordinates, not with what the old
+level maps to, and the two can differ: a terrain height change resets the pixels of the cells it moved to 0
+through the map's own queue while the level stays, and a colour change queued earlier is not in the pixel until
+the map's tick applies it. Skipping the call would leave such a pixel uncoloured where the game recolours it, a
+lasting difference on screen. An exact form would read that pixel and compare as the game does; it keeps the
+coordinates and the pixel read and saves only the calls, a few of the ~47 ns. Instead, every 8th contamination pass
+counts the cells the fast path would take (last part of the stats line), so the saving can be judged from a real
+session before anything is built. The moisture side (`SetDesertIntensity`, the same shape) costs 0.02 ms per tick
+and is left alone. The count is checked in the harness against the game's rule as decompiled.
 
 ### Water rendering (on by default, new in 0.4.14)
 
@@ -767,13 +812,39 @@ dictionary). On a runtime whose list has no such counter the 0.4.23 table, one e
 The two lists are the game's own `ReadOnlyList<Beaver>`s, read by index; a list of any other kind (another mod's)
 is left to the game's own walk. The result cannot differ, so it is the same on every computer.
 
+Since 0.4.28 the first question is not asked again while its answer cannot have changed: in the 0.4.23 session
+about 950 searches per 1000 ticks asked 355 beavers each, for 5 to 12 move-ins. Whether a beaver is looking for a
+better home is read from its home (`Dweller.Home`, and whether the home's game object still exists), the home's
+numbers of adult and child dwellers (two private sets), the home's slot numbers (set once, in `Awake`) and whether
+the beaver is an adult (set once, in `Awake`). The home and the two sets change only in `Dwelling.AssignDweller`,
+`Dwelling.UnassignDweller` and `Dweller.AssignToHome` (which the first calls; the only other writers of `Home` are
+loading a save, before a scene's first tick). Every other path goes through them: a death or deletion, a dwelling
+blocked, demolished or deleted, an unreachable home, a birth into a home, a child growing up (a new entity), and
+Optimized Local Housing's moves (`Dweller.UnassignFromHome`, `Dwelling.AssignDweller`). A counter moves before and
+after each of those three calls (so neither an exception part-way nor a question asked during the change leaves an
+answer current), on a dweller's deletion and in every new scene. Each answer is kept beside the list with the
+counter's value when it was given, and used only while the counter still has that value and the list is unchanged;
+a changed list asks all its beavers again. A search still asks `CanAssignDweller`, live, of exactly the beavers
+that are looking, in list order, and stops at the same first hit: the same calls the game's `&&` makes. A home
+whose game object died while a beaver still pointed at it would change an answer without such a call, but the game
+never destroys a dwelling that way: deleting it first leaves its finished state, which unassigns every dweller. If
+another mod patches the question, anything it reads (the `Dweller` and `Dwelling` getters above) or
+`CanAssignDweller`, or the game's question is not the one this was written for, no answer is kept (one info line at
+the first search, and the stats line says why) and every beaver is asked on every search, as up to 0.4.27.
+
 - The tests script the two predicates per beaver (the game's own need a live entity) and compare the pick with
   the game's walk as decompiled over 560 searches of 300 adults and 60 children in both orders: the same beaver
   moves in or nobody does, 360 component lookups in total, verify mode agrees, a list of another kind is handed
   back, a throwing lookup switches the feature off and hands the search to the game; and after a beaver leaves a
-  list and two are born, the next searches see the new lists, each rebuilt once.
+  list and two are born, the next searches see the new lists, each rebuilt once. Since 0.4.28 the script changes
+  who is looking only through the hooks (as the game can), and checks that `CanAssignDweller` is asked of the same
+  beavers in the same order as the game's walk (over 500 searches it asks the first question a fifth as often); that a
+  kept answer is used until a home changes (forced: a beaver starts looking without one, and is not asked the
+  second question), that verify mode counts such a kept answer, and that another mod's patch on the question (not
+  this mod's own) stops the answers being kept.
 - `HomeSearchVerify = true` runs the game's walk as well, with fresh lookups, and compares the beaver picked;
-  a mismatch is logged and counted, and the mod's pick moves in all the same (up to 0.4.26 the game's did).
+  a mismatch is logged and counted, and the mod's pick moves in all the same (up to 0.4.26 the game's did). It
+  also asks every beaver whose answer is kept and counts the answers that differ (which are still used).
 - The stalest-dwelling walk that precedes the search (`StaleAssignableDwellingService.GetStalest`, a linked list
   rotated until a dwelling with a free slot) is left alone: its order is simulation state and its cost is per
   dwelling, not per beaver.
@@ -1067,13 +1138,21 @@ buildings reused 42010/129250, recomputed 87240
 Two lines for the features added in 0.4.12:
 
 ```
-[LateGamePerformance] Last 1000 ticks. PlantWater: 1000 passes over 8100 objects; 990 used levels computed on the
-water worker (0.240 ms there per pass), 10 read them inside the tick on 7 workers (0.400 ms per pass), 4 had no
-copy to use; the list changed in 6 ticks, the mirror was rebuilt 0 times; 310 level changes applied; main thread
-0.030 ms per pass
+[LateGamePerformance] Last 1000 ticks. PlantWater: 1000 passes over 6800 objects; 996 used the water worker's
+levels (0.240 ms there per pass; 6772000 objects matched, 420 that joined the list after the snapshot were read on
+the main thread; matching 0.080 ms per pass), 4 read every level inside the tick on 7 workers (0.400 ms per pass),
+4 had no copy to use; the list changed in 380 ticks, the mirror was rebuilt 0 times; 146 level changes applied;
+main thread 0.100 ms per pass, of which comparing with the levels known from the last pass 0.015 ms and applying
+0.001 ms; 420 stored levels read from the objects themselves (new objects, and all of them after the game's own
+loop ran, which happened 0 times), the known levels lined up with a changed list in 380 passes
 [LateGamePerformance] Last 1000 ticks. TerrainMaps: 3 rebuilds of 96 terrain route maps on 7 workers; the main
 thread waited 9.5 ms in total, longest 4.1 ms; 5 more built directly in batches of fewer than 4
 ```
+
+In the PlantWater line (0.4.28), "comparing" and "applying" split the main thread's own part: comparing the new
+levels with the ones known from the last pass, then looking at the few that differ. "stored levels read from the
+objects" should stay near the number of objects that joined; "the game's own loop ran" should stay at 0 in a
+colony above 512 objects (each time, every level is read once more).
 
 A second line reports route map rebuilds:
 
@@ -1105,7 +1184,8 @@ no copy was ready
 [LateGamePerformance] Last 1000 ticks. SoilScans: 2000 moisture and contamination passes in 40.0 ms (0.020 ms
 each); 1990 went through a list of changed cells made on a worker (0.040 ms there per list), 10 scanned the map
 on the main thread (97.0% of 8-tile groups had nothing changed and were passed over); lists not usable: 0 not
-finished, 10 after a main-thread edit, 0 after the flag array was replaced; 5400 changed cells updated
+finished, 10 after a main-thread edit, 0 after the flag array was replaced; 5400 changed cells updated; in every
+8th contamination pass 480000 of 670000 changed cells kept their contaminated state and their soil colour value
 [LateGamePerformance] Last 1000 ticks. WaterRendering: 1000 updates switched water tiles 800 times where the game
 switches them 900000 times; 3000 of 6000 flow direction and flow limit uploads left out because the graphics card
 already had them
@@ -1114,10 +1194,15 @@ already had them
 One for the home search (0.4.23):
 
 ```
-[LateGamePerformance] Last 1000 ticks. HomeSearch: 1000 searches for a beaver to move into a home asked 354000
-beavers in 12.0 ms (0.012 ms each); 3 moved in; 354 beavers in the table; 0 searches over lists of another kind
-were left to the game
+[LateGamePerformance] Last 1000 ticks. HomeSearch: 950 searches for a beaver to move into a home went through
+337250 beavers in 5.0 ms (0.005 ms each), asking 10650 of them whether they were looking for a better home (the
+other answers were kept from earlier searches, no home having changed since); 8 moved in; the dweller lists beside
+the game's were rebuilt 30 times; 0 searches over lists of another kind were left to the game
 ```
+
+"asking" (0.4.28) is how many times the game's first question was really asked; the rest were answered from an
+answer kept since no home changed. If another mod patches the question the line says so, and "asking" equals
+"went through".
 
 A third reports the tree and plant search:
 
@@ -1185,12 +1270,12 @@ search check asks the game's own dwelling predicates. The game's own versions of
 | `GcReport` | `true` | Startup garbage collector report. |
 | `LimitCatchUp` | `true` | After a long frame, run at most twice an ordinary frame's simulation time in the next one instead of everything the long frame missed. Pacing only; may differ between peers. |
 | `Diagnostics` | `false` | Timers for route map rebuilds, need selection, walker path finding and the game's A* searches. |
-| `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result; the worker's levels are stored. For testing. |
+| `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result, and compare the levels known from the last pass with the stored ones; the worker's levels are stored. For testing. |
 | `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare; the mod's numbers are put back. For testing. |
 | `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy, which is then swapped in. For testing. |
 | `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
-| `HomeSearchVerify` | `false` | Run the game's own walk for a beaver to move in as well and compare the pick; logs and counts mismatches, the mod's pick moves in. For testing. |
+| `HomeSearchVerify` | `false` | Run the game's own walk for a beaver to move in as well and compare the pick, and ask every beaver whose answer was kept again; logs and counts mismatches, the mod's pick moves in. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `SaveSnapshot` | `true` | Snapshot trees, crops, paths, levees and platforms on worker threads at every save. Saving only; may differ between peers. |
 | `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well and compare every entity; the mod's is saved. Measurement only. For testing. |

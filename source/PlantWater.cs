@@ -66,10 +66,35 @@ namespace LateGamePerformance
     // computed from (WaterMapCopy swapped it in and nothing has rewritten it since) and the worker finished;
     // otherwise the tick reads the levels itself on this mod's worker threads, as 0.4.12 did.
     //
-    // PlantWaterVerify reads everything again on the main thread with the game's own method and compares; the levels
-    // read ahead are stored all the same. If anything throws, the feature switches itself off and the game's own
-    // loop runs; nothing has been changed at that point, or what was changed is what the game's loop would have
-    // changed first, so it simply carries on.
+    // Since 0.4.28 the main thread no longer reads every object's stored level (WaterAboveBase, one object after
+    // another all over memory) to find the few that changed. It keeps the level each object was left at by this
+    // mod's last pass, in an int array index-aligned with the game's list as it was then, and compares the new
+    // levels with that array. Only an object whose new level differs from its known one, or whose known one is
+    // missing, is looked at, in list order, and treated exactly as the game's loop treats it: its stored level is
+    // read at that moment and, if the new level differs, the game's own UpdateWaterAboveBase(int) stores it and
+    // raises the event. Exact because the stored level has one writer, the private UpdateWaterAboveBase(int), and
+    // it is reached from two places only: WaterObjectService.Tick (through the public UpdateWaterAboveBase(),
+    // which stores what the map shows at that moment) and registration (OnEnterFinishedPostLoadState, which stores
+    // what the map shows at that moment). So an object passed over has a new level equal to the level this mod
+    // left it at, and its stored level is still that one, unless:
+    //   - it registered since the last pass: the objects that registered since are at the end of the game's list
+    //     (the list only appends), so the last N entries, N the registrations seen since, are never known;
+    //   - the game's own loop ran in between (fewer than 512 objects, a failure, another mod's prefix skipping this
+    //     one, which a postfix notices as a call this mod did not handle): every known level is forgotten and the
+    //     next pass reads them all from the objects, as 0.4.27 did every pass;
+    //   - an earlier handler in the same pass called the public UpdateWaterAboveBase() on it: that stores what the
+    //     map shows, which is the new level this pass computed, so the game's loop would find it equal and so does
+    //     this one (the stored level is read before anything is changed).
+    // The array follows the game's list: while the list's own change counter has not moved since the last pass it
+    // is used as it is; otherwise the list and the list as it was are walked side by side (objects that stay keep
+    // their order), every object found keeps its known level and any other is read from the object. In a large
+    // colony 0 to 146 levels change per 1000 ticks, so a pass reads a few objects instead of 6,800.
+    //
+    // PlantWaterVerify reads everything again on the main thread with the game's own method and compares, and also
+    // compares every known level with the object's stored level; the levels read ahead are stored all the same, and
+    // an object whose known level is wrong is still passed over. If anything throws, the feature switches itself off
+    // and the game's own loop runs; nothing has been changed at that point, or what was changed is what the game's
+    // loop would have changed first, so it simply carries on.
     internal static class PlantWater
     {
         // Below this many objects the game's own loop is as fast as anything else.
@@ -103,8 +128,24 @@ namespace LateGamePerformance
         private static Func<WaterObject, int> _currentLevel;
         private static Action<WaterObject, int> _setLevel;
         private static Func<object, Vector3Int> _tileOf;
+        private static Func<object, int> _versionOf;
 
         private static int[] _levels = new int[0];
+
+        // What this mod's last pass left: the game's list as it was (object for object) and each object's level,
+        // Unknown where the object has to be asked. Only the main thread touches these.
+        private const int Unknown = int.MinValue;
+        private static int[] _known = new int[0];
+        private static int[] _knownSpare = new int[0];
+        private static WaterObject[] _knownObjects = new WaterObject[0];
+        private static int _knownCount;
+        private static List<WaterObject> _knownList;
+        private static int _knownVersion;
+        private static int _registeredSincePass;
+        private static int[] _candidates = new int[0];
+        // Calls of the game's Tick this mod handled, and calls its postfix saw; they differ when anything else ran.
+        private static long _handledCalls;
+        private static long _seenCalls;
         private static bool _active;
         private static bool _verify;
         private static bool _usingCopy;
@@ -132,15 +173,23 @@ namespace LateGamePerformance
         private static long _workerStopwatchTicks;
         private static long _readStopwatchTicks;
         private static long _matchStopwatchTicks;
+        private static long _compareStopwatchTicks;
         private static long _applyStopwatchTicks;
         private static long _mainStopwatchTicks;
+        private static long _readFromObjects;
+        private static long _realigned;
+        private static long _forgotten;
         private static long _verifyMismatches;
+        private static long _knownMismatches;
 
         internal static bool VerifyEnabled
         {
             get => _verify;
             set => _verify = value;
         }
+
+        // For the tests: verify's count of known levels that differed from the stored ones, over the session.
+        internal static long KnownMismatches => _knownMismatches;
 
         public static Feature CreateFeature(Config config)
         {
@@ -159,7 +208,11 @@ namespace LateGamePerformance
                     BindAccessors();
                     return HarmonyLib.AccessTools.Method(typeof(WaterObjectService), "Tick");
                 },
-                Prefix = Reflect.Own(self, nameof(TickPrefix))
+                Prefix = Reflect.Own(self, nameof(TickPrefix)),
+                // Runs whether or not the prefix did (a skipped original still gets its postfixes): a call the prefix
+                // did not handle means the game's own loop, or another mod, may have changed levels behind the known
+                // ones, so they are forgotten.
+                Postfix = Reflect.Own(self, nameof(TickPostfix))
             });
             // The mirror's hooks. Without them the snapshot never matches the game's list, and every object is read
             // on the main thread; the tick notices that and rebuilds the mirror, so the result is still the game's.
@@ -213,6 +266,11 @@ namespace LateGamePerformance
                 batch.Count = 0;
                 batch.Done = false;
             }
+            _knownList = null;
+            _knownCount = 0;
+            _registeredSincePass = 0;
+            Array.Clear(_knownObjects, 0, _knownObjects.Length);
+            _handledCalls = _seenCalls = 0;
         }
 
         // For the tests, which cannot set the .cfg value before the feature exists.
@@ -265,6 +323,17 @@ namespace LateGamePerformance
             {
                 _itemsOf = null;
             }
+            // The list's own change counter, which the runtime moves on every addition and removal: while it has not
+            // moved since the last pass, the known levels are aligned as they are. Optional: without it every pass
+            // lines them up with the list again.
+            try
+            {
+                _versionOf = Reflect.FieldGetter<int>(typeof(List<WaterObject>), "_version");
+            }
+            catch (Exception)
+            {
+                _versionOf = null;
+            }
         }
 
         public static string TakeStatsLine()
@@ -278,17 +347,21 @@ namespace LateGamePerformance
                 "PlantWater: {0} passes over {1} objects; {2} used the water worker's levels ({3:0.000} ms there per pass; " +
                 "{4} objects matched, {5} that joined the list after the snapshot were read on the main thread; matching " +
                 "{6:0.000} ms per pass), {7} read every level inside the tick on {8} workers ({9:0.000} ms per pass), {10} had " +
-                "no copy to use; the list changed in {11} ticks, the mirror was rebuilt {12} times; {13} level changes applied " +
-                "({14:0.000} ms per pass); main thread {15:0.000} ms per pass{16}",
+                "no copy to use; the list changed in {11} ticks, the mirror was rebuilt {12} times; {13} level changes applied; " +
+                "main thread {15:0.000} ms per pass, of which comparing with the levels known from the last pass {14:0.000} ms " +
+                "and applying {17:0.000} ms; {18} stored levels read from the objects themselves (new objects, and all of " +
+                "them after the game's own loop ran, which happened {19} times), the known levels lined up with a changed " +
+                "list in {20} passes{16}",
                 _passes, _passes > 0 ? _objects / _passes : 0, _fromWorker,
                 _fromWorker > 0 ? _workerStopwatchTicks * ms / _fromWorker : 0, _fromWorkerObjects, _directObjects,
                 _fromWorker > 0 ? _matchStopwatchTicks * ms / _fromWorker : 0, _inTick, _workers,
                 _inTick > 0 ? _readStopwatchTicks * ms / _inTick : 0, _noCopy, _listChanged, _resyncs, _changes,
-                _passes > 0 ? _applyStopwatchTicks * ms / _passes : 0, _passes > 0 ? _mainStopwatchTicks * ms / _passes : 0,
-                _verify ? $"; verify mismatches {_verifyMismatches}" : "");
+                _passes > 0 ? _compareStopwatchTicks * ms / _passes : 0, _passes > 0 ? _mainStopwatchTicks * ms / _passes : 0,
+                _verify ? $"; verify mismatches {_verifyMismatches}, known levels that differed from the stored ones {_knownMismatches}" : "",
+                _passes > 0 ? _applyStopwatchTicks * ms / _passes : 0, _readFromObjects, _forgotten, _realigned);
             _passes = _objects = _changes = _fromWorker = _fromWorkerObjects = _directObjects = _inTick = _noCopy = 0;
             _listChanged = _resyncs = _workerStopwatchTicks = _readStopwatchTicks = _matchStopwatchTicks = 0;
-            _applyStopwatchTicks = _mainStopwatchTicks = 0;
+            _compareStopwatchTicks = _applyStopwatchTicks = _mainStopwatchTicks = _readFromObjects = _forgotten = _realigned = 0;
             return line;
         }
 
@@ -342,6 +415,8 @@ namespace LateGamePerformance
                 Mirror.Add(waterObject);
                 MirrorTiles.Add(_tileOf(waterObject));
                 _mirrorVersion++;
+                // The game stores its level right after this; the next pass reads it from the object.
+                _registeredSincePass++;
             }
             catch (Exception exception)
             {
@@ -385,9 +460,12 @@ namespace LateGamePerformance
                 int count = objects.Count;
                 if (count < MinObjects)
                 {
+                    // The game's loop stores levels this mod does not see.
+                    Forget();
                     return true;
                 }
                 long started = Stopwatch.GetTimestamp();
+                int version = _versionOf != null ? _versionOf(objects) : 0;
                 if (_levels.Length < count)
                 {
                     _levels = new int[count + count / 4];
@@ -422,26 +500,63 @@ namespace LateGamePerformance
                 {
                     Verify(objects, count, levels);
                 }
+
+                // The objects whose level may have changed: new level different from the known one, or none known.
+                long comparing = Stopwatch.GetTimestamp();
+                int[] known = AlignKnown(objects, items, count, version);
+                if (_candidates.Length < count)
+                {
+                    _candidates = new int[count + count / 4];
+                }
+                int[] candidates = _candidates;
+                int candidateCount = 0;
                 for (int i = 0; i < count; i++)
                 {
-                    WaterObject waterObject = items != null ? items[i] : objects[i];
-                    if (levels[i] != waterObject.WaterAboveBase)
+                    if (levels[i] != known[i])
                     {
-                        _setLevel(waterObject, levels[i]);
+                        candidates[candidateCount++] = i;
+                    }
+                }
+                long compared = Stopwatch.GetTimestamp();
+                if (_verify)
+                {
+                    VerifyKnown(objects, items, count, known);
+                }
+
+                // The game's loop for those, in list order: the stored level read now, the new one stored (and the
+                // event raised) only if it differs.
+                long applying = Stopwatch.GetTimestamp();
+                for (int k = 0; k < candidateCount; k++)
+                {
+                    int i = candidates[k];
+                    WaterObject waterObject = items != null ? items[i] : objects[i];
+                    int level = levels[i];
+                    if (known[i] == Unknown)
+                    {
+                        _readFromObjects++;
+                    }
+                    if (level != waterObject.WaterAboveBase)
+                    {
+                        _setLevel(waterObject, level);
                         _changes++;
-                        if (objects.Count != count)
+                        if (_versionOf != null ? _versionOf(objects) != version : objects.Count != count)
                         {
                             // A handler changed the list, which the game's own foreach would refuse: this feature
                             // refuses too and hands the tick to the game's loop, which then throws as it would.
                             throw new InvalidOperationException("the water object list changed inside a level change handler");
                         }
                     }
+                    known[i] = level;
                 }
+                _knownVersion = version;
+                _registeredSincePass = 0;
                 long applied = Stopwatch.GetTimestamp();
-                _applyStopwatchTicks += applied - read;
+                _compareStopwatchTicks += compared - comparing;
+                _applyStopwatchTicks += applied - applying;
                 _mainStopwatchTicks += applied - started;
                 _passes++;
                 _objects += count;
+                _handledCalls++;
                 return false;
             }
             catch (Exception exception)
@@ -452,7 +567,88 @@ namespace LateGamePerformance
                 return true;
             }
         }
+
+        internal static void TickPostfix()
+        {
+            // Every call of the game's Tick passes here, handled by the prefix or not; the prefix counts the ones it
+            // handled. A difference means levels may have been stored behind this mod's back.
+            _seenCalls++;
+            if (_seenCalls != _handledCalls)
+            {
+                _seenCalls = _handledCalls;
+                Forget();
+            }
+        }
         // ReSharper restore InconsistentNaming
+
+        // The known levels, index-aligned with the game's list: as they are while the list's change counter has not
+        // moved since the last pass, otherwise lined up again by walking the list and the list as it was side by
+        // side. An object not found keeps no level, and neither do the entries that registered since the last pass
+        // (the last ones of the list, as the list only appends).
+        private static int[] AlignKnown(List<WaterObject> objects, WaterObject[] items, int count, int version)
+        {
+            bool sameList = ReferenceEquals(_knownList, objects);
+            if (sameList && _versionOf != null && _knownVersion == version && _knownCount == count && _registeredSincePass == 0)
+            {
+                return _known;
+            }
+            if (_knownSpare.Length < count)
+            {
+                _knownSpare = new int[count + count / 4];
+            }
+            int[] aligned = _knownSpare;
+            int[] previous = _known;
+            WaterObject[] before = _knownObjects;
+            int end = sameList ? _knownCount : 0;
+            int j = 0;
+            for (int i = 0; i < count; i++)
+            {
+                WaterObject waterObject = items != null ? items[i] : objects[i];
+                while (j < end && !ReferenceEquals(before[j], waterObject))
+                {
+                    j++;
+                }
+                aligned[i] = j < end ? previous[j++] : Unknown;
+            }
+            for (int i = Math.Max(0, count - _registeredSincePass); i < count; i++)
+            {
+                aligned[i] = Unknown;
+            }
+            _knownSpare = previous;
+            _known = aligned;
+            if (_knownObjects.Length < count)
+            {
+                _knownObjects = new WaterObject[count + count / 4];
+            }
+            WaterObject[] now = _knownObjects;
+            if (items != null)
+            {
+                Array.Copy(items, now, count);
+            }
+            else
+            {
+                objects.CopyTo(0, now, 0, count);
+            }
+            if (_knownCount > count)
+            {
+                Array.Clear(now, count, _knownCount - count);
+            }
+            _knownList = objects;
+            _knownCount = count;
+            _realigned++;
+            return aligned;
+        }
+
+        // Every known level forgotten: the next pass reads each object's stored level from the object.
+        private static void Forget()
+        {
+            if (_knownList != null)
+            {
+                _forgotten++;
+            }
+            _knownList = null;
+            _registeredSincePass = 0;
+        }
 
         // Main thread, in WaterMapCopy's set-up of the tick's copy, before the water tasks exist.
         private static void OnJobCreated(WaterMapCopy.Job job)
@@ -614,9 +810,34 @@ namespace LateGamePerformance
             }
         }
 
+        // Counted and logged only, like the check above: every level this pass takes as known is compared with the
+        // level the object stores, before anything is changed. An object whose known level is wrong is still passed
+        // over when its new level equals the known one, as it is with verify off.
+        private static void VerifyKnown(List<WaterObject> objects, WaterObject[] items, int count, int[] known)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (known[i] == Unknown)
+                {
+                    continue;
+                }
+                int stored = (items != null ? items[i] : objects[i]).WaterAboveBase;
+                if (stored != known[i])
+                {
+                    _knownMismatches++;
+                    if (_knownMismatches <= 10)
+                    {
+                        Log.Warning($"PlantWater verify: object {i} stores level {stored} where the mod knew {known[i]} from " +
+                                    "its last pass.");
+                    }
+                }
+            }
+        }
+
         private static void Fail(Exception exception)
         {
             _active = false;
+            Forget();
             TurnedOff.Report("PlantWater", "PlantWater failed and turned itself off for this session: " + exception);
         }
     }

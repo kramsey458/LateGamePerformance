@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -629,11 +630,89 @@ internal static class WaterAndSoilTests
         string stats = SoilScans.TakeStatsLine();
         Console.WriteLine("     " + stats);
         check(changes > 1000, $"soil: the test soil actually changes ({changes} cells over 12 passes)");
+        RunSoilSample(check, contamination, cFlags, cLevels, mapIndex, random, columnCounts, ceiling, calls, ref handled, ref same);
         RunSoilLists(check, mSim, cSim, moisture, contamination, mapIndex, arrays, random, columnCounts, ceiling, calls);
         check(handled, "soil: every pass over the real services went through the mod");
         check(same, "soil: the game's per-cell method is called for the same cells, with the same coordinates and levels, " +
                     "in the same order as the game's own loop");
         check(stats.Contains("verify mismatches 0") && SoilScans.IsActive, "soil: verify mode agrees and the feature is still active");
+    }
+
+    // Measurement only (0.4.28): in every 8th contamination pass the mod counts the changed cells that neither enter nor
+    // leave the contaminated state and whose soil colour value is bit for bit unchanged, the ones a "write the level
+    // only" fast path would take (not built: not exact, see SoilScans). Counted against the game's own rule as
+    // decompiled (SetContaminationLevel's two branches, GetMapSoilContamination) over the service's own levels, which
+    // the recorded per-cell call writes as the game's does last. The calls themselves must stay the game's.
+    private static void RunSoilSample(Action<bool, string> check, object contamination, object cFlags, object cLevels,
+        MapIndexService mapIndex, Random random, int[] columnCounts, Func<int, int> ceiling, List<string> calls, ref bool handled, ref bool same)
+    {
+        const float threshold = 0.5f, maxMap = 0.8f;
+        int verticalStride = mapIndex.VerticalStride;
+        bool[] flags = (bool[])ArrayOf(cFlags);
+        float[] levels = (float[])ArrayOf(cLevels);
+        float[] stored = new float[levels.Length];
+        RouteMapsTests.SetField(contamination, "_threadSafeContaminationLevels", stored);
+        RouteMapsTests.SetField(contamination, "_contaminationThreshold", threshold);
+        RouteMapsTests.SetField(contamination, "_maxMapContamination", maxMap);
+        SoilScans.SetContaminationForTests((_, coordinates, index, level) =>
+        {
+            calls.Add("c " + coordinates + " " + index + " " + level);
+            stored[index] = level;
+        });
+        float Look(float contaminationLevel)
+        {
+            if (contaminationLevel > 0f)
+            {
+                if (contaminationLevel <= threshold)
+                {
+                    float num = 1f - contaminationLevel / threshold;
+                    return 1f - maxMap * num;
+                }
+                return 1f;
+            }
+            return 0f;
+        }
+        float[] choices = { 0f, 0f, -0.25f, 0.2f, 0.25f, 0.5f, 0.9f, 1.4f, 3f };
+        long expectedSame = 0, expectedSampled = 0;
+        SoilScans.TakeStatsLine();
+        for (int pass = 0; pass < 2 * SoilScans.SampleEvery; pass++)
+        {
+            for (int i = 0; i < flags.Length; i++)
+            {
+                flags[i] = random.Next(1000) < 300;
+                levels[i] = random.Next(4) == 0 ? (float)random.NextDouble() : choices[random.Next(choices.Length)];
+            }
+            List<string> expected = new List<string>();
+            bool sampled = SoilScans.NextContaminationPassSampled;
+            Index2DEnumerator enumerator = mapIndex.Indices2D.GetEnumerator();
+            while (enumerator.MoveNext())
+            {
+                int current = enumerator.Current;
+                for (int i = 0; i < columnCounts[current]; i++)
+                {
+                    int index = current + i * verticalStride;
+                    if (!flags[index]) continue;
+                    expected.Add("c " + mapIndex.IndexToCoordinates(current, ceiling(index)) + " " + index + " " + levels[index]);
+                    if (!sampled) continue;
+                    float before = stored[index], after = levels[index];
+                    bool enters = after > 0f && before <= 0f, leaves = !enters && after <= 0f && before > 0f;
+                    expectedSampled++;
+                    if (!enters && !leaves && BitConverter.SingleToInt32Bits(Look(before)) == BitConverter.SingleToInt32Bits(Look(after)))
+                    {
+                        expectedSame++;
+                    }
+                }
+            }
+            calls.Clear();
+            handled &= !SoilScans.ContaminationPrefix(contamination);
+            same &= calls.SequenceEqual(expected);
+        }
+        string stats = SoilScans.TakeStatsLine();
+        Console.WriteLine("     " + stats);
+        check(expectedSame > 0 && expectedSame < expectedSampled &&
+              stats.Contains($"in every 8th contamination pass {expectedSame} of {expectedSampled} changed cells kept their contaminated state"),
+            $"soil: the sampled count of contamination cells a level-only fast path would take matches the game's rule ({expectedSame} of " +
+            $"{expectedSampled}), and the per-cell calls stay the game's");
     }
 
     private static void RunSoilLists(Action<bool, string> check, object mSim, object cSim, object moisture, object contamination,
@@ -779,11 +858,18 @@ internal static class WaterAndSoilTests
         FieldInfo mapField = objectType.GetField("_threadSafeWaterMap", Any), tileField = objectType.GetField("_baseCoordinates", Any);
         PropertyInfo level = objectType.GetProperty("WaterAboveBase");
         EventInfo changed = objectType.GetEvent("WaterAboveBaseChanged");
+        MethodInfo currentLevel = objectType.GetMethod("CurrentWaterAboveBase", Any);
+        MethodInfo storeLevel = objectType.GetMethod("UpdateWaterAboveBase", Any, null, new[] { typeof(int) }, null);
         WaterObjectService[] services = { new WaterObjectService(), new WaterObjectService() };
         List<WaterObject>[] objects = { new List<WaterObject>(), new List<WaterObject>() };
         List<string>[] events = { new List<string>(), new List<string>() };
         Random tiles = new Random(22);
-        void AddObject(Vector3Int tile)
+        // What WaterObject.OnEnterFinishedPostLoadState does after registering: store the level the map shows now.
+        void StoreLevelLikeTheGame(WaterObject waterObject)
+        {
+            storeLevel.Invoke(waterObject, new[] { currentLevel.Invoke(waterObject, new object[] { tileField.GetValue(waterObject) }) });
+        }
+        void AddObject(Vector3Int tile, bool likeTheGame = false)
         {
             for (int w = 0; w < 2; w++)
             {
@@ -794,6 +880,7 @@ internal static class WaterAndSoilTests
                 changed.AddEventHandler(waterObject, new EventHandler((sender, _) => events[which].Add(index + "=" + level.GetValue(sender))));
                 services[w].RegisterWaterObject(waterObject);
                 if (w == 1) PlantWater.RegisterPostfix(waterObject);
+                if (likeTheGame) StoreLevelLikeTheGame(waterObject);
                 objects[w].Add(waterObject);
             }
         }
@@ -808,10 +895,11 @@ internal static class WaterAndSoilTests
         string[] rounds =
         {
             "normal", "normal", "normal", "left", "normal", "layout", "normal", "wrong mirror", "normal", "joined", "flood", "normal",
-            "verify", "verify", "verify"
+            "registered", "normal", "re-registered", "normal", "game loop", "normal", "verify", "verify", "verify"
         };
         bool same = true, handled = true;
         int totalEvents = 0;
+        long knownMismatchesBefore = PlantWater.KnownMismatches;   // counted over the session, like verify mismatches
         foreach (string round in rounds)
         {
             PlantWater.SetVerifyForTests(round == "verify");
@@ -870,13 +958,46 @@ internal static class WaterAndSoilTests
                     objects[1].RemoveAt(victim);
                     break;
                 }
+                case "registered":
+                {
+                    // Three objects are built as the game builds them: registered, then their level stored from the map
+                    // as it is now (before this tick's swap). The mod has no known level for them and reads it.
+                    for (int k = 0; k < 3; k++) AddObject(new Vector3Int(tiles.Next(0, width), tiles.Next(0, height), tiles.Next(0, 4)), true);
+                    break;
+                }
+                case "re-registered":
+                {
+                    // The last object leaves and comes back (unregistered, registered, level stored): the list looks
+                    // as before, but the mod treats the entries registered since its last pass as unknown.
+                    for (int w = 0; w < 2; w++)
+                    {
+                        WaterObject last = objects[w][objects[w].Count - 1];
+                        services[w].UnregisterWaterObject(last);
+                        if (w == 1) PlantWater.UnregisterPostfix(last);
+                        services[w].RegisterWaterObject(last);
+                        if (w == 1) PlantWater.RegisterPostfix(last);
+                        StoreLevelLikeTheGame(last);
+                    }
+                    break;
+                }
             }
             events[0].Clear();
             events[1].Clear();
             RouteMapsTests.Call(world.Game, "Tick");
             services[0].Tick();                                          // the game's own loop over the game's map
             if (WaterMapCopy.MapUpdatePrefix(world.Mod)) RouteMapsTests.Call(world.Mod, "Tick");
-            handled &= !PlantWater.TickPrefix(services[1]);              // the mod over the swapped-in copy
+            if (round == "game loop")
+            {
+                // The game's own loop runs over the mod's world in place of the mod (the fallback, or another mod's
+                // prefix): the postfix sees a call the prefix did not handle and every known level is forgotten.
+                services[1].Tick();
+                PlantWater.TickPostfix();
+            }
+            else
+            {
+                handled &= !PlantWater.TickPrefix(services[1]);          // the mod over the swapped-in copy
+                PlantWater.TickPostfix();
+            }
             same &= events[0].Count == events[1].Count;
             for (int i = 0; same && i < events[0].Count; i++) same &= events[0][i] == events[1][i];
             for (int i = 0; i < objects[0].Count; i++) same &= (int)level.GetValue(objects[0][i]) == (int)level.GetValue(objects[1][i]);
@@ -885,16 +1006,19 @@ internal static class WaterAndSoilTests
         string stats = PlantWater.TakeStatsLine();
         Console.WriteLine("     " + stats);
         Console.WriteLine("     " + WaterMapCopy.TakeStatsLine());
-        check(totalEvents > 300, $"plant water on the worker: the test water actually moves ({totalEvents} level changes over 15 ticks)");
+        check(totalEvents > 300, $"plant water on the worker: the test water actually moves ({totalEvents} level changes over 21 ticks)");
         check(same && handled, "plant water on the worker: the same levels and events as the game's own loop over the real water map, " +
-                               "through ordinary ticks, an object leaving, a layout change, a wrong mirror, objects joining and verify mode");
-        check(stats.StartsWith("PlantWater: 15 passes over") && stats.Contains("; 14 used the water worker's levels") &&
-              stats.Contains("1001 that joined the list after the snapshot were read on the main thread") &&
+                               "through ordinary ticks, an object leaving, a layout change, a wrong mirror, objects joining, objects " +
+                               "registered as the game does it, an object registered again, a tick of the game's own loop and verify mode");
+        check(stats.StartsWith("PlantWater: 20 passes over") && stats.Contains("; 19 used the water worker's levels") &&
+              stats.Contains("1004 that joined the list after the snapshot were read on the main thread") &&
               stats.Contains(", 1 read every level inside the tick") && stats.Contains("1 had no copy to use") &&
-              stats.Contains("the list changed in 2 ticks, the mirror was rebuilt 1 times") && stats.Contains("verify mismatches 0") &&
-              PlantWater.IsActive,
-            "plant water on the worker: fourteen ticks used the worker's levels (objects leaving, seen or unseen by the hook, are matched " +
-            "around), one fell back for the layout change, joiners were read on the main thread, verify agreed");
+              stats.Contains("the list changed in 3 ticks, the mirror was rebuilt 1 times") && stats.Contains("which happened 1 times") &&
+              stats.Contains("verify mismatches 0, known levels that differed from the stored ones " + knownMismatchesBefore) &&
+              PlantWater.KnownMismatches == knownMismatchesBefore && PlantWater.IsActive,
+            "plant water on the worker: nineteen ticks used the worker's levels (objects leaving, seen or unseen by the hook, are matched " +
+            "around), one fell back for the layout change, joiners were read on the main thread, the game's own loop made the mod " +
+            "forget its known levels once, verify agreed");
         PlantWater.SetVerifyForTests(false);
         WaterMapCopy.SceneCreated();
         PlantWater.SceneCreated();
