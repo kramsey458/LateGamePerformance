@@ -523,7 +523,10 @@ namespace LateGamePerformance
             return pure;
         }
 
-        // Lets the game count into its own tables and compares with what was just written there.
+        // Lets the game count into its own tables, compares with what the mod had just written there, and puts the
+        // mod's numbers back: the setting is each player's own, so in co-op the one player who has it on must read the
+        // same numbers as the others (up to 0.4.26 a difference left the game's in the tables). Refilled in the order
+        // they were copied out, so the tables end up as they are with the setting off.
         private static void Verify(object counter, object inventories)
         {
             object stockCounter = _stockCounterOf(counter);
@@ -540,14 +543,20 @@ namespace LateGamePerformance
             _gameUpdateCapacity.Invoke(capacityCounter, new[] { inventories });
             for (int i = 0; i < 4; i++)
             {
-                string difference = Difference(mine[i], tables[i](i < 2 ? stockCounter : capacityCounter));
+                Dictionary<string, int> games = tables[i](i < 2 ? stockCounter : capacityCounter);
+                string difference = Difference(mine[i], games);
                 if (difference != null)
                 {
                     _verifyMismatches++;
                     if (_verifyMismatches <= 10)
                     {
-                        Log.Warning($"DistrictCounts verify: {names[i]} of {difference}. Using the game's.");
+                        Log.Warning($"DistrictCounts verify: {names[i]} of {difference}.");
                     }
+                }
+                games.Clear();
+                foreach (KeyValuePair<string, int> pair in mine[i])
+                {
+                    games.Add(pair.Key, pair.Value);
                 }
             }
         }

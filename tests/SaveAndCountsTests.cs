@@ -884,8 +884,11 @@ internal static class SaveAndCountsTests
         check(DistrictCounts.ForeignPatch(null) != null,
             "district counts: the reviewed patch is only accepted on the method it was reviewed on");
 
-        DistrictCounts.ResetForTests();
         DistrictCounts.PatchesOn = method => null;
+        RunDistrictCountsVerifyOnlyMeasures(check, list, goods);
+
+        DistrictCounts.ResetForTests();
+        DistrictCounts.CreateFeature(new Config());
         DistrictCounts.Activate();
 
         // A broken inventory: the feature turns itself off and the game's count runs (and fails its own way).
@@ -897,5 +900,56 @@ internal static class SaveAndCountsTests
         games.UpdateCounters();
         mods.UpdateCounters();
         check(Counts(games, goods) == Counts(mods, goods), "district counts: and the game's count then leaves nothing of the failed one behind");
+    }
+
+    // A capacity rule that answers differently every time it is asked: the game's count in verify mode then comes out
+    // different from the mod's, as it would if the mod had a counting bug.
+    private sealed class DriftingDisallower : IGoodDisallower
+    {
+        public static int Calls;
+
+#pragma warning disable CS0067
+        public event EventHandler<DisallowedGoodsChangedEventArgs> DisallowedGoodsChanged;
+#pragma warning restore CS0067
+
+        public int AllowedAmount(string goodId)
+        {
+            return 10 + Calls++;
+        }
+    }
+
+    // A verify key is each player's own, so what the game reads must not depend on it: the same district is counted
+    // with DistrictCountsVerify off and on, with the game's count made to differ, and every good must read the same.
+    private static void RunDistrictCountsVerifyOnlyMeasures(Action<bool, string> check, List<Inventory> list, string[] goods)
+    {
+        HashSet<Inventory> district = new HashSet<Inventory>(list.Take(150));
+        Inventory drifting = (Inventory)RuntimeHelpers.GetUninitializedObject(typeof(Inventory));
+        StorableGoodRegistry allowed = new StorableGoodRegistry();
+        allowed.Add(new List<StorableGoodAmount> { new StorableGoodAmount(StorableGood.CreateAsTakeable(goods[0]), 500) });
+        Set(drifting, "_allowedGoods", allowed);
+        Set(drifting, "_storage", new GoodRegistry());
+        Set(drifting, "<PublicInput>k__BackingField", false);
+        Set(drifting, "<PublicOutput>k__BackingField", true);
+        Set(drifting, "_ignorableCapacity", false);
+        Set(drifting, "_goodDisallower", new DriftingDisallower());
+        district.Add(drifting);
+
+        string CountWith(bool verify, out string line)
+        {
+            DistrictCounts.ResetForTests();
+            DistrictCounts.CreateFeature(new Config { DistrictCountsVerify = verify });
+            DistrictCounts.Activate();
+            DriftingDisallower.Calls = 0;
+            DistrictResourceCounter counter = NewCounter(district);
+            bool replaced = !DistrictCounts.UpdatePrefix(counter);
+            line = DistrictCounts.TakeStatsLine();
+            return replaced ? Counts(counter, goods) : null;
+        }
+
+        string off = CountWith(false, out _);
+        string on = CountWith(true, out string verifyLine);
+        check(off != null && off == on && DriftingDisallower.Calls == 2 && verifyLine.Contains("verify mismatches 1"),
+            "district counts verify: the game's count came out different and was logged, and every good reads the mod's count, " +
+            $"as with verify off ({verifyLine})");
     }
 }

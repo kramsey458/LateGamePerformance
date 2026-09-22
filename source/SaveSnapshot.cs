@@ -31,8 +31,8 @@ namespace LateGamePerformance
     // The list of components allowed on workers is exactly the ones whose Save this mod has read (see
     // TECHNICAL.md). An entity is eligible only if every persistent component on it is on that list. If a worker
     // throws for any reason, everything is discarded and the game's own Create runs; the feature is then off for
-    // the session. SaveSnapshotVerify also runs the game's own snapshot and compares every entity, and uses the
-    // game's. Not part of the simulation: what is saved does not change, only which thread writes it down.
+    // the session. SaveSnapshotVerify also runs the game's own snapshot and compares every entity; the mod's is
+    // saved either way. Not part of the simulation: what is saved does not change, only which thread writes it down.
     internal static class SaveSnapshot
     {
         private const string FactoryType = "Timberborn.WorldPersistence.SerializedWorldFactory";

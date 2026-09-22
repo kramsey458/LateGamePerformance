@@ -30,7 +30,8 @@ namespace LateGamePerformance
     // cannot differ, so it is the same on every computer.
     //
     // HomeSearchVerify runs the game's walk as well (fresh lookups, through the same concatenation) and compares
-    // the beaver picked; a mismatch is logged and the game's pick is used.
+    // the beaver picked; a mismatch is logged and counted, and the mod's pick still moves in (up to 0.4.26 the
+    // game's did, so a player with the setting on could differ from the others in co-op).
     internal static class HomeSearch
     {
         private const string AssignerType = "Timberborn.DwellingSystem.DwellerHomeAssigner";
@@ -194,16 +195,16 @@ namespace LateGamePerformance
                 Dweller pick = Scan(dwelling, primary) ?? Scan(dwelling, secondary);
                 if (_verify)
                 {
+                    // Counted and logged only: the setting is each player's own, so the mod's pick moves in either way.
                     Dweller expected = GamesPick(dwelling, primaryBeavers, secondaryBeavers);
                     if (!ReferenceEquals(pick, expected))
                     {
                         _verifyMismatches++;
                         if (_verifyMismatches <= 10)
                         {
-                            Log.Warning("HomeSearch verify: the mod would move in " + Describe(pick) + " and the game " +
-                                        Describe(expected) + ". Using the game's.");
+                            Log.Warning("HomeSearch verify: the mod moves in " + Describe(pick) + " where the game would move in " +
+                                        Describe(expected) + ".");
                         }
-                        pick = expected;
                     }
                 }
                 if (pick != null)

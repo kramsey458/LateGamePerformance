@@ -154,6 +154,7 @@ internal static class Program
         TestTimingMemory();
         TestBootConfig();
         TestYielderSearch();
+        TestVerifyOnlyMeasures();
         TestGarbageCollection();
         TestCatchUp();
         TestSoundAndUi();
@@ -201,9 +202,14 @@ internal static class Program
         HomeSearchTests.Run(Check);
         string[] expectedWarnings =
         {
+            "YielderSearch: result differs from the game's own search. Mod: nothing to take. Game: nothing in range.",
+            "HaulCache verify: cached list differs from vanilla (cached 2, vanilla 2).",
             "CatchUp failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
-            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed",
-            "SaveSnapshot: the saving code of", "HomeSearch failed"
+            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing",
+            "DistrictCounts verify: output capacity of Good0: the mod counted", "DistrictCounts failed",
+            "WaterMapCopy verify: the copy made on a worker differs from the game's.",
+            "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
+            "HomeSearch verify: the mod moves in", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
         for (int i = 0; asExpected && i < expectedWarnings.Length; i++)
@@ -816,6 +822,54 @@ internal static class Program
         GamesAnswer(YielderSearch.LazyCandidates(forest, plant => plant.Exists, plant => plant.Yielding, plant => plant.Alive,
             plant => plant.Reachable ? plant : null, reached => reached != null, blocked));
         Check(blocked.Lookups == 2000, "yielder search: with nothing reachable nothing can be left out");
+    }
+
+    // A verify key is each player's own (the .cfg, the settings page), so it must not change what the game is handed:
+    // in co-op a player with a key on would otherwise take the game's answer where the others take the mod's, the
+    // first time the two differ, and the colonies drift apart. Every verify mode is made to see a difference here or
+    // in its feature's tests, and must hand the game what it is handed with the key off. The tree search and the
+    // hauling list cannot run outside the game (their candidates are live buildings and plants), so these two drive
+    // the step each prefix takes once the game's own answer is in: the comparison.
+    private static void TestVerifyOnlyMeasures()
+    {
+        // The tree search: the mod found nothing to take, the game's own search says nothing is in range.
+        bool wasVerifying = YielderSearch.VerifyEnabled;
+        YielderSearch.VerifyEnabled = true;
+        Timberborn.YielderFinding.YielderSearchResult mods = Timberborn.YielderFinding.YielderSearchResult.CreateEmpty();
+        Timberborn.YielderFinding.YielderSearchResult handed =
+            YielderSearch.Compared(mods, Timberborn.YielderFinding.YielderSearchResult.CreateNoYielderInRange());
+        YielderSearch.VerifyEnabled = wasVerifying;
+        Check(ReferenceEquals(handed.Yielder, null) && handed.NoYielderInRange == mods.NoYielderInRange,
+            "verify only measures: the tree search hands the game the mod's result, as with verify off, when the game's own " +
+            $"search differs (handed: {(handed.NoYielderInRange ? "nothing in range, the game's" : "nothing to take, the mod's")})");
+
+        // The hauling list: the cache holds [a, b], the game's own build says [b, a].
+        Type haulBehavior = typeof(Timberborn.Hauling.WeightedBehavior).Assembly.GetType("Timberborn.Hauling.HaulWorkplaceBehavior", true);
+        var a = (Timberborn.WorkSystem.WorkplaceBehavior)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(haulBehavior);
+        var b = (Timberborn.WorkSystem.WorkplaceBehavior)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(haulBehavior);
+        List<Timberborn.WorkSystem.WorkplaceBehavior> list = new List<Timberborn.WorkSystem.WorkplaceBehavior> { a, b };
+        HaulCache.Compare(list, new List<Timberborn.Hauling.WeightedBehavior>
+        {
+            new Timberborn.Hauling.WeightedBehavior(2f, b), new Timberborn.Hauling.WeightedBehavior(1f, a)
+        });
+        Check(list.Count == 2 && ReferenceEquals(list[0], a) && ReferenceEquals(list[1], b),
+            "verify only measures: the hauling list handed to the game stays the cached one, as with verify off, when the game's " +
+            $"own build differs (handed: {(ReferenceEquals(list[0], a) ? "the cached order" : "the game's order")})");
+
+        // The water map's verify pass swaps the worker's copy in from a postfix (WaterAndSoilTests drives it), so that
+        // postfix must run before any other mod's postfix on the same method, as the swap does with verify off:
+        // BeaverBuddies' desync trace hashes the map there. Sorted by Harmony with another mod's ordinary postfix
+        // registered first (that mod loaded first).
+        PatchSpec update = WaterMapCopy.CreateFeature(new Config()).Patches[0];
+        MethodInfo another = typeof(Program).GetMethod(nameof(AnotherModsPrefix), BindingFlags.Static | BindingFlags.NonPublic);
+        List<MethodInfo> order = HarmonyLib.PatchProcessor.GetSortedPatchMethods(update.Target(), new[]
+        {
+            new HarmonyLib.Patch(new HarmonyLib.HarmonyMethod(another), 0, "another.mod"),
+            new HarmonyLib.Patch(new HarmonyLib.HarmonyMethod(update.Postfix), 1, Plugin.HarmonyId + ".WaterMapCopy")
+        });
+        Check(order.Count == 2 && order[0] == update.Postfix,
+            "verify only measures: the water map's verify postfix, which swaps the worker's copy in, runs before other mods' " +
+            "postfixes on ThreadSafeWaterMap.Update whatever the load order");
     }
 
     private static void TestGarbageCollection()

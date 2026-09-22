@@ -65,9 +65,10 @@ namespace LateGamePerformance
     // computed from (WaterMapCopy swapped it in and nothing has rewritten it since) and the worker finished;
     // otherwise the tick reads the levels itself on this mod's worker threads, as 0.4.12 did.
     //
-    // PlantWaterVerify reads everything again on the main thread with the game's own method and compares. If
-    // anything throws, the feature switches itself off and the game's own loop runs; nothing has been changed at
-    // that point, or what was changed is what the game's loop would have changed first, so it simply carries on.
+    // PlantWaterVerify reads everything again on the main thread with the game's own method and compares; the levels
+    // read ahead are stored all the same. If anything throws, the feature switches itself off and the game's own
+    // loop runs; nothing has been changed at that point, or what was changed is what the game's loop would have
+    // changed first, so it simply carries on.
     internal static class PlantWater
     {
         // Below this many objects the game's own loop is as fast as anything else.
@@ -585,6 +586,9 @@ namespace LateGamePerformance
             _resyncs++;
         }
 
+        // Counted and logged only: the levels read ahead are stored either way, because the setting is each player's
+        // own and in co-op the one player who has it on must store the same levels as the others (up to 0.4.26 a
+        // difference stored the main thread's).
         private static void Verify(List<WaterObject> objects, int count, int[] levels)
         {
             for (int i = 0; i < count; i++)
@@ -596,9 +600,8 @@ namespace LateGamePerformance
                     if (_verifyMismatches <= 10)
                     {
                         Log.Warning($"PlantWater verify: object {i} read {levels[i]} ahead of the tick and {level} on the main " +
-                                    "thread. Using the main thread's.");
+                                    "thread.");
                     }
-                    levels[i] = level;
                 }
             }
         }

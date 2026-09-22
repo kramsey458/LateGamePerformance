@@ -321,27 +321,31 @@ namespace LateGamePerformance
                 VerifyScratch.AddRange(VerifyItemScratch);
             }
             VerifyScratch.Sort(ByWeightDescending);
-            bool same = VerifyScratch.Count == Ordered.Count;
-            for (int i = 0; same && i < VerifyScratch.Count; i++)
+            Compare(Ordered, VerifyScratch);
+            VerifyScratch.Clear();
+            VerifyItemScratch.Clear();
+        }
+
+        // Verify mode: the list about to be handed to the game against the game's own build of it. Counted and logged
+        // only; the game is handed the cached list either way, because the setting is each player's own and in co-op
+        // the one player who has it on must get the same list as the others (up to 0.4.26 a difference handed over
+        // the vanilla list).
+        internal static void Compare(List<WorkplaceBehavior> handed, List<WeightedBehavior> vanilla)
+        {
+            bool same = vanilla.Count == handed.Count;
+            for (int i = 0; same && i < vanilla.Count; i++)
             {
-                same = ReferenceEquals(VerifyScratch[i].WorkplaceBehavior, Ordered[i]);
+                same = ReferenceEquals(vanilla[i].WorkplaceBehavior, handed[i]);
             }
             if (!same)
             {
                 _verifyMismatches++;
                 if (_verifyMismatches <= 10)
                 {
-                    Log.Warning($"HaulCache verify: cached list differs from vanilla (cached {Ordered.Count}, " +
-                                $"vanilla {VerifyScratch.Count}). Using the vanilla list.");
-                }
-                Ordered.Clear();
-                for (int i = 0; i < VerifyScratch.Count; i++)
-                {
-                    Ordered.Add(VerifyScratch[i].WorkplaceBehavior);
+                    Log.Warning($"HaulCache verify: cached list differs from vanilla (cached {handed.Count}, " +
+                                $"vanilla {vanilla.Count}).");
                 }
             }
-            VerifyScratch.Clear();
-            VerifyItemScratch.Clear();
         }
     }
 }

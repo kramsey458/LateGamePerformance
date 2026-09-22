@@ -49,9 +49,11 @@ internal static class WaterAndSoilTests
         RunScanModel(check);
         RunWaterMap(check, verify: false);
         RunWaterMap(check, verify: true);
+        RunWaterMapVerifyOnlyMeasures(check);
         RunWaterTiming(check);
         RunSoil(check);
         RunPlantWaterOnWorker(check);
+        RunPlantWaterVerifyOnlyMeasures(check);
     }
 
     private static MapIndexService CreateMapIndex(int width, int height, int depth)
@@ -392,7 +394,7 @@ internal static class WaterAndSoilTests
                     break;
                 case Round.Normal:
                 case Round.CountsMove:
-                    if (!verify) expectedSwaps++;
+                    expectedSwaps++;
                     break;
             }
             if (round == Round.LayoutChanged)
@@ -419,8 +421,10 @@ internal static class WaterAndSoilTests
         check(WaterMapCopy.IsActive, $"{mode}: the feature is still active");
         if (verify)
         {
-            check(stats.Contains("10 ticks compared with") && stats.Contains("verify mismatches 0"),
-                "verify mode: every usable copy was compared with the game's and none differed");
+            check(stats.StartsWith($"WaterMapCopy: {expectedSwaps} ticks swapped in") &&
+                  stats.Contains($"; {expectedSwaps} compared with the game's own copy first, verify mismatches 0"),
+                $"verify mode: every usable copy was compared with the game's, none differed, and all {expectedSwaps} were swapped in " +
+                "as with verify off");
         }
         else
         {
@@ -428,6 +432,55 @@ internal static class WaterAndSoilTests
                   stats.Contains("in 4 ticks where the water layout changed and 2 where no copy was ready"),
                 $"water map copy: swapped in on the {expectedSwaps} ordinary ticks, the game copied on the others");
         }
+        WaterMapCopy.SceneCreated();
+    }
+
+    // A verify key is each player's own, so it must not change the water map the game reads. The worker's copy is made
+    // to differ from the game's (one byte changed right after it was made, as a copying bug would): with the key off it
+    // is swapped in; with the key on the difference is logged and the same copy is swapped in all the same.
+    private static void RunWaterMapVerifyOnlyMeasures(Action<bool, string> check)
+    {
+        Action<WaterMapCopy.Job> previous = WaterMapCopy.AfterCopy;
+        byte[] Handed(bool verify, out byte[] games, out string stats)
+        {
+            WaterMapCopy.CreateFeature(new Config { WaterMapCopyVerify = verify }).Patches[0].Target();
+            WaterMapCopy.SceneCreated();
+            WaterMapCopy.Activate();
+            WaterMapCopy.AfterCopy = null;
+            WaterWorld world = CreateWaterWorld();
+            Random random = new Random(41);
+            PropertyInfo anyChanged = world.Simulator.GetType().GetProperty("AnyColumnChanged");
+            anyChanged.SetValue(world.Simulator, false);
+            // A first tick without a copy, in which the mod meets the map; then one with the worker's copy, spoilt.
+            for (int tick = 0; tick < 2; tick++)
+            {
+                WaterMapCopy.StartParallelTickPrefix(world.Simulator);
+                SimulateWaterTasks(world, random, false);
+                if (tick == 1)
+                {
+                    WaterMapCopy.AfterCopy = job => MemoryMarshal.AsBytes(job.SpareColumns.AsSpan())[5] ^= 0x5A;
+                    WaterMapCopy.FillForTests();
+                    WaterMapCopy.AfterCopy = null;
+                }
+                RouteMapsTests.Call(world.Game, "Tick");
+                if (WaterMapCopy.MapUpdatePrefix(world.Mod))
+                {
+                    RouteMapsTests.Call(world.Mod, "Tick");
+                }
+                WaterMapCopy.MapUpdatePostfix(world.Mod);
+            }
+            stats = WaterMapCopy.TakeStatsLine();
+            games = Bytes((Array)RouteMapsTests.GetField(world.Game, "_threadSafeWaterColumns")).ToArray();
+            return Bytes((Array)RouteMapsTests.GetField(world.Mod, "_threadSafeWaterColumns")).ToArray();
+        }
+
+        byte[] off = Handed(false, out byte[] games, out _);
+        byte[] on = Handed(true, out _, out string verifyStats);
+        Console.WriteLine("     " + verifyStats);
+        check(!off.AsSpan().SequenceEqual(games) && off.AsSpan().SequenceEqual(on) && verifyStats.Contains("verify mismatches 1"),
+            "water map copy verify: the worker's copy differed from the game's and that was logged, and the map holds the " +
+            "worker's copy, as with verify off");
+        WaterMapCopy.AfterCopy = previous;
         WaterMapCopy.SceneCreated();
     }
 
@@ -830,6 +883,83 @@ internal static class WaterAndSoilTests
               PlantWater.IsActive,
             "plant water on the worker: fourteen ticks used the worker's levels (objects leaving, seen or unseen by the hook, are matched " +
             "around), one fell back for the layout change, joiners were read on the main thread, verify agreed");
+        PlantWater.SetVerifyForTests(false);
+        WaterMapCopy.SceneCreated();
+        PlantWater.SceneCreated();
+    }
+
+    // A verify key is each player's own, so it must not change the levels the game stores. One object's level from the
+    // water worker is made wrong right after the worker wrote it (as a lookup bug would): with the key off the tick
+    // stores it; with the key on the main thread's own read differs, that is logged, and the same level is stored.
+    private static void RunPlantWaterVerifyOnlyMeasures(Action<bool, string> check)
+    {
+        const int width = 32, height = 28, count = 600, spoilt = 3;
+        Type objectType = typeof(WaterObject);
+        FieldInfo mapField = objectType.GetField("_threadSafeWaterMap", Any), tileField = objectType.GetField("_baseCoordinates", Any);
+        PropertyInfo level = objectType.GetProperty("WaterAboveBase");
+        int[] Stored(bool verify, out int workers, out string stats)
+        {
+            object terrain = Proxy<Timberborn.TerrainSystem.ITerrainService>((method, args) =>
+                method.Name == "Contains" && args[0] is Vector2Int xy
+                    ? (object)(xy.x >= 0 && xy.x < width && xy.y >= 0 && xy.y < height)
+                    : throw new NotSupportedException(method.Name));
+            WaterMapCopy.CreateFeature(new Config()).Patches[0].Target();
+            WaterMapCopy.SceneCreated();
+            WaterMapCopy.Activate();
+            PlantWater.CreateFeature(new Config()).Patches[0].Target();
+            PlantWater.Activate();
+            PlantWater.UseWaterMapCopy();
+            PlantWater.SetVerifyForTests(verify);
+            Action<WaterMapCopy.Job> levels = WaterMapCopy.AfterCopy;
+            WaterWorld world = CreateWaterWorld(width, height, terrain);
+            Random random = new Random(43), tiles = new Random(44);
+            SimulateWaterTasks(world, random, true);
+            PropertyInfo anyChanged = world.Simulator.GetType().GetProperty("AnyColumnChanged");
+            anyChanged.SetValue(world.Simulator, true);
+            if (WaterMapCopy.MapUpdatePrefix(world.Mod)) RouteMapsTests.Call(world.Mod, "Tick");
+            anyChanged.SetValue(world.Simulator, false);
+
+            WaterObjectService service = new WaterObjectService();
+            List<WaterObject> objects = new List<WaterObject>();
+            for (int i = 0; i < count; i++)
+            {
+                WaterObject waterObject = (WaterObject)RuntimeHelpers.GetUninitializedObject(objectType);
+                mapField.SetValue(waterObject, world.Mod);
+                tileField.SetValue(waterObject, new Vector3Int(tiles.Next(0, width), tiles.Next(0, height), tiles.Next(0, 4)));
+                service.RegisterWaterObject(waterObject);
+                PlantWater.RegisterPostfix(waterObject);
+                objects.Add(waterObject);
+            }
+            PlantWater.TakeStatsLine();
+
+            int worker = 0;
+            WaterMapCopy.AfterCopy = job =>
+            {
+                levels(job);
+                int[] written = (int[])job.Extra.GetType().GetField("Levels", Any).GetValue(job.Extra);
+                written[spoilt] += 7;
+                worker = written[spoilt];
+            };
+            WaterMapCopy.StartParallelTickPrefix(world.Simulator);
+            SimulateWaterTasks(world, random, false);
+            WaterMapCopy.FillForTests();
+            WaterMapCopy.AfterCopy = levels;
+            if (WaterMapCopy.MapUpdatePrefix(world.Mod)) RouteMapsTests.Call(world.Mod, "Tick");
+            bool handled = !PlantWater.TickPrefix(service);
+            workers = worker;
+            stats = PlantWater.TakeStatsLine();
+            int[] stored = new int[count];
+            for (int i = 0; i < count; i++) stored[i] = handled ? (int)level.GetValue(objects[i]) : int.MinValue;
+            return stored;
+        }
+
+        int[] off = Stored(false, out int spoiltLevel, out _);
+        int[] on = Stored(true, out _, out string verifyStats);
+        Console.WriteLine("     " + verifyStats);
+        check(off[spoilt] == spoiltLevel && off.AsSpan().SequenceEqual(on) && verifyStats.Contains("; 1 used the water worker's levels") &&
+              verifyStats.Contains("verify mismatches 1"),
+            "plant water verify: the main thread read another level than the worker and that was logged, and every object stores " +
+            $"the worker's level, as with verify off (object {spoilt}: {on[spoilt]}, the worker's {spoiltLevel})");
         PlantWater.SetVerifyForTests(false);
         WaterMapCopy.SceneCreated();
         PlantWater.SceneCreated();

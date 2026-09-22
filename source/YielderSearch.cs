@@ -45,8 +45,8 @@ namespace LateGamePerformance
     // it was thrown away. The first candidate is always looked up ("found something" starts false), so that
     // still happens on the same tick as in the unmodded game.
     //
-    // YielderSearchVerify runs the game's own search as well, compares, logs any difference and uses the game's.
-    // If anything throws, the feature switches itself off and the game's own code runs.
+    // YielderSearchVerify runs the game's own search as well, compares and logs any difference; the game is handed
+    // the mod's result either way. If anything throws, the feature switches itself off and the game's own code runs.
     internal static class YielderSearch
     {
         internal sealed class Counters
@@ -271,13 +271,7 @@ namespace LateGamePerformance
                 {
                     YielderSearchResult games = finder.FindLivingYielder(receivingInventory, liftingCapacity,
                         yielders.Select(plant => LookUp(start, plant)));
-                    if (!Same(result, games))
-                    {
-                        _verifyMismatches++;
-                        Log.Warning("YielderSearch: result differs from the game's own search; using the game's. " +
-                                    $"Mod: {Describe(result)}. Game: {Describe(games)}.");
-                        result = games;
-                    }
+                    result = Compared(result, games);
                 }
                 __result = result;
                 return false;
@@ -335,6 +329,20 @@ namespace LateGamePerformance
         private static bool WasReached(ReachableYielder reached)
         {
             return reached.Yielder;
+        }
+
+        // Verify mode: the game's own search beside the mod's. Returns the result the game is handed, which is the
+        // mod's whatever the comparison says: the setting is each player's own, so in co-op the one player who has it
+        // on must get the same answer as the others (up to 0.4.26 a difference handed over the game's).
+        internal static YielderSearchResult Compared(YielderSearchResult result, YielderSearchResult games)
+        {
+            if (!Same(result, games))
+            {
+                _verifyMismatches++;
+                Log.Warning("YielderSearch: result differs from the game's own search. " +
+                            $"Mod: {Describe(result)}. Game: {Describe(games)}.");
+            }
+            return result;
         }
 
         private static bool Same(YielderSearchResult a, YielderSearchResult b)

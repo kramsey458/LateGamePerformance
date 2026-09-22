@@ -41,7 +41,9 @@ namespace LateGamePerformance
     // Up to 0.4.14 the hook was on Tick, and such postfixes did not run on swapped ticks.
     //
     // WaterMapCopyVerify lets the game copy every tick as well and compares, byte for byte, with what the worker
-    // made. Nothing is swapped in that mode.
+    // made, then swaps the worker's copy in as without the setting (in the postfix, which runs before other mods'
+    // postfixes): the setting is each player's own, so in co-op the one player who has it on must read the same
+    // map as the others. Up to 0.4.26 nothing was swapped in that mode, so a difference left the game's copy.
     internal static class WaterMapCopy
     {
         private delegate Vector2 FlowAtTop<T>(ref T outflows);
@@ -267,13 +269,12 @@ namespace LateGamePerformance
             {
                 return null;
             }
-            long used = _verify ? _verified : _swapped;
             double workerMs = _workerStopwatchTicks * 1000.0 / Stopwatch.Frequency;
             string line = string.Format(CultureInfo.InvariantCulture,
-                "WaterMapCopy: {0} ticks {1} the copy made on a worker thread ({2:0.000} ms there per tick); the game " +
-                "copied on the main thread in {3} ticks where the water layout changed and {4} where no copy was ready{5}",
-                used, _verify ? "compared with" : "swapped in", used > 0 ? workerMs / used : 0, _fellBackLayout,
-                _fellBackNotReady, _verify ? $"; verify mismatches {_verifyMismatches}" : "");
+                "WaterMapCopy: {0} ticks swapped in the copy made on a worker thread ({1:0.000} ms there per tick); the " +
+                "game copied on the main thread in {2} ticks where the water layout changed and {3} where no copy was ready{4}",
+                _swapped, _swapped > 0 ? workerMs / _swapped : 0, _fellBackLayout, _fellBackNotReady,
+                _verify ? $"; {_verified} compared with the game's own copy first, verify mismatches {_verifyMismatches}" : "");
             _swapped = _fellBackLayout = _fellBackNotReady = _workerStopwatchTicks = _verified = 0;
             return line;
         }
@@ -442,18 +443,11 @@ namespace LateGamePerformance
                 _workerStopwatchTicks += job.WorkerStopwatchTicks;
                 if (_verify)
                 {
+                    // The game copies as well; the postfix compares and then swaps as below.
                     _verifyJob = job;
                     return true;
                 }
-                // The game's Update from here, with both copies already made: the layer count is unchanged (no
-                // resize, no event), and with no column changed the game would not copy the column counts.
-                _setMapAnyChanged(__instance, false);
-                _setMapColumns(__instance, job.SpareColumns);
-                _setMapFlows(__instance, job.SpareFlows);
-                _spareColumns = job.LiveColumns;
-                _spareFlows = job.LiveFlows;
-                _swappedJob = job;
-                _swapped++;
+                Swap(__instance, job);
                 return false;
             }
             catch (Exception exception)
@@ -464,7 +458,10 @@ namespace LateGamePerformance
             }
         }
 
+        // First among the postfixes, so that other mods' postfixes (BeaverBuddies' desync trace) see the map the
+        // swap leaves, as they do with the setting off.
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.First)]
         internal static void MapUpdatePostfix(object __instance)
         {
             Job job = _verifyJob;
@@ -473,19 +470,44 @@ namespace LateGamePerformance
             {
                 return;
             }
-            _verified++;
-            bool same = MemoryMarshal.AsBytes(new ReadOnlySpan<ReadOnlyWaterColumn>(job.SpareColumns))
-                            .SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<ReadOnlyWaterColumn>(_mapColumns(__instance)))) &&
-                        MemoryMarshal.AsBytes(new ReadOnlySpan<Vector2>(job.SpareFlows))
-                            .SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<Vector2>(_mapFlows(__instance))));
-            if (!same)
+            try
             {
-                _verifyMismatches++;
-                if (_verifyMismatches <= 10)
+                _verified++;
+                bool same = MemoryMarshal.AsBytes(new ReadOnlySpan<ReadOnlyWaterColumn>(job.SpareColumns))
+                                .SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<ReadOnlyWaterColumn>(_mapColumns(__instance)))) &&
+                            MemoryMarshal.AsBytes(new ReadOnlySpan<Vector2>(job.SpareFlows))
+                                .SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<Vector2>(_mapFlows(__instance))));
+                if (!same)
                 {
-                    Log.Warning("WaterMapCopy verify: the copy made on a worker differs from the game's. The game's is used.");
+                    _verifyMismatches++;
+                    if (_verifyMismatches <= 10)
+                    {
+                        Log.Warning("WaterMapCopy verify: the copy made on a worker differs from the game's.");
+                    }
                 }
+                // Counted and logged only: the worker's copy goes in as with the setting off, because the setting
+                // is each player's own and in co-op the one player who has it on must read the same map as the
+                // others. The game's copy, just made into the current arrays, becomes the spare.
+                Swap(__instance, job);
             }
+            catch (Exception exception)
+            {
+                // Nothing was swapped; the map keeps the game's own copy.
+                Fail(exception);
+            }
+        }
+
+        // The game's Update from here, with both copies already made: the layer count is unchanged (no resize, no
+        // event), and with no column changed the game would not copy the column counts.
+        private static void Swap(object map, Job job)
+        {
+            _setMapAnyChanged(map, false);
+            _setMapColumns(map, job.SpareColumns);
+            _setMapFlows(map, job.SpareFlows);
+            _spareColumns = job.LiveColumns;
+            _spareFlows = job.LiveFlows;
+            _swappedJob = job;
+            _swapped++;
         }
 
         private static void Fail(Exception exception)
