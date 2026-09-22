@@ -692,17 +692,16 @@ would have written; only the thread that wrote part of it down differs.
   sequential snapshot entity for entity and keeps the order, a throwing part comes back as a failure with nothing
   thrown, and one worker or 64 give the same result.
 
-### Memory clean-up right after a save (on by default, new in 0.4.17)
+### Memory clean-up right after a save (0.4.17 to 0.4.23, removed in 0.4.24)
 
-A save allocates a lot: the snapshot of the world, then the JSON tree and the compressed bytes. In the logged
-354-beaver session every autosave was followed by a garbage collection within about ten ticks, so each save was two
-hitches: the save frame, and a collection frame of 100 to 190 ms a second later. `CollectAfterSave = true` (the
-default) runs a collection right after the save's main-thread part, inside `SaveWriter.WriteToSaveStream`, so it
-lands in the frame that is long anyway; the allocation budget starts over and the rest of the save's garbage no
-longer tips it over on its own. One `SaveCollect:` line per save says how long it took and how much it freed; the
-`Timing:` line counts the save frame with its collection separately from ordinary collections, which is how to see
-whether the collection a second later is gone. It also runs after the save BeaverBuddies writes for a joining
-player. Memory only; it changes nothing the game computes.
+0.4.17 ran a full garbage collection right after each save's main-thread part (`GC.Collect()` in a postfix on
+`SaveWriter.WriteToSaveStream`), so that the collection which followed every autosave a second later would land in
+the frame that was long anyway. The first session recorded with it, 0.4.23 in a 360-beaver colony with a managed heap of
+3.1 GB, showed the flaw: a forced full collection is not incremental, and on that heap it took 894 to 1274 ms per save
+and freed 150 to 280 MB, while the collection it pre-empted was a 100 to 190 ms frame. Every save was a 1.1 to 1.5 s
+freeze. The feature is removed; `CollectAfterSave` in an older settings file is ignored. What remains true: the save's
+garbage still brings a collection soon after it, and with incremental collection on that is the 100 to 190 ms frame
+the `Timing:` line reports. Lesson: never force a full collection on a heap this size.
 
 ### Audio listener placed only when needed (on by default, new in 0.4.17)
 
@@ -894,7 +893,6 @@ features, disable the mod.
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `SaveSnapshot` | `true` | Snapshot trees, crops, paths, levees and platforms on worker threads at every save. Saving only; may differ between peers. |
 | `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well, compare every entity and use the game's. Measurement only. For testing. |
-| `CollectAfterSave` | `true` | Collect garbage right after each save's main-thread part instead of a second later. Memory only; may differ between peers. |
 | `SoundListener` | `true` | Place the audio listener when the camera moved, while it glides, and every tenth frame otherwise. Sound only; may differ between peers. |
 | `AnimatorCulling` | `true` | Leave out the pose update of animated objects with no renderer on screen; their time keeps running. Rendering only; may differ between peers. |
 | `UiThrottle` | `true` | Status alert lists every fourth frame, the selected entity's panel every second frame. Interface only; may differ between peers. |

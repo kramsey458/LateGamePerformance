@@ -72,7 +72,7 @@ internal static class Program
         TestYielderSearch();
         TestGarbageCollection();
         TestCatchUp();
-        TestSaveCollectSoundAndUi();
+        TestSoundAndUi();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
@@ -84,7 +84,7 @@ internal static class Program
             HomeSearch.CreateFeature(new Config()), SoilScans.CreateListsFeature(),
             WaterRendering.CreateTilesFeature(), WaterRendering.CreateUploadsFeature(),
             MetricsDump.CreateFeature(new Config()),
-            Diagnostics.CreateFeature(), CatchUp.CreateFeature(), SaveCollect.CreateFeature(),
+            Diagnostics.CreateFeature(), CatchUp.CreateFeature(),
             SoundListenerSkip.CreateFeature(), UiThrottle.CreateFeature(), AnimatorCulling.CreateFeature(),
             Plugin.CreateTickFeature()
         };
@@ -101,7 +101,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 106, $"106 patches declared (found {patchCount})");
+        Check(patchCount == 105, $"105 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -114,7 +114,7 @@ internal static class Program
         HomeSearchTests.Run(Check);
         string[] expectedWarnings =
         {
-            "CatchUp failed", "SaveCollect failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
+            "CatchUp failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
             "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
@@ -182,28 +182,8 @@ internal static class Program
         Check(untouched == 1f && !CatchUp.IsActive, "catch-up: an exception switches it off and leaves the delta alone");
     }
 
-    private static void TestSaveCollectSoundAndUi()
+    private static void TestSoundAndUi()
     {
-        // Save collect: collects once, reports what it freed, never runs into itself, and switches off on failure.
-        long heap = 900L << 20;
-        int collections = 0;
-        SaveCollect.HeapBytes = () => heap;
-        SaveCollect.Collect = () =>
-        {
-            collections++;
-            heap = 600L << 20;
-            SaveCollect.WritePostfix();
-        };
-        SaveCollect.Activate();
-        SaveCollect.WritePostfix();
-        Check(collections == 1 && SaveCollect.IsActive, "save collect: one collection per save, none from inside itself");
-        SaveCollect.Collect = () => throw new InvalidOperationException("no collector");
-        SaveCollect.WritePostfix();
-        Check(!SaveCollect.IsActive, "save collect: a failure switches it off for the session");
-        SaveCollect.Collect = () => collections++;
-        SaveCollect.WritePostfix();
-        Check(collections == 1, "save collect: and then nothing runs");
-
         // Sound listener: runs when the camera moved, while the listener glides, and every tenth frame otherwise.
         SoundListenerSkip.Policy policy = new SoundListenerSkip.Policy();
         Check(policy.ShouldRun(true), "sound listener: the first frame runs");
@@ -249,8 +229,8 @@ internal static class Program
             "StatsEveryTicks = -3", "Nonsense", "GcReport = maybe", "RouteMaps = false", "RouteMapsMinFields = 0",
             "LimitCatchUp = false", "UiThrottle = false"
         }));
-        Check(!config.UiThrottle && config.SoundListener && config.CollectAfterSave && config.AnimatorCulling,
-            "config: CollectAfterSave, SoundListener, UiThrottle and AnimatorCulling are ways out, on by default");
+        Check(!config.UiThrottle && config.SoundListener && config.AnimatorCulling,
+            "config: SoundListener, UiThrottle and AnimatorCulling are ways out, on by default");
         Check(!config.LimitCatchUp && new Config().LimitCatchUp, "config: LimitCatchUp is a setting, on by default");
         Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch && config.TerrainSearch && config.IdleEntities && config.HomeSearch,
             "config: what decides which simulation code runs cannot be changed from the file");

@@ -146,10 +146,6 @@ namespace LateGamePerformance
             {
                 SaveSnapshot.Activate();
             }
-            if (config.CollectAfterSave && SaveCollect.CreateFeature().Apply(HarmonyId))
-            {
-                SaveCollect.Activate();
-            }
             if (config.SoundListener && SoundListenerSkip.CreateFeature().Apply(HarmonyId))
             {
                 SoundListenerSkip.Activate();

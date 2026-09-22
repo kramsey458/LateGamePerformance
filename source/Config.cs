@@ -53,8 +53,8 @@ namespace LateGamePerformance
         public bool WaterRendering = true;
         // Not part of the simulation, so it may differ between players. A way out, not a setting.
         public bool BackgroundSave = true;
-        // Memory, sound and user interface only. Ways out, not settings.
-        public bool CollectAfterSave = true;
+        // Sound and user interface only. Ways out, not settings. (CollectAfterSave, 0.4.17 to 0.4.23, is gone: a forced
+        // full collection on a 3 GB heap took over a second at every save. An old file's key is ignored.)
         public bool SoundListener = true;
         public bool UiThrottle = true;
         public bool AnimatorCulling = true;
@@ -136,7 +136,6 @@ namespace LateGamePerformance
             HomeSearchVerify = Bool(values, nameof(HomeSearchVerify), HomeSearchVerify);
             WaterRendering = Bool(values, nameof(WaterRendering), WaterRendering);
             BackgroundSave = Bool(values, nameof(BackgroundSave), BackgroundSave);
-            CollectAfterSave = Bool(values, nameof(CollectAfterSave), CollectAfterSave);
             SoundListener = Bool(values, nameof(SoundListener), SoundListener);
             UiThrottle = Bool(values, nameof(UiThrottle), UiThrottle);
             AnimatorCulling = Bool(values, nameof(AnimatorCulling), AnimatorCulling);
@@ -159,7 +158,7 @@ namespace LateGamePerformance
                    $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}, TerrainSearch={TerrainSearch}, IdleEntities={IdleEntities}, HomeSearch={HomeSearch}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
-                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, HomeSearchVerify={HomeSearchVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, SaveSnapshot={SaveSnapshot}, SaveSnapshotVerify={SaveSnapshotVerify}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, HomeSearchVerify={HomeSearchVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, SaveSnapshot={SaveSnapshot}, SaveSnapshotVerify={SaveSnapshotVerify}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }
