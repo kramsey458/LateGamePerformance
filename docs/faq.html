@@ -124,7 +124,7 @@
 
   <details id="haul">
     <summary>What is the hauling job list cache?</summary>
-    <div class="answer"><p>Every time a hauler looks for work, the game asks every building with an inventory in the district for its hauling jobs and their weights, sorts the whole list, and tries the jobs in order. It repeats that for every hauler decision, even when nothing changed in between. The mod keeps each building's jobs until something that feeds them changes (stock, reservations, allowed goods, enabled inventories, blocked state, emptying mark, obtain or supply setting, recipe or priority). On every request it assembles the district's list from them and sorts it with the game's own comparison. In 0.4.27, as a safety net, everything cached is dropped every tick, so an input the mod does not track, such as one added by another mod, can be out of date for at most a single tick. The 0.4.28 preview keeps answers across ticks instead, and asks again on every request any building with a job source it has not read (another mod's, for example).</p></div>
+    <div class="answer"><p>Every time a hauler looks for work, the game asks every building with an inventory in the district for its hauling jobs and their weights, sorts the whole list, and tries the jobs in order. It repeats that for every hauler decision, even when nothing changed in between. The mod keeps each building's jobs until something that feeds them changes (stock, reservations, allowed goods, enabled inventories, blocked state, emptying mark, obtain or supply setting, recipe or priority). On every request it assembles the district's list from them and sorts it with the game's own comparison. In 0.4.27, as a safety net, everything cached is dropped every tick, so an input the mod does not track, such as one added by another mod, can be out of date for at most a single tick. The 0.4.28 preview keeps answers across ticks instead, and re-reads any building with a job source it does not know (another mod's, for example) on every request.</p></div>
   </details>
 
   <details id="routes">
@@ -188,7 +188,7 @@
 
   <details id="mods">
     <summary>Does it work with other mods?</summary>
-    <div class="answer"><p>In 0.4.27 the hauling cache is dropped every tick, so an input the mod does not track, for example one added by another mod, can be out of date only within a single tick. The 0.4.28 preview asks again on every request any building whose job source or capacity rule it has not read, and keeps nothing if another mod patches the game methods it relies on. It needs Harmony and Mod Settings. Beyond that, keep a copy of your save when combining mods, as always.</p></div>
+    <div class="answer"><p>In 0.4.27 the hauling cache is dropped every tick, so an input the mod does not track, for example one added by another mod, can be out of date only within a single tick. The 0.4.28 preview re-reads any building whose job source or capacity rule it does not know on every request, and keeps nothing if another mod patches the game methods it relies on. It needs Harmony and Mod Settings. Beyond that, keep a copy of your save when combining mods, as always.</p></div>
   </details>
 
   <details id="game-version">
