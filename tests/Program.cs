@@ -208,7 +208,7 @@ internal static class Program
             "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing",
             "DistrictCounts verify: output capacity of Good0: the mod counted", "DistrictCounts failed",
             "WaterMapCopy verify: the copy made on a worker differs from the game's.",
-            "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
+            "PlantWater verify: object 3 read", "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
             "HomeSearch verify: the mod moves in", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;

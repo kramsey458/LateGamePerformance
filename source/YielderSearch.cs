@@ -41,9 +41,11 @@ namespace LateGamePerformance
     // trees to conclude "nothing to do": 3.8 ms per tick, 22% of all tick time. Plants whose good can be taken are looked
     // up exactly as before, in the same order.
     //
-    // One side effect is kept on purpose: the first lookup of a search fills the building's terrain route map if
-    // it was thrown away. The first candidate is always looked up ("found something" starts false), so that
-    // still happens on the same tick as in the unmodded game.
+    // A lookup fills the building's terrain route map if it was thrown away. Up to 0.4.24 the first candidate was
+    // always looked up so that this happened on the same tick as in the unmodded game; since 0.4.25 (dead plants and
+    // plants out of reach are not looked up) it may happen later. That cannot change a result: every cached terrain
+    // map is built at the end of each navigation tick anyway, and the only reader of a map's filled state in the
+    // game's code is the fill itself (TECHNICAL.md, Tree and plant search).
     //
     // YielderSearchVerify runs the game's own search as well, compares and logs any difference; the game is handed
     // the mod's result either way. If anything throws, the feature switches itself off and the game's own code runs.
@@ -271,6 +273,8 @@ namespace LateGamePerformance
                 {
                     YielderSearchResult games = finder.FindLivingYielder(receivingInventory, liftingCapacity,
                         yielders.Select(plant => LookUp(start, plant)));
+                    // Compared returns the mod's result: that, not `games`, is what the game is handed (the tests
+                    // drive Compared, not this prefix, so keep any substitution out of here too).
                     result = Compared(result, games);
                 }
                 __result = result;
@@ -339,8 +343,11 @@ namespace LateGamePerformance
             if (!Same(result, games))
             {
                 _verifyMismatches++;
-                Log.Warning("YielderSearch: result differs from the game's own search. " +
-                            $"Mod: {Describe(result)}. Game: {Describe(games)}.");
+                if (_verifyMismatches <= 10)
+                {
+                    Log.Warning("YielderSearch: result differs from the game's own search. " +
+                                $"Mod: {Describe(result)}. Game: {Describe(games)}.");
+                }
             }
             return result;
         }

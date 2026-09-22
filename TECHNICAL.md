@@ -1057,7 +1057,11 @@ game. Up to 0.4.26 the hauling list, tree search, plant water, district count, w
 handed over the game's result when they found a difference: harmless alone, but in multiplayer the one player with
 a key on then took a different answer from the others the moment the mod had a bug, and the colonies drifted apart.
 The tests make every one of those checks see a difference and require the game to be handed the same as with the
-key off.
+key off. What a key on still changes is how much of the game's code runs, and with it any other mod's code hooked
+into it: the tree search check looks up every candidate, which fills terrain route maps that a player with the key
+off may fill a tick later (a fill's timing cannot change a result, see Tree and plant search); the district count
+check asks every good disallower twice; the hauling list check asks every haul provider on every request; the home
+search check asks the game's own dwelling predicates. The game's own versions of these only read.
 
 | Key | Default | Meaning |
 |---|---|---|

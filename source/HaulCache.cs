@@ -206,7 +206,9 @@ namespace LateGamePerformance
                 Build(__instance);
                 if (_verify)
                 {
-                    // The game's own build alongside, timed, so the two can be compared from the stats line.
+                    // The game's own build alongside, timed, so the two can be compared from the stats line. It only
+                    // compares: Ordered, the cached list, is what the game is handed either way (the tests drive
+                    // Compare, not this prefix, so keep any substitution out of here too).
                     long verifying = Stopwatch.GetTimestamp();
                     Verify(__instance);
                     _verifyStopwatchTicks += Stopwatch.GetTimestamp() - verifying;

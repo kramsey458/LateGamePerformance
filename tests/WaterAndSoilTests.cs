@@ -470,8 +470,20 @@ internal static class WaterAndSoilTests
                 WaterMapCopy.MapUpdatePostfix(world.Mod);
             }
             stats = WaterMapCopy.TakeStatsLine();
-            games = Bytes((Array)RouteMapsTests.GetField(world.Game, "_threadSafeWaterColumns")).ToArray();
-            return Bytes((Array)RouteMapsTests.GetField(world.Mod, "_threadSafeWaterColumns")).ToArray();
+            games = State(world.Game);
+            return State(world.Mod);
+        }
+
+        // Everything the game reads from the map: the columns, the flows, the column counts and the changed flag.
+        byte[] State(object map)
+        {
+            List<byte> state = new List<byte>();
+            foreach (string field in new[] { "_threadSafeWaterColumns", "_waterFlowDirections", "_threadSafeColumnCounts" })
+            {
+                state.AddRange(Bytes((Array)RouteMapsTests.GetField(map, field)).ToArray());
+            }
+            state.Add((bool)map.GetType().GetProperty("AnyColumnChanged").GetValue(map) ? (byte)1 : (byte)0);
+            return state.ToArray();
         }
 
         byte[] off = Handed(false, out byte[] games, out _);
@@ -479,7 +491,7 @@ internal static class WaterAndSoilTests
         Console.WriteLine("     " + verifyStats);
         check(!off.AsSpan().SequenceEqual(games) && off.AsSpan().SequenceEqual(on) && verifyStats.Contains("verify mismatches 1"),
             "water map copy verify: the worker's copy differed from the game's and that was logged, and the map holds the " +
-            "worker's copy, as with verify off");
+            "worker's copy, flows, column counts and changed flag, as with verify off");
         WaterMapCopy.AfterCopy = previous;
         WaterMapCopy.SceneCreated();
     }
@@ -891,19 +903,21 @@ internal static class WaterAndSoilTests
     // A verify key is each player's own, so it must not change the levels the game stores. One object's level from the
     // water worker is made wrong right after the worker wrote it (as a lookup bug would): with the key off the tick
     // stores it; with the key on the main thread's own read differs, that is logged, and the same level is stored.
+    // Once more with the water map's verify key on as well, as 'Verify every feature' sets them: the worker's copy then
+    // goes in from the map's postfix, and the plant water pass must still get the worker's levels.
     private static void RunPlantWaterVerifyOnlyMeasures(Action<bool, string> check)
     {
         const int width = 32, height = 28, count = 600, spoilt = 3;
         Type objectType = typeof(WaterObject);
         FieldInfo mapField = objectType.GetField("_threadSafeWaterMap", Any), tileField = objectType.GetField("_baseCoordinates", Any);
         PropertyInfo level = objectType.GetProperty("WaterAboveBase");
-        int[] Stored(bool verify, out int workers, out string stats)
+        int[] Stored(bool verify, bool mapVerify, out int workers, out string stats)
         {
             object terrain = Proxy<Timberborn.TerrainSystem.ITerrainService>((method, args) =>
                 method.Name == "Contains" && args[0] is Vector2Int xy
                     ? (object)(xy.x >= 0 && xy.x < width && xy.y >= 0 && xy.y < height)
                     : throw new NotSupportedException(method.Name));
-            WaterMapCopy.CreateFeature(new Config()).Patches[0].Target();
+            WaterMapCopy.CreateFeature(new Config { WaterMapCopyVerify = mapVerify }).Patches[0].Target();
             WaterMapCopy.SceneCreated();
             WaterMapCopy.Activate();
             PlantWater.CreateFeature(new Config()).Patches[0].Target();
@@ -917,6 +931,7 @@ internal static class WaterAndSoilTests
             PropertyInfo anyChanged = world.Simulator.GetType().GetProperty("AnyColumnChanged");
             anyChanged.SetValue(world.Simulator, true);
             if (WaterMapCopy.MapUpdatePrefix(world.Mod)) RouteMapsTests.Call(world.Mod, "Tick");
+            WaterMapCopy.MapUpdatePostfix(world.Mod);
             anyChanged.SetValue(world.Simulator, false);
 
             WaterObjectService service = new WaterObjectService();
@@ -945,6 +960,7 @@ internal static class WaterAndSoilTests
             WaterMapCopy.FillForTests();
             WaterMapCopy.AfterCopy = levels;
             if (WaterMapCopy.MapUpdatePrefix(world.Mod)) RouteMapsTests.Call(world.Mod, "Tick");
+            WaterMapCopy.MapUpdatePostfix(world.Mod);
             bool handled = !PlantWater.TickPrefix(service);
             workers = worker;
             stats = PlantWater.TakeStatsLine();
@@ -953,13 +969,20 @@ internal static class WaterAndSoilTests
             return stored;
         }
 
-        int[] off = Stored(false, out int spoiltLevel, out _);
-        int[] on = Stored(true, out _, out string verifyStats);
+        int[] off = Stored(false, false, out int spoiltLevel, out _);
+        int[] on = Stored(true, false, out _, out string verifyStats);
         Console.WriteLine("     " + verifyStats);
         check(off[spoilt] == spoiltLevel && off.AsSpan().SequenceEqual(on) && verifyStats.Contains("; 1 used the water worker's levels") &&
               verifyStats.Contains("verify mismatches 1"),
             "plant water verify: the main thread read another level than the worker and that was logged, and every object stores " +
             $"the worker's level, as with verify off (object {spoilt}: {on[spoilt]}, the worker's {spoiltLevel})");
+        int[] all = Stored(true, true, out _, out string allStats);
+        Console.WriteLine("     " + allStats);
+        check(off.AsSpan().SequenceEqual(all) && allStats.Contains("; 1 used the water worker's levels") &&
+              allStats.Contains("verify mismatches 2"),
+            "plant water verify with the water map's verify on as well: the worker's copy went in from the map's postfix, the " +
+            $"difference was logged, and every object stores the worker's level (object {spoilt}: {all[spoilt]})");
+        WaterMapCopy.VerifyEnabled = false;
         PlantWater.SetVerifyForTests(false);
         WaterMapCopy.SceneCreated();
         PlantWater.SceneCreated();
