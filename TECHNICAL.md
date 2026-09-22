@@ -609,15 +609,18 @@ that becomes eligible (or is added) before the entity being ticked shifts it and
 one after it is reached. The mirror adds an entity that wakes up mid-pass at once when its id sorts after the
 entity being ticked, and after the pass when it sorts before. Entities that fall asleep or are removed mid-pass
 leave after the pass (ticking a sleeping entity does nothing), and the game's own deferred removals
-(`_entitiesToRemove`) are applied at the end of the pass as the game does. If an entity's tick throws, the pass is
-left exactly as the game leaves it (mid-pass, removals pending); should the mirror stop being trusted in the middle
+(`_entitiesToRemove`) are applied at the end of the pass as the game does. Until then an entity removed mid-pass
+is ticked through the game's own `Tick`, which checks each of its parts, so a part switched on after the removal
+is still reached in that pass, as in the game's loop (up to 0.4.26 it was not). If an entity's tick throws, the
+pass is left exactly as the game leaves it (mid-pass, removals pending); should the mirror stop being trusted in the middle
 of a pass, every remaining entity is ticked, which is the game's loop. The prefix runs at Harmony's last priority,
 so BeaverBuddies' own prefix on the same method, which hashes the game's list before the pass, still runs first. The harness
 (`tests/IdleEntitiesTests.cs`) replays a scripted history of 300 passes over the game's real bucket, entities
 and metered components, with components switched on and off and entities added and removed both between passes
 and from inside another entity's tick, and requires the sequence of effective ticks to be identical to a model of
-the game's loop. The `IdleEntities:` stats line says how many entities per tick were ticked and how many left out.
-If any bookkeeping throws, the feature switches itself off and the game's loop runs.
+the game's loop; a directed case removes an entity during a pass and switches it on later in the same pass. The
+`IdleEntities:` stats line says how many entities per tick were ticked and how many left out. If any bookkeeping
+throws, the feature switches itself off and the game's loop runs.
 
 ### Terrain path searches resumed instead of restarted (always on, new in 0.4.18)
 
