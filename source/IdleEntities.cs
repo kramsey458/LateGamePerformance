@@ -24,10 +24,10 @@ namespace LateGamePerformance
     // are hooked and flip the flag; TickableEntityBucket.Add and Remove keep the keys in step, with the same
     // deferral of removals during a pass that the game has. Each pass first makes sure the keys still match the
     // game's list, rebuilding the mirror if not; the walk over the keys for that is skipped while the list's own
-    // change counter has not moved since they last matched (every 128th pass walks them anyway). An entity whose
-    // tick components are all disabled does nothing when ticked, and the index is the game's, so everything the
-    // game would do, including its own quirk of ticking an entity again when something is inserted before it
-    // mid-pass, happens exactly as before.
+    // change counter has not moved since they last matched and no Add or Remove came through the hooks (every 128th
+    // pass walks them anyway). An entity whose tick components are all disabled does nothing when ticked, and the
+    // index is the game's, so everything the game would do, including its own quirk of ticking an entity again when
+    // something is inserted before it mid-pass, happens exactly as before.
     // The game's own list is untouched; BeaverBuddies reads it for its per-tick hash.
     //
     // Simulation feature: always on, the same on every computer. Self-disables on any bookkeeping exception and
@@ -49,8 +49,9 @@ namespace LateGamePerformance
             // The same keys as the game's _tickableEntities, so the same index means the same entity.
             public readonly SortedList<Guid, Record> Mirror = new SortedList<Guid, Record>();
             public bool Ticking;
-            // The game's list and its change counter when its keys were last found equal to the mirror's, and the
-            // passes since the keys were last walked (see Unchanged).
+            // The game's list and its change counter when its keys were last found equal to the mirror's (the list is
+            // null once a postfix has changed the mirror's keys since), and the passes since the keys were last walked
+            // (see Unchanged).
             public SortedList<Guid, TickableEntity> CheckedList;
             public int CheckedVersion;
             public int PassesSinceWalk;
@@ -191,7 +192,7 @@ namespace LateGamePerformance
             double ticks = _passes / 128.0;
             string line = $"IdleEntities: per tick {_ticked / ticks:0} entities ticked and {_leftOut / ticks:0} passed over because " +
                           "none of their tick parts was switched on" +
-                          $"; keys compared with the game's list on {_keyChecks} of {_passes} passes" +
+                          $"; keys walked against the game's list on {_keyChecks} of {_passes} passes" +
                           (_listVersion == null ? " (the list's change counter was not found)" : "") +
                           (_resyncs > 0 ? $"; the mirror had to be rebuilt {_resyncs} time(s), which should not happen" : "");
             _passes = _ticked = _leftOut = _resyncs = _keyChecks = 0;
@@ -227,7 +228,7 @@ namespace LateGamePerformance
                 {
                     Resync(bucket, all);
                 }
-                // The keys match now; until the counter moves they still will.
+                // The keys match now; until the counter moves or a postfix changes the mirror they still will.
                 bucket.CheckedList = _listVersion != null ? all : null;
                 bucket.CheckedVersion = version;
                 _setTicking(__instance, true);
@@ -293,6 +294,8 @@ namespace LateGamePerformance
                 Record record = Register(bucket, tickableEntity);
                 // The game's Add inserts at once, even during a pass; so does the mirror, at the same index.
                 bucket.Mirror[tickableEntity.EntityId] = record;
+                // The next pass walks the keys (see Unchanged), even should another mod have skipped the game's Add.
+                bucket.CheckedList = null;
             }
             catch (Exception exception)
             {
@@ -323,6 +326,8 @@ namespace LateGamePerformance
                 if (!bucket.Ticking)
                 {
                     bucket.Mirror.Remove(tickableEntity.EntityId);
+                    // As in Add: the next pass walks the keys, even should another mod have skipped the game's Remove.
+                    bucket.CheckedList = null;
                 }
                 // During a pass the game defers the removal to the end of TickAll (_entitiesToRemove); the mirror
                 // removes the same keys there.
@@ -401,13 +406,14 @@ namespace LateGamePerformance
         }
 
         // Whether the game's list is the one whose keys last matched the mirror's, with its change counter where it stood
-        // then; if so, the walk over the keys is skipped. Every change to a SortedList's keys (an insert, a removal, a
-        // clear) moves its counter, so the game's keys are as they were. The mirror's keys change only in step with the
-        // game's list: in Add's postfix, after the game's Add moved the counter; in Remove's outside a pass and in the
-        // end-of-pass removals, where the key goes from both lists (moving the counter) or was in neither. So the keys
-        // still match, the walk would have found them equal, and skipping it changes nothing. The walk runs anyway on
-        // every 128th pass of a bucket, which catches a change that bypasses the counter (only a write to the list's
-        // private fields could) or a counter that went all the way round.
+        // then and the mirror untouched by the postfixes since; if so, the walk over the keys is skipped. Every change to a
+        // SortedList's keys (an insert, a removal, a clear) moves its counter, so the game's keys are as they were. The
+        // mirror's keys change in Add's postfix and in Remove's outside a pass, which both clear CheckedList so that the
+        // next pass walks whatever the game's list did (another mod's prefix may have skipped the game's Add or Remove
+        // while these postfixes still ran), and in the end-of-pass removals, where each key goes from both lists (moving
+        // the counter) or is in neither. So the keys still match, the walk would have found them equal, and skipping it
+        // changes nothing. The walk runs anyway on every 128th pass of a bucket, which catches a change that bypasses the
+        // counter (only a write to the list's private fields could) or a counter that went all the way round.
         private static bool Unchanged(Bucket bucket, SortedList<Guid, TickableEntity> all, int version)
         {
             return _listVersion != null && ReferenceEquals(bucket.CheckedList, all) && version == bucket.CheckedVersion &&

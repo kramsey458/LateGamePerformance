@@ -244,6 +244,7 @@ internal static class IdleEntitiesTests
             midPass = null;
             once?.Invoke();
         };
+        // wrongPasses is set back to 0 at the start of each case below, so each check reports only its own passes.
         int pass = 0, wrongPasses = 0;
         // One pass: whether the mirror was rebuilt at its start, and, unless the list is changed behind the hooks during
         // it, whether its ticks were the game's loop's.
@@ -273,6 +274,7 @@ internal static class IdleEntitiesTests
             $"rebuilt {rebuiltEarly} times, {wrongPasses} passes unlike the game's)");
 
         // Behind the hooks, with the counter put back: only the full walk on the 128th pass since the last one sees it.
+        wrongPasses = 0;
         Swap(1, 12, true);
         int rebuiltAt = 0;
         while (rebuiltAt == 0 && pass < 300)
@@ -288,6 +290,7 @@ internal static class IdleEntitiesTests
         // Behind the hooks, moving the counter, as anything done through the list's methods does: the next pass rebuilds,
         // as it did when the keys were compared on every pass. Then the same followed by an add through the hooks, which
         // brings the counts back together; then the same from inside a tick in the middle of a pass.
+        wrongPasses = 0;
         Swap(2, 13, false);
         bool swapped = Pass();
         Swap(4, 14, false);
@@ -303,6 +306,7 @@ internal static class IdleEntitiesTests
 
         // Through the hooks, between passes and in the middle of one: the keys are compared once on the next pass, match,
         // and are skipped again after that.
+        wrongPasses = 0;
         long before = Counter("_keyChecks");
         HookedAdd(ents[17]);
         HookedRemove(ents[0]);
@@ -321,11 +325,44 @@ internal static class IdleEntitiesTests
             $"during and after a removal in the middle of a pass, {afterLast - afterQuiet} of 1 after that; rebuilt: " +
             $"{hooked || hookedMidPass || quiet || last}; {wrongPasses} passes unlike the game's)");
 
+        // Another mod's Harmony prefix that skips the game's Add, and one that skips its Remove: Harmony still runs the
+        // postfixes, so the mirror gains a key the game's list never got and loses one the list keeps. The counts still
+        // agree and the list's counter does not move, yet the next pass must rebuild, as it did when the keys were
+        // compared on every pass.
+        wrongPasses = 0;
+        IdleEntities.AddPostfix(bucket, ents[21].Entity);
+        IdleEntities.RemovePostfix(bucket, ents[7].Entity);
+        bool skippedOriginals = Pass();
+        bool afterSkipped = Pass();
+        check(skippedOriginals && !afterSkipped && wrongPasses == 0 && !gameList.ContainsKey(ents[21].Id) &&
+              gameList.ContainsKey(ents[7].Id),
+            "idle entities: an add and a removal whose game methods another mod skipped (only the postfixes ran) make the next " +
+            $"pass rebuild the mirror (rebuilt: {skippedOriginals}; then {(afterSkipped ? "rebuilt again" : "in step")}; " +
+            $"{wrongPasses} passes unlike the game's)");
+
+        // A different list object in the bucket's field, with one other key and its counter set to where the old list's
+        // stood. The game's field is readonly, so this is only a safeguard: a counter says nothing about another list, so
+        // the next pass walks the keys and rebuilds.
+        wrongPasses = 0;
+        SortedList<Guid, TickableEntity> replacement = new SortedList<Guid, TickableEntity>(gameList);
+        replacement.Remove(ents[9].Id);
+        replacement.Add(ents[20].Id, ents[20].Entity);
+        ListVersionField.SetValue(replacement, ListVersionField.GetValue(gameList));
+        listField.SetValue(bucket, replacement);
+        gameList = replacement;
+        bool replaced = Pass();
+        bool afterReplaced = Pass();
+        check(replaced && !afterReplaced && wrongPasses == 0,
+            "idle entities: another list object in the bucket, with the same count and the old list's counter, makes the next " +
+            $"pass rebuild the mirror (rebuilt: {replaced}; then {(afterReplaced ? "rebuilt again" : "in step")}; " +
+            $"{wrongPasses} passes unlike the game's)");
+
         // With no counter to read, every pass compares the keys, and a change the counter would not show is found at once.
         object counter = counterField?.GetValue(null);
         counterField?.SetValue(null, null);
         try
         {
+            wrongPasses = 0;
             long walksBefore = Counter("_keyChecks");
             Pass();
             Pass();
@@ -344,7 +381,8 @@ internal static class IdleEntitiesTests
         IdleEntities.TickEntity = entity => entity.Tick();
         string line = IdleEntities.TakeStatsLine();
         Console.WriteLine("     " + line);
-        check(line != null && line.Contains("keys compared"), "idle entities stats: says on how many passes the keys were compared");
+        check(line != null && line.Contains("keys walked against the game's list on"),
+            "idle entities stats: says on how many passes the keys were walked");
         IdleEntities.SceneCreated();
     }
 
