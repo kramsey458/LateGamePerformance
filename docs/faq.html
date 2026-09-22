@@ -51,7 +51,7 @@
       <ul>
         <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.14 was reported as working well; 0.4.23, the last release played, as working amazingly well).</li>
         <li>On a computer that had memory clean-up freezes of most of a second about once a minute, incremental garbage collection removed them and made the frame rate much steadier at high tick rates.</li>
-        <li>0.4.27, the latest release, has not been played yet, and neither has 0.4.26. 0.4.27 adds no new speed-up: it makes the verify settings only measure, builds a route map that failed on a worker thread again on the main thread, and shows a dialog if a feature turns itself off. 0.4.26 is the round built from a recorded 0.4.23 session, reviewed for production safety and tested against the game's classes: fewer tree-search lookups, plant water ticks that stay on the fast path when a plant is planted or cut, the mod&rsquo;s own worker threads, route map caches walked only after a change, no behaviour log strings until a save reads them, far-away animated objects posed less often, more of the save snapshot on worker threads (with a guard against other mods&rsquo; patches on the saving code, 0.4.26), and 0.4.24&rsquo;s removal of the memory clean-up that froze every save for about a second.</li>
+        <li>0.4.27, the latest release, has not been played yet, and neither has 0.4.26. 0.4.27 adds no new speed-up: it makes the verify settings only measure, builds a route map that failed on a worker thread again on the main thread, and shows a dialog if a feature turns itself off. 0.4.26 is the round built from a recorded 0.4.23 session, reviewed for production safety and tested against the game's classes: fewer tree-search lookups, plant water ticks that stay on the fast path when a plant is planted or cut, the mod&rsquo;s own worker threads, route map caches walked only after a change, no behavior log strings until a save or the entity panel reads them, far-away animated objects posed less often, more of the save snapshot on worker threads (with a guard against other mods&rsquo; patches on the saving code, 0.4.26), and 0.4.24&rsquo;s removal of the memory clean-up that froze every save for about a second.</li>
         <li>0.4.21 to 0.4.23 stop visiting the ten thousand trees, crops and paths that have nothing to tick, take most of a save's snapshot on worker threads, and move the plant water levels and the soil change lists to the workers that already hold the data.</li>
         <li>0.4.16 to 0.4.18 are aimed at what a logged 354-beaver session showed: the second of stutter after every autosave and memory clean-up, and the single slow beaver ticks and end-of-day slump from terrain path searches that restarted from the same tile.</li>
       </ul>
@@ -72,7 +72,7 @@
     <div class="answer">
       <p>Yes, but none of them change what the game simulates.</p>
       <ul>
-        <li><strong>In the game</strong> (<strong>Mods &gt; Late Game Performance</strong>): <strong>Incremental garbage collection</strong>, the one decision that is yours to make because it edits a file in the game's folder, and three measurement boxes for a test session: <strong>Diagnostics timers</strong>, <strong>Verify terrain path searches</strong> and <strong>Verify save snapshots</strong>. Since 0.4.26 also <strong>Verify every feature</strong> and two one-off memory measurements that untick themselves.</li>
+        <li><strong>In the game</strong> (<strong>Mods &gt; Late Game Performance</strong>): <strong>Incremental garbage collection</strong>, the one decision that is yours to make because it edits a file in the game's folder, and three measurement boxes for a test session: <strong>Diagnostics timers</strong>, <strong>Verify terrain path searches</strong> and <strong>Verify save snapshots</strong>. Since 0.4.25 also <strong>Verify every feature</strong> and two one-off memory measurements that untick themselves.</li>
         <li><strong>In <code>version-1.1\LateGamePerformance.cfg</code></strong>: testing switches, how the work is split over threads, and which log lines are written. Restart after editing.</li>
       </ul>
       <p>Everything that affects the simulation (the hauling cache, the route maps, the tree and plant search and the rest) is always on, the same for everyone on the same version. To run without one of them, disable the mod.</p>
@@ -86,7 +86,7 @@
 
   <details id="get">
     <summary>Where do I get it?</summary>
-    <div class="answer"><p>From the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest">GitHub releases page</a>, as a ZIP you extract into your Mods folder. It also needs Harmony and Mod Settings from the Steam Workshop. See the <a href="install.html">install guide</a>. Previews, when there is one, are on the same page marked pre-release.</p></div>
+    <div class="answer"><p>From the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest">GitHub releases page</a>, as a ZIP (under <strong>Assets</strong>) that you extract into your Mods folder. It also needs Harmony and Mod Settings from the Steam Workshop. See the <a href="install.html">install guide</a>. A preview, when there is one, is on the same page, marked <strong>Pre-release</strong>, and has not been played yet.</p></div>
   </details>
 
   <h2 id="co-op-section">Multiplayer and BeaverBuddies</h2>
@@ -107,12 +107,12 @@
 
   <details id="all-players">
     <summary>Do all players need it?</summary>
-    <div class="answer"><p>Yes. Every player installs the same version. The mod changes which code runs during the simulation, so all players have to run the same code. A multiplayer mod's own version check covers it, and there is nothing else to match.</p></div>
+    <div class="answer"><p>Yes. Every player installs the same version of the mod and runs the same game version. The mod changes which code runs during the simulation, so all players have to run the same code. A multiplayer mod's own version check covers it, and there is nothing else to match.</p></div>
   </details>
 
   <details id="co-op-settings">
     <summary>Do the players' settings have to match?</summary>
-    <div class="answer"><p>No. Incremental garbage collection, adaptive pacing, thread counts and the timing options do not affect the simulation, so each player can set them differently, and each player benefits separately.</p></div>
+    <div class="answer"><p>No. Incremental garbage collection, thread counts, the timing options and (since 0.4.27) the verify settings do not affect the simulation, so each player can set them differently, and each player benefits separately.</p></div>
   </details>
 
   <details id="co-op-tested">
@@ -124,7 +124,7 @@
 
   <details id="haul">
     <summary>What is the hauling job list cache?</summary>
-    <div class="answer"><p>Every time a hauler looks for work, the game asks every building with an inventory in the district for its hauling jobs and their weights, sorts the whole list, and tries the jobs in order. It repeats that for every hauler decision, even when nothing changed in between. The mod keeps each building's jobs until something that feeds them changes (stock, reservations, allowed goods, enabled inventories, blocked state, emptying mark, obtain or supply setting, recipe or priority), and keeps the district's sorted list until a building in it changes. As a safety net everything cached is dropped every tick, so an input the mod does not track, such as one added by another mod, can be out of date for at most a single tick.</p></div>
+    <div class="answer"><p>Every time a hauler looks for work, the game asks every building with an inventory in the district for its hauling jobs and their weights, sorts the whole list, and tries the jobs in order. It repeats that for every hauler decision, even when nothing changed in between. The mod keeps each building's jobs until something that feeds them changes (stock, reservations, allowed goods, enabled inventories, blocked state, emptying mark, obtain or supply setting, recipe or priority). On every request it assembles the district's list from them and sorts it with the game's own comparison. In 0.4.27, as a safety net, everything cached is dropped every tick, so an input the mod does not track, such as one added by another mod, can be out of date for at most a single tick. The 0.4.28 preview keeps answers across ticks instead, and asks again on every request any building with a job source it has not read (another mod's, for example).</p></div>
   </details>
 
   <details id="routes">
@@ -139,12 +139,12 @@
 
   <details id="safety">
     <summary>What if something goes wrong?</summary>
-    <div class="answer"><p>If anything throws inside a feature, that feature switches itself off for the rest of the session and the game's own code runs. Since 0.4.27 the game then shows a dialog asking every player to restart, and <code>Player.log</code> repeats the <code>Simulation features:</code> line with that feature <code>OFF</code>. A route or terrain map that fails on a worker thread is built again on the main thread first; the feature turns off only if that fails too. If a game method a feature needs is missing (for example after a game update), the feature does not start at all and the startup line says <code>OFF</code>. Patches on methods that Harmony cannot patch safely are refused. See <a href="troubleshooting.html#off">Troubleshooting</a>.</p></div>
+    <div class="answer"><p>If anything throws inside a feature, that feature switches itself off for the rest of the session and the game's own code runs. Since 0.4.27 the game then shows a dialog on that computer asking every player to restart, and <code>Player.log</code> repeats the <code>Simulation features:</code> line with that feature <code>OFF</code>. A route or terrain map that fails on a worker thread is built again on the main thread first; the feature turns off only if that fails too. If a game method a feature needs is missing (for example after a game update), the feature does not start at all and the startup line says <code>OFF</code>. Before each release the test harness checks that no patch targets a method Harmony cannot patch safely in the game (one with an exception filter, which is what crashed 0.4.3). See <a href="troubleshooting.html#off">Troubleshooting</a>.</p></div>
   </details>
 
   <details id="verify">
     <summary>Can I check it against the game?</summary>
-    <div class="answer"><p>Yes. Every feature that replaces a game calculation has a verify setting in <code>LateGamePerformance.cfg</code> (<code>HaulCacheVerify</code>, <code>YielderSearchVerify</code>, <code>PlantWaterVerify</code>, <code>DistrictCountsVerify</code>, <code>WaterMapCopyVerify</code>, <code>SoilScansVerify</code>, <code>HomeSearchVerify</code>, <code>TerrainSearchVerify</code> and <code>SaveSnapshotVerify</code>; the last two are also boxes on the settings page). Each runs the game's own code as well, and compares and logs any difference. Since 0.4.27 the game is always handed the mod's own result, so the checks only measure and one player may have them on in a multiplayer game; in 0.4.26 and earlier most of them handed the game its own result, so leave them off there. They are slower than no mod, so use them for a test session and switch them off afterwards. In the stats lines look for <code>verify mismatches 0</code>; any mismatch is a bug worth reporting. Since 0.4.26 one box, <strong>Verify every feature</strong>, turns all of them on for a session.</p></div>
+    <div class="answer"><p>Yes. Most features that replace a game calculation have a verify setting in <code>LateGamePerformance.cfg</code> (<code>HaulCacheVerify</code>, <code>YielderSearchVerify</code>, <code>PlantWaterVerify</code>, <code>DistrictCountsVerify</code>, <code>WaterMapCopyVerify</code>, <code>SoilScansVerify</code>, <code>HomeSearchVerify</code>, <code>TerrainSearchVerify</code> and <code>SaveSnapshotVerify</code>; the last two are also boxes on the settings page). Each runs the game's own code as well, and compares and logs any difference. Since 0.4.27 the game is always handed the mod's own result, so the checks only measure and one player may have them on in a multiplayer game; in 0.4.26 and earlier most of them handed the game its own result, so leave them off there. They are slower than no mod, so use them for a test session and switch them off afterwards. In the stats lines look for <code>verify mismatches 0</code>; any mismatch is a bug worth reporting. Since 0.4.25 one box, <strong>Verify every feature</strong>, turns all of them on for a session.</p></div>
   </details>
 
   <h2 id="gc-section">Memory clean-up (garbage collection)</h2>
@@ -159,11 +159,6 @@
     <div class="answer">
       <p>Unity reads the incremental collection choice from <code>Timberborn_Data\boot.config</code> before any mod loads, so a mod cannot switch it while the game runs. Ticking the box adds one line, <code>gc-max-time-slice=3</code>, and unticking removes it. Nothing else in the file is touched, a backup (<code>boot.config.before-incremental-gc.bak</code>) is written beside it before the first change and never overwritten, and the file is only ever written because you clicked the box, never at startup for a player who never ticked it. Steam's "verify integrity of game files" and game updates restore the original; if the box is still ticked, the mod puts the line back at the next start.</p>
     </div>
-  </details>
-
-  <details id="pacing">
-    <summary>What is adaptive garbage collection pacing?</summary>
-    <div class="answer"><p>With incremental collection on, Unity does up to a fixed 3 ms of clean-up per frame while a cycle is running. The experimental pacing setting picks the slice each frame from recent frame times: 3 ms when frames are slow, 6 ms when they are fast, 8 ms while paused. One session each way showed no difference that could be told from noise, so it is off by default and marked experimental. It only changes the length of a slice, never what is collected, and it does not affect the simulation.</p></div>
   </details>
 
   <h2 id="measuring">Measuring it</h2>
@@ -186,14 +181,14 @@
 
   <details id="metrics">
     <summary>Can I see where a tick's time goes, part by part?</summary>
-    <div class="answer"><p>Yes. Tick <strong>Record per-component timings</strong> on the settings page and load a save. The mod switches on the game's own per-component timers and writes a report to <code>Documents\Timberborn\LateGamePerformance</code> every 3,000 ticks. It applies from the next save load, the game runs a little slower while it is on, and it does not affect the simulation. Launching the game with <code>-metrics</code> has the same effect.</p></div>
+    <div class="answer"><p>Yes. Set <code>RecordTimings = true</code> in <code>version-1.1\LateGamePerformance.cfg</code> and restart the game. The mod switches on the game's own per-component timers and writes a report to <code>Documents\Timberborn\LateGamePerformance</code> every 3,000 ticks (<code>MetricsEveryTicks</code>). The game runs a little slower while it is on, so set it back to <code>false</code> after a profiling session. It does not affect the simulation. Launching the game with <code>-metrics</code> has the same effect. (Up to 0.4.9 this was a box on the settings page.)</p></div>
   </details>
 
   <h2 id="compat">Compatibility</h2>
 
   <details id="mods">
     <summary>Does it work with other mods?</summary>
-    <div class="answer"><p>The hauling cache is dropped every tick, so an input the mod does not track, for example one added by another mod, can be out of date only within a single tick. It needs Harmony and Mod Settings. Beyond that, keep a copy of your save when combining mods, as always.</p></div>
+    <div class="answer"><p>In 0.4.27 the hauling cache is dropped every tick, so an input the mod does not track, for example one added by another mod, can be out of date only within a single tick. The 0.4.28 preview asks again on every request any building whose job source or capacity rule it has not read, and keeps nothing if another mod patches the game methods it relies on. It needs Harmony and Mod Settings. Beyond that, keep a copy of your save when combining mods, as always.</p></div>
   </details>
 
   <details id="game-version">
@@ -217,9 +212,9 @@
 
 <footer class="site-footer">
   <div class="wrap foot">
-    <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
+    <div><strong>Late Game Performance</strong><br>Free and open source, MIT licensed, maintained by <a href="https://github.com/timbermods">Timbermods</a>. An unofficial community mod for Timberborn. Not affiliated with or endorsed by Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.27</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest">Latest release</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li><li><a href="https://timbermods.github.io/">More mods from Timbermods</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>

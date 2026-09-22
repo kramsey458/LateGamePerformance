@@ -30,7 +30,7 @@ recorded on 2026-09-21 23:13 (0.4.23, deep profile, 10 minutes at speed 7) unles
   --prerelease --title "X.Y.Z preview" --notes-file <notes>`; `.\build.ps1` builds and zips; `packaging/manifest.json` and
   `source/LateGamePerformance.csproj` carry the version). Decompiled game source: `%TEMP%\tb-src` (ilspycmd; regenerate
   with `ilspycmd -p -o %TEMP%\tb-src <Managed>\Timberborn.*.dll` if missing). Game 1.1.2.4, Unity 6000.5, Mono. The owner's
-  other repositories (`BeaverBuddies-MultiColony`, `BeaverBuddies-Multiplayer-Stability-Fork`, `PerformanceLog`,
+  other repositories (`BeaverBuddies-MultiColony`, `BeaverBuddies-Stability-Fork`, `PerformanceLog`,
   `MixedStorage`, `OptimizedLocalHousing`, `HungryPathing`) may be read; the running BeaverBuddies is MultiColony 1.4.0-beta2
   or later (its worktrees hold the newest code; `git worktree list` in that repo). `TECHNICAL.md` in this repo documents every
   feature; the memory file of this project's Claude sessions has the history.
@@ -116,7 +116,7 @@ temporary entity, the main thread does the unsafe parts and merges in `AllCompon
 the follow-up if the main thread is still the long pole afterwards.
 
 Correction (2026-09-22) to design (1): a hash of `Save`'s own IL bytes does not see a change in anything `Save` calls. A
-`Save` that hands its work to a helper (a private method, a base class, a serializer) can change behaviour while its own bytes
+`Save` that hands its work to a helper (a private method, a base class, a serializer) can change behavior while its own bytes
 stay the same, so the guard has to hash the IL of every method `Save` calls in its own assembly too (resolve the call
 operands with `Module.ResolveMethod`, as `SaveGuard.Read` already does to look for other mods' patches). IL bytes also carry
 metadata tokens, which any rebuild of the assembly may renumber: a game or fork update can change a hash without changing
@@ -252,23 +252,23 @@ cached unbuilt maps changes only through those methods (read `FlowFieldCache`, `
 and `AccessFlowField.OnNodesChanged` to enumerate every way a map becomes unbuilt or cached, and hook each). Verify: a
 periodic full scan in verify mode that must find nothing the flag missed.
 
-### H. Beaver ticks: measure by root behaviour, then two exact trims
+### H. Beaver ticks: measure by root behavior, then two exact trims
 
 Evidence: `BehaviorManager` 5.7 ms per tick and 267 KB/s of garbage (28% of all allocation), `WalkerMover` 1.5 ms and
 118 KB/s, `NeedManager` 0.6 ms. About 7 ms of the entity tick is unattributed. Beaver ticks are the only cost that grows with
 the colony, so they matter most for 400 to 500 beavers, and nothing measured so far says where inside a decision the time goes.
 
-Design: (1) One session with `RecordTimings = true` (the game's `TimerMetricCache<RootBehavior>` gives time per root behaviour
+Design: (1) One session with `RecordTimings = true` (the game's `TimerMetricCache<RootBehavior>` gives time per root behavior
 per beaver) and the `Diagnostics` box on (`PickBestAction` calls, ms and longest); read the CSV in
 `Documents\Timberborn\LateGamePerformance`. (2) The garbage: `BehaviorManager.SetRunningBehavior` formats a string
-(`$"{name} {PartialDayNumber:0.00}"`) into a `CyclicBuffer<string>` of 10 on every behaviour change; the buffer is saved and shown
-in the entity panel. Store (behaviour, day as float) pairs in a ring of this mod's own and materialise the strings only when
+(`$"{name} {PartialDayNumber:0.00}"`) into a `CyclicBuffer<string>` of 10 on every behavior change; the buffer is saved and shown
+in the entity panel. Store (behavior, day as float) pairs in a ring of this mod's own and materialize the strings only when
 `Save` or the panel reads them (patch `SetRunningBehavior` to skip the game's add, patch `Save` and the `TimestampedBehaviorLog`
 getter to fill the game's buffer first; loaded strings are kept as strings). Byte-identical saves because the same format is
 applied to the same float. Verify: compare a save written with and without the feature (the `Verify save snapshots` box
-covers it if the materialisation happens before the snapshot). (3) `WalkerMover`'s 118 KB/s: read `PathFollower.MoveAlongPath`
+covers it if the materialization happens before the snapshot). (3) `WalkerMover`'s 118 KB/s: read `PathFollower.MoveAlongPath`
 and `WalkerSpeedManager.GetWalkerSpeedAtCurrentPosition` for per-tick allocations (a closure or a boxed struct is likely).
-(4) Skipping empty need-behaviour groups in `DistrictNeedBehaviorService.AppraiseNeedBehaviors` is exact (the sorted set's
+(4) Skipping empty need-behavior groups in `DistrictNeedBehaviorService.AppraiseNeedBehaviors` is exact (the sorted set's
 comparer is consistent with the total order "points descending, insertion descending", so leaving out a group that can never
 be picked changes nothing else) but worth under 0.1 ms per tick; only if the timers show many empty groups.
 
@@ -323,12 +323,12 @@ attribution exists.
 ### L. DistrictCitizenAssigner: 0.28 ms per tick, one 6 ms call
 
 Evidence: `DistrictCitizenAssigner` 2.66 ms/s. Its tick copies the unassigned-citizen set and, for each, asks every finished
-district centre `IsGloballyReachableFromCitizen` (a path query) and `DistanceToCitizen`. A steady 0.28 ms means citizens are
+district center `IsGloballyReachableFromCitizen` (a path query) and `DistanceToCitizen`. A steady 0.28 ms means citizens are
 unassigned on most ticks and re-queried every tick.
 
-Design: (1) Diagnostics counter: unassigned citizens per tick and district centres per query. (2) If a few citizens stay
-unassigned for long (cut off, in another colony's area), memoise the answer per citizen keyed on (the citizen's node id, the
-nav-mesh update counter, the finished-district-centre list version): same inputs, same output, so exact; invalidate on
+Design: (1) Diagnostics counter: unassigned citizens per tick and district centers per query. (2) If a few citizens stay
+unassigned for long (cut off, in another colony's area), memoize the answer per citizen keyed on (the citizen's node id, the
+nav-mesh update counter, the finished-district-center list version): same inputs, same output, so exact; invalidate on
 `OnNavMeshUpdated` (the class already receives it) and on district changes. Verify mode runs the game's query alongside.
 Read `Citizen.AssignDistrict`, `DistrictCenter.IsGloballyReachableFromCitizen` and `DistanceToCitizen` first for other inputs.
 
@@ -357,7 +357,8 @@ has a different remedy, and nothing above should be tuned for the host alone.
 
 1. **Correctness session** (once, 30 minutes, single player is fine): every verify key on (`HaulCacheVerify`,
    `YielderSearchVerify`, `PlantWaterVerify`, `DistrictCountsVerify`, `WaterMapCopyVerify`, `SoilScansVerify`,
-   `HomeSearchVerify`, `TerrainSearchVerify`, `SaveSnapshotVerify`), then `grep "verify mismatches" Player.log`: every line must
+   `HomeSearchVerify`, `TerrainSearchVerify`, `SaveSnapshotVerify`, and from 0.4.28 `PathFollowVerify` and `ReachabilityVerify`;
+   `VerifyAll = true` or the **Verify every feature** box sets them all), then `grep "verify mismatches" Player.log`: every line must
    say 0. None of the verify modes has ever been run inside the game. Do this before any new simulation change.
 2. **Measurement session** (both computers, same save, 20 minutes at speed 7, window in front): Performance Log `Profile = deep`,
    `RecordTimings = true`, the `Diagnostics` box on, no verify keys. Collect: both Performance Log folders, both `Player.log`s.
