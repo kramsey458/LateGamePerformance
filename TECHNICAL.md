@@ -948,6 +948,12 @@ SetPass call counts, `GC.Collect` and the rest of the default list) with `Profil
 per frame and the longest frame or as a count; the first session with the timers on writes `unity-markers.txt`
 beside the metrics reports with every counter this build of the engine offers, so the list can be changed.
 
+The one-destination terrain A* search is also what `TerrainSearch` replaces. Up to 0.4.26 its prefix ran first
+and Harmony then skipped the timer's, so the terrain A* numbers left out every search `TerrainSearch` answered.
+Since `TerrainSearch` runs at Harmony's last priority (see Build and test) the timer's prefix runs first, and the
+terrain A* numbers include those searches, timed as the mod answers them (resumed or from its previous search).
+Numbers from before and after that change are not comparable; the `TerrainSearch:` stats line is unchanged.
+
 ### Stats
 
 Every `StatsEveryTicks` ticks (default 1000) one line is logged, for example:
@@ -1142,7 +1148,9 @@ The tests load the installed game's assemblies and check that every patch target
 the mod relies on still exists with a compatible signature, plus settings parsing. A patch target containing
 an exception filter (`catch ... when`) is refused: Harmony cannot patch those under the game's Mono runtime, and
 the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). Every prefix that can skip the
-game's method (one that returns `bool`) must carry `[HarmonyPriority(Priority.Last)]`: the tests find them all in
+game's method (one that returns `bool` or takes `ref bool __runOriginal`) must carry
+`[HarmonyPriority(Priority.Last)]`, because once one has skipped it Harmony skips every later prefix that could
+change the call (one returning `bool`, or with a `ref`, `out` or reference-type argument): the tests find them all in
 the declared patches, sort each with Harmony's own sorter against another mod's ordinary prefix registered after it,
 and require it to come last, so that other mods' prefixes on the same methods (BeaverBuddies', MultiColony's colony
 filter) run first on every computer whatever the mod load order. They also build a road

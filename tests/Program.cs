@@ -386,14 +386,39 @@ internal static class Program
     // own sort with another mod's ordinary prefix registered after this one (this mod loaded first).
     private static void TestReplacingPrefixesRunLast(Feature[] features)
     {
+        List<string> early = PrefixesRunningFirst(features, out int replacing);
+        Check(replacing > 0 && early.Count == 0,
+            $"patches: all {replacing} prefixes that can skip the game's method run after other mods' prefixes, whatever the load order" +
+            (early.Count > 0 ? "; these run first: " + string.Join(", ", early) : ""));
+
+        // The walk itself: a void prefix that skips through `ref bool __runOriginal`, with no priority, is caught.
+        Feature probe = new Feature { Name = "Probe" };
+        probe.Patches.Add(new PatchSpec
+        {
+            Name = "probe", Target = features[0].Patches[0].Target,
+            Prefix = typeof(Program).GetMethod(nameof(RunOriginalPrefix), BindingFlags.Static | BindingFlags.NonPublic)
+        });
+        Check(PrefixesRunningFirst(new[] { probe }, out int probed).Count == 1 && probed == 1,
+            "patches: a prefix that skips the game's method through ref bool __runOriginal is found and held to the same rule");
+    }
+
+    private static void RunOriginalPrefix(ref bool __runOriginal)
+    {
+        __runOriginal = false;
+    }
+
+    private static List<string> PrefixesRunningFirst(IEnumerable<Feature> features, out int replacing)
+    {
         List<string> early = new List<string>();
-        int replacing = 0;
+        replacing = 0;
         MethodInfo another = typeof(Program).GetMethod(nameof(AnotherModsPrefix), BindingFlags.Static | BindingFlags.NonPublic);
         foreach (Feature feature in features)
         {
             foreach (PatchSpec patch in feature.Patches)
             {
-                if (patch.Prefix == null || patch.Prefix.ReturnType != typeof(bool))
+                // A bool result or a `ref bool __runOriginal` argument can skip the original.
+                if (patch.Prefix == null || (patch.Prefix.ReturnType != typeof(bool) &&
+                                             !patch.Prefix.GetParameters().Any(p => p.Name == "__runOriginal")))
                 {
                     continue;
                 }
@@ -410,9 +435,7 @@ internal static class Program
                 }
             }
         }
-        Check(replacing > 0 && early.Count == 0,
-            $"patches: all {replacing} prefixes that can skip the game's method run after other mods' prefixes, whatever the load order" +
-            (early.Count > 0 ? "; these run first: " + string.Join(", ", early) : ""));
+        return early;
     }
 
     private static void AnotherModsPrefix()
