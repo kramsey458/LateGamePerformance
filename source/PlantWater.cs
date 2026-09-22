@@ -605,7 +605,7 @@ namespace LateGamePerformance
         private static void Fail(Exception exception)
         {
             _active = false;
-            Log.Warning("PlantWater failed and turned itself off for this session: " + exception);
+            TurnedOff.Report("PlantWater", "PlantWater failed and turned itself off for this session: " + exception);
         }
     }
 }

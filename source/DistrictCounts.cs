@@ -350,7 +350,8 @@ namespace LateGamePerformance
             {
                 // The game's own count starts by clearing every table, so whatever was written is thrown away.
                 _active = false;
-                Log.Warning("DistrictCounts failed and turned itself off for this session: " + exception);
+                TurnedOff.Report("DistrictCounts",
+                    "DistrictCounts failed and turned itself off for this session: " + exception);
                 return true;
             }
         }

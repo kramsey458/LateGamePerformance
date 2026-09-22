@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using LateGamePerformance;
@@ -244,6 +245,84 @@ internal static class TerrainAndWaterTests
         Console.WriteLine($"     timing: {maps} terrain maps one by one {sequentialTimer.Elapsed.TotalMilliseconds:0.0} ms " +
                           $"({sequentialTimer.Elapsed.TotalMilliseconds / maps:0.00} ms each), {workers} workers " +
                           $"{parallelTimer.Elapsed.TotalMilliseconds:0.0} ms");
+
+        RunTerrainFailures(graph, heapFactory, groupService, starts, sequential, cache, service, cachedStarts, check);
+    }
+
+    // A map whose fill throws. Up to 0.4.26 a worker gave up the rest of its share of the batch at the first
+    // exception, so which maps stayed unbuilt depended on the worker count, which differs between computers, and a
+    // map a worker could not build was left for the game while the feature turned itself off on that computer only.
+    private static void RunTerrainFailures(object graph, object heapFactory, object groupService, int[] starts,
+        List<TerrainMaps.Work> sequential, object cache, object service, List<int> cachedStarts, Action<bool, string> check)
+    {
+        long compared = 0;
+        // Item 3 throws on any thread but this one (as a patch by another mod that calls Unity would on a worker),
+        // and lands on a worker thread with 5 workers and with 7.
+        List<int>[] filledWith = new List<int>[2];
+        bool reported = true;
+        int run = 0;
+        foreach (int count in new[] { 5, 7 })
+        {
+            List<TerrainMaps.Work> work = CreateWork(starts);
+            RouteMapsTests.PoisonOffThisThread(work[3].Field);
+            object[] pool = TerrainMaps.CreateWorkerGenerators(heapFactory, groupService, count);
+            reported &= TerrainMaps.FillParallel(graph, work, pool, Range) != null;
+            filledWith[run++] = RouteMapsTests.FilledIndices(work);
+        }
+        List<int> allButThree = new List<int>();
+        for (int i = 0; i < starts.Length; i++) if (i != 3) allButThree.Add(i);
+        check(reported && filledWith[0].SequenceEqual(filledWith[1]) && filledWith[0].SequenceEqual(allButThree),
+            $"terrain, one map fails on a worker: 5 and 7 workers leave the same maps built, all but that one " +
+            $"(unbuilt with 5: {RouteMapsTests.Missing(filledWith[0], starts.Length)}; with 7: {RouteMapsTests.Missing(filledWith[1], starts.Length)})");
+
+        // Through the navigation tick hook: every cached map throws on a worker thread and builds on this one. The
+        // maps the workers could not build are built again on the main thread, with 5 workers and with 7 alike,
+        // and the feature stays on.
+        foreach (object field in CachedFields(cache, cachedStarts)) RouteMapsTests.PoisonOffThisThread(field);
+        int reports = TurnedOff.Version;
+        foreach (int count in new[] { 5, 7 })
+        {
+            TerrainMaps.CreateFeature(new Config { RouteMapsWorkers = count });
+            TerrainMaps.PathfindingServiceCreatedPostfix(service);
+            TerrainMaps.SetRangeForTests(Range);
+            foreach (object field in CachedFields(cache, cachedStarts)) RouteMapsTests.Call(field, "Clear");
+            TerrainMaps.NavigationTickedPostfix();
+            int wrong = 0;
+            for (int i = 0; i < starts.Length; i++)
+            {
+                object field = RouteMapsTests.Call(cache, "GetFlowFieldAtNode", starts[i]);
+                if (!(bool)RouteMapsTests.Get(field, "IsFilled") || !RouteMapsTests.SameMap(sequential[i].Field, field, ref compared)) wrong++;
+            }
+            check(wrong == 0 && TerrainMaps.IsActive && TurnedOff.Version == reports,
+                $"terrain hook, {count} workers that cannot build: every cached map is built on the main thread instead, " +
+                $"identical to the game's, feature still on ({wrong} wrong)");
+        }
+
+        // A map that throws wherever it is built, in a batch small enough for the main thread: the other maps are
+        // still built, and the feature turns itself off (on every computer alike: the game's code failed on the
+        // game's data).
+        object poisoned = RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[1]);
+        for (int i = 1; i <= 3; i++) RouteMapsTests.Call(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "Clear");
+        RouteMapsTests.PoisonEverywhere(poisoned);
+        TerrainMaps.NavigationTickedPostfix();
+        bool othersBuilt = (bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[2]), "IsFilled") &&
+                           (bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[3]), "IsFilled");
+        check(othersBuilt && !TerrainMaps.IsActive && TurnedOff.Version == reports + 1 && TurnedOff.Names().Last() == "TerrainMaps",
+            "terrain hook, a map that fails on the main thread too: the maps after it in the batch are still built, and " +
+            "the feature turns itself off and says so");
+        string stats = TerrainMaps.TakeStatsLine();
+        Console.WriteLine("     " + stats);
+        check(stats.Contains("maps whose first build threw were built again on the main thread"),
+            "terrain stats: the maps built again on the main thread are counted");
+        TerrainMaps.CreateFeature(new Config());
+        TerrainMaps.Activate();
+    }
+
+    private static List<object> CachedFields(object cache, List<int> cachedStarts)
+    {
+        List<object> fields = new List<object>();
+        foreach (int start in cachedStarts) fields.Add(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", start));
+        return fields;
     }
 
     private static object ReadOnlyListOf(Assembly navigation, List<int> values)

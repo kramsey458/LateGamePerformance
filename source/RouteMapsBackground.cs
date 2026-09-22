@@ -21,12 +21,18 @@ namespace LateGamePerformance
     //  - Workers read the road graph and the district maps. Every method that changes those is gated to land the
     //    whole batch first, as is the start of the next navigation tick and a new game scene.
     //  - A map is built by exactly one thread: claiming is a compare-and-swap on a per-map state.
+    //  - A map whose build threw is built once more on the main thread before the game can see it (when it is
+    //    asked for, or when the flight lands), so the game never sees one of these maps unbuilt, whatever happened
+    //    on the workers. Only if that throws too does the feature turn itself off.
     internal static partial class RouteMaps
     {
         private sealed class Flight
         {
             public Work[] Items;
             public int[] State;
+            // Set by the thread whose build threw, before the map's state becomes Done; cleared on the main thread
+            // when the map is built again.
+            public bool[] Failed;
             public Dictionary<int, int> IndexByNode;
             public object Graph;
             public object DistrictMap;
@@ -34,7 +40,11 @@ namespace LateGamePerformance
             public Task[] Tasks;
             public int Cursor;
             public int Remaining;
+            // The first build that threw, anywhere; and the first that threw again on the main thread, which
+            // turns the feature off when the flight closes.
             public Exception Failure;
+            public Exception Fatal;
+            public int Rebuilt;
             public long Launched;
             public long MainStopwatchTicks;
             public int BuiltOnMain;
@@ -135,6 +145,7 @@ namespace LateGamePerformance
             {
                 Items = work.ToArray(),
                 State = new int[work.Count],
+                Failed = new bool[work.Count],
                 IndexByNode = new Dictionary<int, int>(work.Count),
                 Graph = graph,
                 DistrictMap = districtMap,
@@ -177,10 +188,20 @@ namespace LateGamePerformance
                     }
                 }
                 Task.WaitAll(flight.Tasks);
+                if (flight.Failure != null)
+                {
+                    for (int i = 0; i < flight.Failed.Length; i++)
+                    {
+                        if (flight.Failed[i])
+                        {
+                            Rebuild(flight, i);
+                        }
+                    }
+                }
             }
             catch (Exception exception)
             {
-                Interlocked.CompareExchange(ref flight.Failure, exception, null);
+                flight.Fatal = flight.Fatal ?? exception;
             }
             NotePause(flight, Stopwatch.GetTimestamp() - started);
             Close(flight);
@@ -201,26 +222,36 @@ namespace LateGamePerformance
         private static void EnsureBuiltCore(int nodeId)
         {
             Flight flight = _flight;
-            if (flight.IndexByNode.TryGetValue(nodeId, out int index) && Volatile.Read(ref flight.State[index]) != Done)
+            if (flight.IndexByNode.TryGetValue(nodeId, out int index))
             {
-                long started = Stopwatch.GetTimestamp();
-                if (Interlocked.CompareExchange(ref flight.State[index], Running, Pending0) == Pending0)
+                if (Volatile.Read(ref flight.State[index]) != Done)
                 {
-                    Build(flight, index, flight.MainGenerator);
-                    flight.BuiltOnMain++;
-                }
-                else
-                {
-                    SpinWait spin = new SpinWait();
-                    while (Volatile.Read(ref flight.State[index]) != Done)
+                    long started = Stopwatch.GetTimestamp();
+                    if (Interlocked.CompareExchange(ref flight.State[index], Running, Pending0) == Pending0)
                     {
-                        spin.SpinOnce();
+                        Build(flight, index, flight.MainGenerator);
+                        flight.BuiltOnMain++;
                     }
-                    flight.WaitedOnMain++;
+                    else
+                    {
+                        SpinWait spin = new SpinWait();
+                        while (Volatile.Read(ref flight.State[index]) != Done)
+                        {
+                            spin.SpinOnce();
+                        }
+                        flight.WaitedOnMain++;
+                    }
+                    NotePause(flight, Stopwatch.GetTimestamp() - started);
                 }
-                NotePause(flight, Stopwatch.GetTimestamp() - started);
+                // Done now, so whoever built it has finished with it.
+                if (flight.Failed[index])
+                {
+                    long started = Stopwatch.GetTimestamp();
+                    Rebuild(flight, index);
+                    NotePause(flight, Stopwatch.GetTimestamp() - started);
+                }
             }
-            if (Volatile.Read(ref flight.Remaining) == 0)
+            if (flight.Fatal != null || Volatile.Read(ref flight.Remaining) == 0)
             {
                 Land();
             }
@@ -253,8 +284,8 @@ namespace LateGamePerformance
             }
         }
 
-        // Never throws: a map that fails is left unfilled, which the game rebuilds on demand, and the failure is
-        // reported when the flight closes. The state always reaches Done so nobody waits forever.
+        // Never throws: a map that fails is left unfilled and marked, and the main thread builds it again before the
+        // game sees it. The state always reaches Done so nobody waits forever.
         private static void Build(Flight flight, int index, object generator)
         {
             try
@@ -263,12 +294,30 @@ namespace LateGamePerformance
             }
             catch (Exception exception)
             {
+                flight.Failed[index] = true;
                 Interlocked.CompareExchange(ref flight.Failure, exception, null);
             }
             finally
             {
                 Volatile.Write(ref flight.State[index], Done);
                 Interlocked.Decrement(ref flight.Remaining);
+            }
+        }
+
+        // Main thread, on a map that is Done: builds a map whose first build threw once more, with the main thread's
+        // generator. If that throws too, the game's generator fails on the game's data, alike on every peer, and the
+        // feature turns itself off when the flight closes.
+        private static void Rebuild(Flight flight, int index)
+        {
+            flight.Failed[index] = false;
+            try
+            {
+                Fill(flight.MainGenerator, flight.Graph, flight.Items[index]);
+                flight.Rebuilt++;
+            }
+            catch (Exception exception)
+            {
+                flight.Fatal = flight.Fatal ?? exception;
             }
         }
 
@@ -282,9 +331,14 @@ namespace LateGamePerformance
             _backgroundStopwatchTicks += Stopwatch.GetTimestamp() - flight.Launched;
             _builtOnMain += flight.BuiltOnMain;
             _waitedOnMain += flight.WaitedOnMain;
-            if (flight.Failure != null)
+            _rebuiltAfterFailure += flight.Rebuilt;
+            if (flight.Fatal != null)
             {
-                Disable(flight.Failure);
+                Disable(flight.Fatal);
+            }
+            else if (flight.Failure != null)
+            {
+                NoteRecovered(flight.Failure);
             }
         }
     }

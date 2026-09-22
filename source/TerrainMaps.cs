@@ -32,6 +32,12 @@ namespace LateGamePerformance
     //  - Which maps are built is simulation state: a terrain map is cached exactly while its building is finished,
     //    and unlike road maps nothing a player looks at fills one (the range overlay uses a map of its own). After
     //    this runs every peer has the same maps built, whatever the thread count.
+    //  - That holds when a build throws, too. A map that throws does not stop the others, and after the batch it is
+    //    built once more on the main thread, so a failure only one computer's worker threads have (a patch by
+    //    another mod that works only on the main thread, say) leaves it with the same maps built as everyone else.
+    //    Only if the main thread's build throws as well, which is then the game's generator failing on the game's
+    //    data and so the same on every peer, does the feature turn itself off, and it says so in the game
+    //    (TurnedOff).
     //
     // Difference from the unmodded game, the same one the road maps have: maps are built before the first request
     // instead of on it, so the few code paths that use a terrain map only "if it is already filled" find it
@@ -95,6 +101,8 @@ namespace LateGamePerformance
         private static long _builtDirectly;
         private static long _stopwatchTicks;
         private static long _longestStopwatchTicks;
+        private static long _rebuiltOnMain;
+        private static bool _workerFailureLogged;
 
         public static bool IsActive => _active;
 
@@ -164,8 +172,12 @@ namespace LateGamePerformance
                 "{11} unbuilt maps were found by the periodic check alone",
                 _batches, _mapsBuilt, _workerCount, _stopwatchTicks * msPerTick, _longestStopwatchTicks * msPerTick,
                 _builtDirectly, MinMapsForWorkers, _cachedMaps, _largestMapNodes, _scans, _scansSkipped, _missedByHooks);
+            if (_rebuiltOnMain > 0)
+            {
+                line += $"; {_rebuiltOnMain} maps whose first build threw were built again on the main thread";
+            }
             _batches = _mapsBuilt = _builtDirectly = _stopwatchTicks = _longestStopwatchTicks = 0;
-            _scans = _scansSkipped = _missedByHooks = 0;
+            _scans = _scansSkipped = _missedByHooks = _rebuiltOnMain = 0;
             return line;
         }
 
@@ -218,18 +230,57 @@ namespace LateGamePerformance
         // Fills every work item with the game's own generator, spread over the worker generators. Returns the
         // first exception any worker hit, or null. Public to the test harness, which runs it against the real
         // navigation assembly and compares the result with one-by-one fills.
+        //
+        // A map whose fill throws is left unfilled and its worker goes on with the next one. Up to 0.4.26 the
+        // worker gave up the rest of its share instead, so which maps were left depended on the worker count,
+        // which differs between computers.
         public static Exception FillParallel(object graph, IReadOnlyList<Work> work, object[] workerGenerators, float maxDistance)
         {
             int workers = Math.Min(workerGenerators.Length, work.Count);
-            // This mod's own worker threads; strided split: no shared counters, one generator per worker.
-            return TickWorkers.Run(workers, (worker, sharing) =>
+            Exception failure = null;
+            // This mod's own worker threads; strided split: no shared counters, one generator per worker. The
+            // generator clears its scratch state at the start of every fill, so one that threw is fit for the next.
+            Exception thrown = TickWorkers.Run(workers, (worker, sharing) =>
             {
                 object generator = workerGenerators[worker];
                 for (int i = worker; i < work.Count; i += sharing)
                 {
-                    _fill(generator, graph, work[i].Field, maxDistance, work[i].StartNodeId);
+                    try
+                    {
+                        _fill(generator, graph, work[i].Field, maxDistance, work[i].StartNodeId);
+                    }
+                    catch (Exception exception)
+                    {
+                        Interlocked.CompareExchange(ref failure, exception, null);
+                    }
                 }
             });
+            return failure ?? thrown;
+        }
+
+        // Fills, on the calling thread, every work item that is not filled yet, going on past a map that throws.
+        // Returns the first exception, or null. Every work item can be built (its start is on the terrain graph),
+        // so after a call that returns null all of them are.
+        internal static Exception FillUnfilledHere(object generator, object graph, IReadOnlyList<Work> work,
+            float maxDistance, ref int built)
+        {
+            Exception failure = null;
+            for (int i = 0; i < work.Count; i++)
+            {
+                try
+                {
+                    if (!_isFilled(work[i].Field))
+                    {
+                        _fill(generator, graph, work[i].Field, maxDistance, work[i].StartNodeId);
+                        built++;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    failure = failure ?? exception;
+                }
+            }
+            return failure;
         }
 
         public static object[] CreateWorkerGenerators(object binaryHeapFactory, object navMeshGroupService, int count)
@@ -355,23 +406,39 @@ namespace LateGamePerformance
                 _mainGenerator = CreateWorkerGenerators(heapFactory, groupService, 1)[0];
             }
             long started = Stopwatch.GetTimestamp();
+            Exception failure;
             if (WorkScratch.Count < MinMapsForWorkers)
             {
-                for (int i = 0; i < WorkScratch.Count; i++)
-                {
-                    _fill(_mainGenerator, graph, WorkScratch[i].Field, maxDistance, WorkScratch[i].StartNodeId);
-                }
+                int built = 0;
+                failure = FillUnfilledHere(_mainGenerator, graph, WorkScratch, maxDistance, ref built);
                 _builtDirectly += WorkScratch.Count;
             }
             else
             {
-                Exception failure = FillParallel(graph, WorkScratch, _workerGenerators, maxDistance);
+                failure = FillParallel(graph, WorkScratch, _workerGenerators, maxDistance);
                 _batches++;
                 _mapsBuilt += WorkScratch.Count;
-                if (failure != null)
+            }
+            if (failure != null)
+            {
+                // Every map whose build threw is built once more here, so that every peer ends the tick with every
+                // buildable map built, whatever went wrong on its worker threads. If the main thread's build throws
+                // too, the game's own generator fails on the game's own data, which it does alike on every peer
+                // (and would on demand in the unmodded game): the exception turns the feature off, the maps after it
+                // still built.
+                int rebuilt = 0;
+                Exception again = FillUnfilledHere(_mainGenerator, graph, WorkScratch, maxDistance, ref rebuilt);
+                _rebuiltOnMain += rebuilt;
+                if (again != null)
                 {
-                    // A map that was not finished is not marked as filled; the game builds it on demand.
-                    throw failure;
+                    throw again;
+                }
+                if (!_workerFailureLogged)
+                {
+                    _workerFailureLogged = true;
+                    Log.Warning("TerrainMaps: a terrain route map could not be built on the first try; it was " +
+                                "built again on the main thread and the feature stays on (later ones are only counted " +
+                                "on the stats line): " + failure);
                 }
             }
             long elapsed = Stopwatch.GetTimestamp() - started;
@@ -393,7 +460,7 @@ namespace LateGamePerformance
         private static void Disable(Exception exception)
         {
             _active = false;
-            Log.Warning("TerrainMaps failed and turned itself off for this session: " + exception);
+            TurnedOff.Report("TerrainMaps", "TerrainMaps failed and turned itself off for this session: " + exception);
         }
     }
 }

@@ -198,9 +198,12 @@ internal static class Program
         IdleEntitiesTests.Run(Check);
         SaveSnapshotTests.Run(Check);
         HomeSearchTests.Run(Check);
+        TestTurnedOff();
         string[] expectedWarnings =
         {
-            "CatchUp failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
+            "CatchUp failed", "RouteMaps: a route map could not be built on the first try", "RouteMaps failed",
+            "RouteMaps failed", "TerrainMaps: a terrain route map could not be built on the first try", "TerrainMaps failed",
+            "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
             "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed",
             "SaveSnapshot: the saving code of", "HomeSearch failed"
         };
@@ -213,6 +216,63 @@ internal static class Program
 
         Console.WriteLine(_failures == 0 ? "ALL PASSED" : _failures + " FAILED");
         return _failures == 0 ? 0 : 1;
+    }
+
+    // A simulation feature that turns itself off mid-game leaves this computer on the game's code and the other
+    // players on the mod's. It is said again, with OFF, on every stats interval and in every new game scene, and a
+    // dialog in the game asks every player to restart. Runs after the forced failures above.
+    private static void TestTurnedOff()
+    {
+        string[] off = TurnedOff.Names();
+        Check(off.SequenceEqual(new[] { "RouteMaps", "TerrainMaps", "PlantWater", "DistrictCounts", "HomeSearch" }),
+            $"turned off: each simulation feature a forced failure above turned off was reported, once ({string.Join(", ", off)})");
+        bool[] all = Enumerable.Repeat(true, Plugin.SimulationFeatureNames.Length).ToArray();
+        string one = Plugin.TurnedOffLine(all, new[] { "RouteMaps" });
+        Check(Plugin.TurnedOffLine(all, new string[0]) == null &&
+              one.StartsWith("Simulation features: HaulCache on, RouteMaps OFF, YielderSearch on, TerrainMaps on,") &&
+              one.Contains("RouteMaps turned itself off during this session after an error") &&
+              one.Contains("every player should restart the game"),
+            "turned off: the line says which feature is now OFF and asks every player to restart; nothing while none is");
+        bool[] noTerrainSearch = (bool[])all.Clone();
+        noTerrainSearch[Array.IndexOf(Plugin.SimulationFeatureNames, "TerrainSearch")] = false;
+        string two = Plugin.TurnedOffLine(noTerrainSearch, new[] { "TerrainMaps", "HaulCache" });
+        Check(two.Contains("HaulCache OFF") && two.Contains("TerrainMaps OFF") && two.Contains("TerrainSearch OFF") &&
+              two.Contains("RouteMaps on") && two.Contains("TerrainMaps, HaulCache turned themselves off"),
+            "turned off: several at once, and a feature that never started stays OFF");
+        string notice = TurnedOff.NoticeText(new[] { "RouteMaps", "TerrainMaps" });
+        Check(notice.Contains("RouteMaps, TerrainMaps") && notice.Contains("Every player should quit and restart the game"),
+            "turned off: the in-game notice names the features and asks every player to restart");
+
+        // Said again in a new game scene and at the next stats interval.
+        List<string> lines = new List<string>();
+        Action<string> sink = Log.Sink;
+        Log.Sink = message => { lines.Add(message); sink(message); };
+        typeof(Plugin).GetMethod("GameSceneCreatedPostfix", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null);
+        int afterScene = lines.Count(IsTurnedOffLine);
+        MethodInfo tickStarted = typeof(Plugin).GetMethod("TickStartedPrefix", BindingFlags.NonPublic | BindingFlags.Static);
+        for (int i = 0; i < Plugin.Current.StatsEveryTicks; i++)
+        {
+            tickStarted.Invoke(null, null);
+        }
+        Log.Sink = sink;
+        Check(afterScene == 1 && lines.Count(IsTurnedOffLine) == 2,
+            $"turned off: the line is said again in a new game scene and on the next stats interval ({afterScene}, {lines.Count(IsTurnedOffLine)})");
+
+        // The notice is built by the game's container in every game scene and looks once per frame.
+        Type type = typeof(TurnedOffNotice);
+        ConstructorInfo[] constructors = type.GetConstructors();
+        Check(constructors.Length == 1 && constructors[0].GetParameters().Length == 1 &&
+              constructors[0].GetParameters()[0].ParameterType.FullName == "Timberborn.CoreUI.DialogBoxShower" &&
+              type.GetInterface("Timberborn.SingletonSystem.IUpdatableSingleton") != null &&
+              typeof(TurnedOffNoticeConfigurator).GetCustomAttributesData().Any(attribute =>
+                  attribute.AttributeType.Name == "ContextAttribute" &&
+                  (string)attribute.ConstructorArguments[0].Value == "Game"),
+            "turned off notice: constructed from the dialog shower, updated every frame, bound in the game scene");
+    }
+
+    private static bool IsTurnedOffLine(string line)
+    {
+        return line.Contains("Simulation features: ") && line.Contains("turned themselves off during this session");
     }
 
     private static void TestCatchUp()

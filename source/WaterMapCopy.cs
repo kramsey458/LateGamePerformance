@@ -493,8 +493,8 @@ namespace LateGamePerformance
             _job = null;
             _verifyJob = null;
             _swappedJob = null;
-            Log.Warning("WaterMapCopy failed and turned itself off for this session; the game copies the water map " +
-                        "itself: " + exception);
+            TurnedOff.Report("WaterMapCopy", "WaterMapCopy failed and turned itself off for this session; the " +
+                             "game copies the water map itself: " + exception);
         }
 
         private static void Fill(Job job)

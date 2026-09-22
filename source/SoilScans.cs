@@ -810,7 +810,7 @@ namespace LateGamePerformance
             // already, so the game passes it over except for asking the soil's look to change again to the same
             // value.
             _active = false;
-            Log.Warning("SoilScans failed and turned itself off for this session: " + exception);
+            TurnedOff.Report("SoilScans", "SoilScans failed and turned itself off for this session: " + exception);
             return true;
         }
 
