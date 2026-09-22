@@ -197,14 +197,14 @@ Evidence: `DistrictCounts: 1002 counts of 233 inventories on 7 workers in 690.0 
 own per-inventory cost (about 4 us) is about 1 ms sequential, so 7 workers should take 0.15 ms; the other 0.5 ms is
 `Parallel.For` waking thread-pool threads. The same overhead sits in PlantWater's fallback (0.36 ms for 6,800 trivial reads).
 
-Correction (2026-09-22): these numbers contradict section 2, which calls the same 0.67 ms count "probably slower than the
-game's own loop at this size", while the paragraph above puts the game's loop at about 1 ms, slower than the mod. Neither
-was measured in the game: the 4 us per inventory has no source (in the harness the game's code counts 700 inventories in
-about 2 ms on .NET 8, under 3 us each, and Mono is slower). To settle it, time the game's own count inside
-`DistrictCountsVerify`, as `HaulCacheVerify` does for the hauler lists. The pool itself is no longer open: 0.4.25 shipped
-worker threads of the mod's own (`TickWorkers`) for DistrictCounts, the PlantWater fallback and the terrain and road map
-batches. What is left of E is that measurement and, if the game's loop still wins at 233 inventories, raising
-`MinInventories`.
+Correction (2026-09-22): these numbers contradicted section 2, which called the same 0.67 ms count "probably slower than
+the game's own loop at this size" (corrected there too), while the paragraph above puts the game's loop at about 1 ms,
+slower than the mod. Neither was measured in the game: the 4 us per inventory has no source (in the harness the game's
+code counts 700 inventories in about 2 ms on .NET 8, under 3 us each, and Mono is slower). To settle it, time the game's
+own count inside `DistrictCountsVerify`, as `HaulCacheVerify` does for the hauler lists. The pool itself is no longer
+open: 0.4.25 shipped worker threads of the mod's own (`TickWorkers`) for DistrictCounts, the PlantWater fallback and the
+terrain and road map batches. What is left of E is that measurement and, if the game's loop still wins at 233 inventories,
+raising `MinInventories`.
 
 Design: a small persistent pool (`TickWorkers`): N threads that spin briefly then block on a `ManualResetEventSlim`, fed a
 work-item struct (delegate + range), joined with a countdown; dedicated threads like `SaveSnapshot.Build` uses, but kept alive
@@ -364,15 +364,17 @@ has a different remedy, and nothing above should be tuned for the host alone.
    the Performance Log repository. Report per-tick and per-frame deltas, not impressions.
 4. **Save benchmark** (added 2026-09-22; repeatable save timing without playing, single player): the game's own
    `SavingBenchmarker` (`Timberborn.Benchmarking.dll`) runs when the game is started with `-settlementName X -saveName Y
-   -benchmarkSaveCount 20 -benchmarkWarmUpLength 30` and without `-benchmarkLength` and `-benchmarkSpeed` (given both, the
-   game runs its ordinary benchmark instead). It loads the save, waits the warm-up in seconds, finishes the tick, saves 20
-   times into memory (`GameSaver.BenchmarkSavingToMemory`), writes `Finished saving benchmark:` with the average, median,
-   90th percentile, minimum and maximum to `Player.log`, and quits. Those saves go through `SaveWithoutFinishingTick` and
-   `SaveWriter.WriteToSaveStream`, so this mod's snapshot workers (`SerializedWorldFactory.Create`) are measured, Background
-   save is not involved (it only takes queued saves), and the Save timing feature logs one `Save to a stream` line per save
-   with the stages split. `tools/benchmark-timberborn.ps1 -Settlement X -Save Y -SaveCount 20` launches it (it starts the
-   game through Steam; `-WarmUpSeconds` sets the warm-up). Use it for item A's decision beside the `Save:` lines of a
-   played session.
+   -benchmarkSaveCount 20 -benchmarkWarmUpLength 30 -skipModManager` and without `-benchmarkLength` and `-benchmarkSpeed`
+   (given both, the game runs its ordinary benchmark instead). `-skipModManager` loads the mods enabled in the mod manager
+   without waiting on its screen; the ordinary benchmark (`-benchmarkLength`) starts the game with every mod switched off,
+   so it measures the game alone, while this one measures the mods. It loads the save, waits the warm-up in seconds,
+   finishes the tick, saves 20 times into memory (`GameSaver.BenchmarkSavingToMemory`), writes `Finished saving
+   benchmark:` with the average, median, 90th percentile, minimum and maximum to `Player.log`, and quits. Those saves go
+   through `SaveWithoutFinishingTick` and `SaveWriter.WriteToSaveStream`, so this mod's snapshot workers
+   (`SerializedWorldFactory.Create`) are measured, Background save is not involved (it only takes queued saves), and the
+   Save timing feature logs one `Save to a stream` line per save with the stages split. `tools/benchmark-timberborn.ps1
+   -Settlement X -Save Y -SaveCount 20` launches it (it starts the game through Steam; `-WarmUpSeconds` sets the warm-up).
+   Use it for item A's decision beside the `Save:` lines of a played session.
 
 ## 6. Definition of done for a round
 
