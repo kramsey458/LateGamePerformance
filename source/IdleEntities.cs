@@ -266,6 +266,13 @@ namespace LateGamePerformance
                 {
                     return;
                 }
+                if (bucket.Ticking && Records.TryGetValue(tickableEntity, out Record pending))
+                {
+                    // The game still ticks it for the rest of this pass, but once forgotten no part switched on
+                    // from here on would wake it. Awake, it goes through the game's own Tick, which checks every part
+                    // as the game's loop does; with nothing switched on that does nothing.
+                    pending.Awake = true;
+                }
                 Forget(tickableEntity);
                 if (!bucket.Ticking)
                 {

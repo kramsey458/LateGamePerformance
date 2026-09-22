@@ -90,6 +90,59 @@ internal static class IdleEntitiesTests
         string line = IdleEntities.TakeStatsLine();
         check(line != null && line.Contains("passed over"), "idle entities stats: " + line);
         IdleEntities.SceneCreated();
+        RemovedThenEnabled(bucketType, add, remove, listField, check);
+    }
+
+    // A case the scripted history does not reach: A removes C during a pass (the game defers that to the end of the
+    // pass), then B switches on C's tick part. C is still in the game's list, after B, so the game ticks it in that
+    // pass; in the next one it is gone.
+    private static void RemovedThenEnabled(Type bucketType, MethodInfo add, MethodInfo remove, FieldInfo listField,
+        Action<bool, string> check)
+    {
+        object bucket = Activator.CreateInstance(bucketType, true);
+        SortedList<Guid, TickableEntity> gameList = (SortedList<Guid, TickableEntity>)listField.GetValue(bucket);
+        IdleEntities.Activate();
+        Ent a = MakeEntity(0, true), b = MakeEntity(1, true), c = MakeEntity(2, false);
+        Ent[] ents = { a, b, c };
+        string[] names = { "A", "B", "C" };
+        foreach (Ent ent in ents)
+        {
+            add.Invoke(bucket, new object[] { ent.Entity });
+            IdleEntities.AddPostfix(bucket, ent.Entity);
+        }
+        List<string> ticks = new List<string>();
+        int pass = 0;
+        IdleEntities.TickEntity = entity =>
+        {
+            int index = Array.FindIndex(ents, ent => ent.Entity == entity);
+            // The game's Tick does nothing for an entity whose components are all disabled.
+            if (!ents[index].Awake) return;
+            ticks.Add(pass + ":" + names[index]);
+            if (pass == 1 && index == 0)
+            {
+                // A deletes C: EntityDeletedEvent -> TickableEntityBucket.Remove, deferred while ticking.
+                remove.Invoke(bucket, new object[] { c.Entity });
+                IdleEntities.RemovePostfix(bucket, c.Entity);
+            }
+            else if (pass == 1 && index == 1)
+            {
+                // B switches on C's tick part: BaseComponent.EnableComponent, then the mod's postfix.
+                EnabledField.SetValue(c.Parts[0], true);
+                IdleEntities.EnabledPostfix(c.Parts[0]);
+            }
+        };
+        for (pass = 1; pass <= 2; pass++)
+        {
+            IdleEntities.TickAllPrefix(bucket);
+        }
+        IdleEntities.TickEntity = entity => entity.Tick();
+        string got = string.Join(",", ticks);
+        check(got == "1:A,1:B,1:C,2:A,2:B" && gameList.Count == 2 && IdleEntities.IsActive,
+            "idle entities: an entity removed during a pass and switched on later in it is ticked in that pass, as by the " +
+            $"game, and not after (expected 1:A,1:B,1:C,2:A,2:B, got {got}; {gameList.Count} left in the game's list)");
+        string line = IdleEntities.TakeStatsLine();
+        check(line != null && !line.Contains("rebuilt"), "idle entities: the mirror stayed in step through the removal: " + line);
+        IdleEntities.SceneCreated();
     }
 
     private static string At(List<string> list, int i)
@@ -112,6 +165,18 @@ internal static class IdleEntitiesTests
             metered.Add(new MeteredTickableComponent(parts[i], null, false));
         }
         return new Ent { Id = id, Entity = new TickableEntity(component, metered, "entity " + index), Parts = parts };
+    }
+
+    // One tick part, switched on or off.
+    private static Ent MakeEntity(int index, bool enabled)
+    {
+        EntityComponent component = (EntityComponent)RuntimeHelpers.GetUninitializedObject(typeof(EntityComponent));
+        Guid id = new Guid(index + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        EntityIdField.SetValue(component, id);
+        Part part = new Part();
+        EnabledField.SetValue(part, enabled);
+        List<MeteredTickableComponent> metered = new List<MeteredTickableComponent> { new MeteredTickableComponent(part, null, false) };
+        return new Ent { Id = id, Entity = new TickableEntity(component, metered, "entity " + index), Parts = new[] { part } };
     }
 
     // The game's loop, modelled: TickableEntityBucket.TickAll over a SortedList, deferring removals while ticking;

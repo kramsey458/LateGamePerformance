@@ -301,7 +301,8 @@ namespace LateGamePerformance
             feature.Patches.Add(new PatchSpec
             {
                 Name = "TickableSingletonService.TickAll",
-                // Without the tick hook the haul cache has no periodic flush; it still has its change hooks.
+                // Metrics, the UI throttle's tick count and the stats lines. The haul cache's per-tick flush is a
+                // required hook of its own on the same method, so it does not depend on this one.
                 Required = false,
                 Target = () => Reflect.Method("Timberborn.TickSystem.TickableSingletonService", "TickAll"),
                 Prefix = Reflect.Own(self, nameof(TickStartedPrefix))
@@ -337,7 +338,6 @@ namespace LateGamePerformance
 
         private static void TickStarted()
         {
-            HaulCache.OnTickStarted();
             MetricsDump.OnTickStarted();
             UiThrottle.OnTickStarted();
             if (_config.StatsEveryTicks > 0 && ++_ticksSinceReport >= _config.StatsEveryTicks)
