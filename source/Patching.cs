@@ -197,6 +197,29 @@ namespace LateGamePerformance
             return type == null ? null : AccessTools.Method(type, methodName);
         }
 
+        // One overload of a method, told apart by its parameter count; null unless exactly one matches.
+        public static MethodInfo Overload(string typeName, string methodName, int parameterCount)
+        {
+            Type type = GameType(typeName);
+            if (type == null)
+            {
+                return null;
+            }
+            MethodInfo found = null;
+            foreach (MethodInfo method in AccessTools.GetDeclaredMethods(type))
+            {
+                if (method.Name == methodName && method.GetParameters().Length == parameterCount)
+                {
+                    if (found != null)
+                    {
+                        return null;
+                    }
+                    found = method;
+                }
+            }
+            return found;
+        }
+
         public static MethodInfo Setter(Type type, string propertyName)
         {
             return AccessTools.PropertySetter(type, propertyName);

@@ -43,7 +43,7 @@ internal static class Program
                      "Timberborn.Yielding", "Timberborn.Goods", "Timberborn.SerializationSystem",
                      "Timberborn.WaterSystem", "Timberborn.SoilMoistureSystem", "Timberborn.SoilContaminationSystem",
                      "Timberborn.WaterSystemRendering", "Timberborn.TerrainSystemRendering", "Timberborn.MapIndexSystem",
-                     "Timberborn.MapStateSystem", "Timberborn.TerrainSystem", "Timberborn.BlockSystem" })
+                     "Timberborn.MapStateSystem", "Timberborn.TerrainSystem", "Timberborn.BlockSystem", "Timberborn.WalkingSystem" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -66,6 +66,7 @@ internal static class Program
         TestBootConfig();
         TestYielderSearch();
         TestGarbageCollection();
+        TestCatchUp();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
@@ -76,7 +77,7 @@ internal static class Program
             WaterMapCopy.CreateFeature(new Config()), SoilScans.CreateFeature(new Config()),
             WaterRendering.CreateTilesFeature(), WaterRendering.CreateUploadsFeature(),
             MetricsDump.CreateFeature(new Config()),
-            Diagnostics.CreateFeature(), Plugin.CreateTickFeature()
+            Diagnostics.CreateFeature(), CatchUp.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
         foreach (Feature feature in features)
@@ -91,7 +92,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 73, $"73 patches declared (found {patchCount})");
+        Check(patchCount == 79, $"79 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -100,7 +101,7 @@ internal static class Program
         WaterAndSoilTests.Run(Check);
         string[] expectedWarnings =
         {
-            "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
+            "CatchUp failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
             "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
@@ -114,14 +115,62 @@ internal static class Program
         return _failures == 0 ? 0 : 1;
     }
 
+    private static void TestCatchUp()
+    {
+        CatchUp.Policy policy = new CatchUp.Policy();
+        bool steady = true;
+        for (int i = 0; i < 200; i++)
+        {
+            steady &= policy.Allow(0.016f) == 0.016f;
+        }
+        Check(steady && Math.Abs(policy.AverageSeconds - 0.016f) < 0.001f,
+            "catch-up: ordinary frames pass unchanged and set the average");
+        float afterHitch = policy.Allow(0.3f);
+        Check(Math.Abs(afterHitch - 1f / 30f) < 0.0001f,
+            $"catch-up: a 300 ms frame after 16 ms frames may only catch up a thirtieth of a second (got {afterHitch:0.0000})");
+        Check(policy.Allow(0.03f) == 0.03f, "catch-up: the frames after the hitch are not held back");
+        CatchUp.Policy slow = new CatchUp.Policy();
+        bool slowMachine = true;
+        for (int i = 0; i < 200; i++)
+        {
+            // The average starts at a thirtieth of a second, so only the first couple of frames are trimmed.
+            slowMachine &= slow.Allow(0.07f) == 0.07f || i < 3;
+        }
+        Check(slowMachine && slow.Allow(0.1f) == 0.1f && slow.Allow(0.5f) < 0.15f,
+            "catch-up: a machine at 70 ms frames keeps its full share; the cap follows its own frame time");
+        Check(policy.Allow(0f) == 0f && policy.Allow(-1f) == -1f, "catch-up: paused frames are left alone");
+        // The prefix scales the game's delta by the same ratio, so the speed and Unity's own cap stay in it.
+        CatchUp.Activate();
+        for (int i = 0; i < 200; i++)
+        {
+            CatchUp.UnscaledDeltaTime = () => 0.016f;
+            float ordinary = 0.016f * 7f;
+            CatchUp.UpdatePrefix(ref ordinary);
+        }
+        CatchUp.UnscaledDeltaTime = () => 0.3f;
+        float delta = 0.3f * 7f;
+        CatchUp.UpdatePrefix(ref delta);
+        Check(Math.Abs(delta - 7f / 30f) < 0.001f, $"catch-up prefix: 2.1 s of game time becomes 0.23 s (got {delta:0.000})");
+        string line = CatchUp.TakeStatsLine();
+        Check(line != null && line.Contains("after 1 long frame(s)") && line.Contains("1.9 s of game time") &&
+              line.Contains("longest such frame 300 ms"), "catch-up stats: " + line);
+        Check(CatchUp.TakeStatsLine() == null, "catch-up stats: nothing to say when nothing was limited");
+        CatchUp.UnscaledDeltaTime = () => throw new InvalidOperationException("no unity");
+        float untouched = 1f;
+        CatchUp.UpdatePrefix(ref untouched);
+        Check(untouched == 1f && !CatchUp.IsActive, "catch-up: an exception switches it off and leaves the delta alone");
+    }
+
     private static void TestConfigParsing()
     {
         Config config = new Config();
         config.Apply(Config.Parse(new[]
         {
             "# comment", "HaulCache = false", "haulcacheflusheveryticks=5 # trailing", "Diagnostics = TRUE",
-            "StatsEveryTicks = -3", "Nonsense", "GcReport = maybe", "RouteMaps = false", "RouteMapsMinFields = 0"
+            "StatsEveryTicks = -3", "Nonsense", "GcReport = maybe", "RouteMaps = false", "RouteMapsMinFields = 0",
+            "LimitCatchUp = false"
         }));
+        Check(!config.LimitCatchUp && new Config().LimitCatchUp, "config: LimitCatchUp is a setting, on by default");
         Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch,
             "config: what decides which simulation code runs cannot be changed from the file");
         Check(config.Diagnostics, "config: bool case-insensitive");

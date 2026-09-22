@@ -49,6 +49,8 @@ namespace LateGamePerformance
         // Not part of the simulation, so it may differ between players. A way out, not a setting.
         public bool BackgroundSave = true;
         public bool Timing = true;
+        // Pacing only (how much simulation one frame may catch up after a hitch), never which ticks run.
+        public bool LimitCatchUp = true;
         public bool SaveTiming = true;
         public bool RecordTimings = false;
         public int MetricsEveryTicks = 3000;
@@ -120,6 +122,7 @@ namespace LateGamePerformance
             WaterRendering = Bool(values, nameof(WaterRendering), WaterRendering);
             BackgroundSave = Bool(values, nameof(BackgroundSave), BackgroundSave);
             Timing = Bool(values, nameof(Timing), Timing);
+            LimitCatchUp = Bool(values, nameof(LimitCatchUp), LimitCatchUp);
             SaveTiming = Bool(values, nameof(SaveTiming), SaveTiming);
             RecordTimings = Bool(values, nameof(RecordTimings), RecordTimings);
             MetricsEveryTicks = Math.Max(0, Int(values, nameof(MetricsEveryTicks), MetricsEveryTicks));
@@ -135,7 +138,7 @@ namespace LateGamePerformance
                    $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
-                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, Timing={Timing}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }

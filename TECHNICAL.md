@@ -499,11 +499,34 @@ no difference that could be told from noise, and a player has no way to judge it
 the per-frame hook it needed. Unity's fixed 3 ms slice from `boot.config` applies, and the `Timing:` line still
 reports it.
 
+### Catch-up limit (on by default, new in 0.4.16)
+
+The game turns each frame's `Time.deltaTime` into simulation buckets, and Unity caps that delta at a third of a
+second. So after a 300 ms frame (an autosave, a garbage collection) at speed 7 the next frame is asked for 2.1 s
+of game time, three and a half ticks: in a 35-minute session log of a 354-beaver colony every autosave was followed
+by frames of 131, 66, 142, 290 and 107 ms, and every collection by a similar tail. One hitch became about a second
+of stutter.
+
+`LimitCatchUp = true` (the default) limits what one frame may catch up to twice the recent ordinary frame time
+(at least a thirtieth of a second); the rest is simply not run, so the simulation loses a fraction of a second of
+wall clock per hitch. Which ticks run, and in what order, is unchanged, and how many buckets a frame runs already
+differs between players and machines, so this is pacing, not simulation. The limit follows each machine's own
+frame time: a computer that always needs 70 ms per frame keeps its full share. A `CatchUp:` line is logged with the
+stats when it did something: how many frames were limited, how much game time was left out, the longest such frame
+and the ordinary frame time it measured. It is hooked into `Ticker.Update`, which BeaverBuddies leaves to the game
+(its own patch there only marks that ticking is in progress).
+
 ### Diagnostics (off by default)
 
-`Diagnostics = true` times route map (road flow field) fills, including the ones the game still does on
-demand, and need selection, which this mod does not change. It adds overhead to hot
-code, so switch it off again after collecting numbers.
+`Diagnostics = true` times code this mod does not change: route map (road flow field) fills, including the ones
+the game still does on demand; need selection (`DistrictNeedBehaviorService.PickBestAction`); walker path finding
+(`Walker.FindPath`, once per new destination); and the game's two A* searches (`RoadAStarPathfinder` and
+`TerrainAStarPathfinder`), which it falls back to when no route map answers. That happens when a beaver standing off
+the road network (a field, a forest) prices the buildings that could satisfy a need, or walks to a random spot, and
+a search for a place that cannot be reached explores the whole area first. The line reports, per method, calls,
+total time and the longest single call; for the A* searches also how many calls were real searches (rather than
+answers out of the previous search from the same node), how many nodes they explored, and how many explored
+everything reachable. It adds overhead to hot code, so switch it off again after collecting numbers.
 
 ### Stats
 
@@ -594,7 +617,8 @@ features, disable the mod.
 | `RecordTimings` | `false` | A profiling tool: switch on the game's per-component tick timers and write their report. Slows the game a little. |
 | `MetricsEveryTicks` | `3000` | While per-component timings are on: write them every N ticks. `0` = never (disables `RecordTimings` too). |
 | `GcReport` | `true` | Startup garbage collector report. |
-| `Diagnostics` | `false` | Timers for route map rebuilds and need selection. |
+| `LimitCatchUp` | `true` | After a long frame, run at most twice an ordinary frame's simulation time in the next one instead of everything the long frame missed. Pacing only; may differ between peers. |
+| `Diagnostics` | `false` | Timers for route map rebuilds, need selection, walker path finding and the game's A* searches. |
 | `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result. For testing. |
 | `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare. For testing. |
 | `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy. For testing. |

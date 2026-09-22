@@ -118,6 +118,10 @@ namespace LateGamePerformance
             {
                 Timing.Activate();
             }
+            if (config.LimitCatchUp && CatchUp.CreateFeature().Apply(HarmonyId))
+            {
+                CatchUp.Activate();
+            }
             if (config.SaveTiming)
             {
                 SaveTiming.CreateFeature().Apply(HarmonyId);
@@ -227,6 +231,11 @@ namespace LateGamePerformance
                 if (routeLine != null)
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {routeLine}");
+                }
+                string catchUpLine = CatchUp.TakeStatsLine();
+                if (catchUpLine != null)
+                {
+                    Log.Info($"Last {_config.StatsEveryTicks} ticks. {catchUpLine}");
                 }
                 if (_diagnosticsActive)
                 {

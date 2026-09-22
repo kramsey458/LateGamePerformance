@@ -20,7 +20,7 @@ In a big late-game colony the game does the same work again and again: finding j
 ## What to expect
 
 - Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes. 0.4.14 has been played since and reported as working well.
-- Preview 0.4.15 (pre-release): the district resource counts stay on worker threads with MixedStorage installed, and BeaverBuddies' water desync trace sees every tick again; not yet played. 0.4.10 to 0.4.14 (the latest release): one checkbox on the settings page; a faster tree search when lumberjack flags are full; plant water checks, terrain route maps and district resource counts on worker threads; autosaves and menu saves finish on a worker thread, so the freeze is roughly halved; the water map copy on a worker thread, faster soil scans and less water rendering work (0.4.14). See [TECHNICAL.md](TECHNICAL.md).
+- Preview 0.4.16 (pre-release): after a long frame (an autosave, a garbage collection) the simulation no longer catches up all at once, which in a logged session turned every such hitch into about a second of stutter; the opt-in diagnostics also time the game's own path searches; not yet played. Preview 0.4.15: the district resource counts stay on worker threads with MixedStorage installed, and BeaverBuddies' water desync trace sees every tick again; not yet played. 0.4.10 to 0.4.14 (the latest release): one checkbox on the settings page; a faster tree search when lumberjack flags are full; plant water checks, terrain route maps and district resource counts on worker threads; autosaves and menu saves finish on a worker thread, so the freeze is roughly halved; the water map copy on a worker thread, faster soil scans and less water rendering work (0.4.14). See [TECHNICAL.md](TECHNICAL.md).
 - Incremental garbage collection, in one 35-minute multiplayer session on two computers: 39 freezes with a median of 675 ms (about 30 s in total) on the computer without it, one collection frame over 50 ms on the computer with it.
 - It is aimed at large colonies. A small colony has little repeated work to remove, so you are unlikely to notice much.
 - How much you gain depends on your colony and your computer. There is no controlled frame rate benchmark yet.
@@ -40,7 +40,7 @@ One difference is documented: route maps are filled before the game first asks f
 
 Tested extensively against the game's own code and in play:
 
-- 215 automated checks pass against the installed game's assemblies, including 73 patch targets.
+- 230 automated checks pass against the installed game's assemblies, including 79 patch targets.
 - Rebuilt route maps are identical to the game's, node for node (9.5 million compared), and every map is complete when it is asked for.
 - The tree and plant search matches a model of the game's search in 4,000 random forests, with 0 differences.
 - Played in multiplayer sessions on two computers, and in the 350-beaver late-game save.
