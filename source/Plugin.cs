@@ -195,6 +195,14 @@ namespace LateGamePerformance
                 AnimatorCulling.Activate();
                 AnimatorCulling.ConfigureLod(config.AnimatorLod, config.AnimatorLodDistance);
             }
+            if (config.DeferPhysicsSync && PhysicsSync.CreateFeature().Apply(HarmonyId))
+            {
+                PhysicsSync.Activate();
+            }
+            if (config.ShaftAnimators && ShaftAnimators.CreateFeature().Apply(HarmonyId))
+            {
+                ShaftAnimators.Activate();
+            }
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
                 Timing.Activate();
@@ -377,6 +385,7 @@ namespace LateGamePerformance
                          {
                              WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine(),
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
+                             PhysicsSync.TakeStatsLine(), ShaftAnimators.TakeStatsLine(),
                              TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), HomeSearch.TakeStatsLine(),
                              TerrainReach.TakeStatsLine(), BehaviorLog.TakeStatsLine(), WalkerMove.TakeStatsLine(),
                              TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine()

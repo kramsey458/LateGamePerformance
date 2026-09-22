@@ -112,8 +112,10 @@ internal static class FeatureTests
     {
         check(AnimatorCulling.PoseInterval(0, 80) == 1 && AnimatorCulling.PoseInterval(79.9f, 80) == 1 &&
               AnimatorCulling.PoseInterval(80, 80) == 2 && AnimatorCulling.PoseInterval(159.9f, 80) == 2 &&
-              AnimatorCulling.PoseInterval(160, 80) == 4 && AnimatorCulling.PoseInterval(5000, 80) == 4,
-            "animator distance: every frame up to the distance, every second frame beyond it, every fourth beyond twice it");
+              AnimatorCulling.PoseInterval(160, 80) == 4 && AnimatorCulling.PoseInterval(239.9f, 80) == 4 &&
+              AnimatorCulling.PoseInterval(240, 80) == 8 && AnimatorCulling.PoseInterval(5000, 80) == 8,
+            "animator distance: every frame up to the distance, every second frame beyond it, every fourth beyond twice it, " +
+            "every eighth beyond three times it");
         // Over any four consecutive frames an object at interval 4 is due exactly once and one at interval 2 exactly
         // twice, whatever its hash, and interval 1 is every frame.
         Random random = new Random(3);

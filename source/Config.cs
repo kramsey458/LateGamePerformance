@@ -61,9 +61,14 @@ namespace LateGamePerformance
         public bool UiThrottle = true;
         public bool AnimatorCulling = true;
         // Rendering only: animated objects farther from the camera than this many tiles have their pose written
-        // every second frame, beyond twice it every fourth. 0 or AnimatorLod = false switches it off.
+        // every second frame, beyond twice it every fourth, beyond three times it every eighth. 0 or AnimatorLod = false
+        // switches it off.
         public bool AnimatorLod = true;
         public int AnimatorLodDistance = 80;
+        // User interface only: the collider sync before each selection raycast (and every 64th frame) instead of every
+        // frame. Presentation only: shaft animator speeds from one speed multiplier per tick.
+        public bool DeferPhysicsSync = true;
+        public bool ShaftAnimators = true;
         // Saving only: which thread writes the snapshot down, never what is written.
         public bool SaveSnapshot = true;
         public bool SaveSnapshotVerify = false;
@@ -150,6 +155,8 @@ namespace LateGamePerformance
             AnimatorCulling = Bool(values, nameof(AnimatorCulling), AnimatorCulling);
             AnimatorLod = Bool(values, nameof(AnimatorLod), AnimatorLod);
             AnimatorLodDistance = Math.Max(0, Int(values, nameof(AnimatorLodDistance), AnimatorLodDistance));
+            DeferPhysicsSync = Bool(values, nameof(DeferPhysicsSync), DeferPhysicsSync);
+            ShaftAnimators = Bool(values, nameof(ShaftAnimators), ShaftAnimators);
             SaveSnapshot = Bool(values, nameof(SaveSnapshot), SaveSnapshot);
             SaveSnapshotVerify = Bool(values, nameof(SaveSnapshotVerify), SaveSnapshotVerify);
             Timing = Bool(values, nameof(Timing), Timing);
@@ -176,6 +183,7 @@ namespace LateGamePerformance
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
                    $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, HomeSearchVerify={HomeSearchVerify}, VerifyAll={VerifyAll}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, AnimatorLod={AnimatorLod}, AnimatorLodDistance={AnimatorLodDistance}, SaveSnapshot={SaveSnapshot}, SaveSnapshotVerify={SaveSnapshotVerify}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"DeferPhysicsSync={DeferPhysicsSync}, ShaftAnimators={ShaftAnimators}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, UnityMarkers={UnityMarkers}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }

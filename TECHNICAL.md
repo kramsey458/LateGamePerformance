@@ -881,8 +881,17 @@ picked up within a fraction of a second. The `SoundListener:` stats line says in
 `UiThrottle = true` (the default) covers two of the game's per-frame systems that only the screen reads:
 
 - `StatusAggregator.UpdateSingleton` goes through every status in the colony every frame to fill the alert lists
-  the top bar and the alert buttons read, about 0.35 ms per frame. It runs every fourth frame now; a status that
-  appears or clears reaches the alert count a few frames later. Removing a subject still updates the lists at once.
+  the top bar and the alert buttons read, about 0.35 ms per frame. It ran every fourth frame from 0.4.17 (still
+  114 us per frame on average in the 0.4.23 session) and runs every sixteenth since 0.4.28; a status that appears or
+  clears reaches the alert count up to sixteen frames (about a quarter of a second) later. Removing a subject still
+  updates the lists at once.
+- `DynamicStatusAggregator.UpdateSingleton` (0.4.28) does the same for the alerts that carry a value, a timed
+  activation's days left and a tragic death (48 us per frame in the 0.4.23 session). It runs every fourth frame, two
+  frames apart from the lists above so the two never share a frame. Its lists are read only by the alert panel's
+  rows (count, value, blinking and the warning sound) and by the alert button that selects the next subject; adding
+  a status and removing a subject still update them at once, and the value a row shows is read live from the status.
+  BeaverBuddies MultiColony's colony filter is a postfix on the aggregators' `IsVisible`, which runs on the frames
+  that rebuild.
 - `EntityPanel.UpdateSingleton` refreshes every fragment of the selected entity's panel every frame, the largest
   single source of garbage among the game's systems at about 120 KB/s. It runs every second frame now, and always
   on the frame a different entity is shown.
@@ -892,7 +901,8 @@ picked up within a fraction of a second. The `SoundListener:` stats line says in
   cost up to ten times an ordinary one. It runs every eighth tick (0.4.22). Selection is per player, so this
   status was never simulation state; the icon it toggles appears up to eight ticks later.
 
-The `UiThrottle:` stats line counts both. Neither is read by the simulation.
+The `UiThrottle:` stats line counts them, for example `status alert lists rebuilt in 590 of 9400 frames (alerts with
+a value in 2350 of 9400)`. None is read by the simulation.
 
 ### Animated objects off screen (on by default, new in 0.4.17)
 
@@ -921,6 +931,46 @@ every frame, so the pose written is the one the game would write on that frame, 
 where that is not visible. Anything closer is written every frame as before. The camera position is read once per
 frame and each object's once per 60 frames. The stats line counts the pose writes left out. Rendering only, like
 the rest of this feature.
+
+**A third tier and one check per frame (new in 0.4.28).** Beyond three times `AnimatorLodDistance` the pose is
+written every eighth frame. And the check no longer hooks `TimbermeshAnimator.UpdateAnimation` once per animator,
+which paid a Harmony call, a `ConditionalWeakTable` lookup (a lock under the game's Mono) and a walk over every
+renderer for destroyed ones, for every animator on every frame. One replacing prefix on
+`AnimatorRegistry.UpdateSingleton` walks the registry's own list exactly as the game does: the same
+`Time.deltaTime`, the same `(bool)` and `isActiveAndEnabled` checks in the same order, then `UpdateAnimation`'s own
+first check (enabled, speed not 0, an animation, not finished), compiled into one call. It calls the game's
+`UpdateAnimation` for every animator whose pose is due and on screen, and the game's `UpdateTime` alone (plus the
+final pose of an animation that just finished, as since 0.4.20) for the others; an animator that first check would
+leave alone is not called, since the game's call returns there. The distance tier is decided first and the
+renderers are asked only on the frames an animator is due. What the mod keeps about each animator sits in arrays
+aligned with the game's list: the game only appends (`Start`) and removes (`OnDestroy`, the rest moving down), so
+in a frame where a slot holds a different animator the entries from there on are noted once and each animator takes
+its own back. Nothing removed is kept after that frame, and everything is let go of when the game scene is unloaded.
+A renderer destroyed since its animator's list was made is noticed when it is asked (Unity throws, the list is made
+again), and the lists and positions are refreshed 300 to 599 and 30 to 59 frames apart, spread by the object, so the
+animators of a scene loaded in one frame do not all refresh together. If anything in the mod's part throws, the rest
+of that frame is the game's own calls, each animator updated once, and the game's loop runs from the next frame.
+The line now reads, for example:
+
+```
+[LateGamePerformance] Last 1000 ticks. AnimatorCulling: 3100000 animator updates; the pose was written in 1400000,
+left out in 90000 because no part of the object was on screen, and left out for objects far from the camera in
+620000 (written every 2nd frame), 540000 (every 4th) and 450000 (every 8th); their time kept running
+```
+
+The harness runs the prefix over the game's real `AnimatorRegistry` list holding real `TimbermeshAnimator` objects
+(Unity's parts, visibility and positions stood in for) beside a twin set driven the way the game's loop drives it,
+through additions, removals from the middle, an animator switched off and a forced failure mid-frame, and requires
+every `Time`, `RepeatedTime` and `PlayingFinished` to stay bit for bit the twin's, the game's update to run exactly
+for the animators due and on screen, and the final pose of an animation finishing on a left-out frame.
+
+Not done: keeping the vertex animators' material. `VertexAnimationUpdater` asks `renderer.material` on every update,
+which makes the renderer's own copy on first use and returns it afterwards, but only while nobody swaps the
+renderer's materials, and the game does: `MaterialColorer.SetCachedMaterialProperties` sets new shared materials on
+every mesh renderer under an object without an `EntityMaterials` component whenever it is highlighted or coloured
+(hover and selection highlighting, construction mode, lighting), after which `renderer.material` makes a new copy.
+Which models carry vertex animations is decided by the models, not the code, so a kept reference cannot be shown to
+stay the one drawn; if it did not, the animation would freeze on screen.
 
 ### Catch-up limit (on by default, new in 0.4.16)
 
@@ -1025,6 +1075,73 @@ heap's live size can be told from its garbage. **Write a memory snapshot file** 
 snapshot (`Unity.Profiling.Memory.MemoryProfiler.TakeSnapshot`, managed and native objects) into
 `Documents\Timberborn\LateGamePerformance\heap-<time>.snap`, which opens in Unity's Memory Profiler package and
 names every object by type; the log says whether this build of the engine wrote one. Measurement only.
+
+### Colliders synced only when a selection needs them (on by default, new in 0.4.28)
+
+Every frame `TransformSyncServiceUnityAdapter.LateUpdate` (Timberborn.Physics) calls `Physics.SyncTransforms()`,
+which hands every transform moved since the last sync to the physics engine. The game asks physics one question
+only: the selection raycast, `SelectableObjectRaycaster`'s private `TryHitSelectableObject`, the one
+`Physics.Raycast` in the game's code, which the cursor tool (on a click), the building placement and preview
+pickers, the zipline, transmitter, character control and duplication tools reach through its public overloads, as
+does BeaverBuddies' player pointer (ten times a second in multiplayer). Nothing in the game has a `Rigidbody`,
+calls `Physics.Simulate` or reads a collider otherwise, and none of the other enabled mods uses physics. But every
+walking beaver and every status icon carries a collider without a `Rigidbody`, a static collider in the engine's
+terms, and moving static colliders is the engine's expensive case. In the 0.4.23 session Unity's PreLateUpdate,
+where this sync runs, grew from 1.4 to 5.5 ms per frame over the session, following the game clock (the evening
+commute, the start of work, the drought) rather than the camera or the tick. This sync is the suspect; it has not
+been measured on its own yet, and the stats line below samples what it costs.
+
+`DeferPhysicsSync = true` (the default) leaves the per-frame sync out and runs it right before a selection raycast
+whenever one was left out since the last sync, so every raycast sees the colliders where their objects are at that
+moment. The first frame and every 64th after it still sync, timed for the stats line, which also keeps the colliders
+at most about a second behind for anything that might ask without a raycast. The physics step in `FixedUpdate`
+syncs the same transforms before it simulates, so with the per-frame sync gone the cost would only move there:
+while the feature is on, `Physics.simulationMode` is `Script` (nothing simulates), and the previous mode is put back
+if the feature turns off. The startup line gives the previous mode and `Physics.autoSyncTransforms` (when true,
+queries also sync on their own). A raycast made after this frame's ticks sees this frame's positions rather than the
+last drawn frame's, a fraction of a tile for a walking beaver; which object a click selects is otherwise unchanged.
+While a building or area tool is out its picker can raycast every frame, and those frames sync as before; so do
+BeaverBuddies' pointer frames in multiplayer, about one in six at 60 frames per second. If anything
+throws, the colliders are synced, the simulation mode is put back and the game syncs every frame again.
+
+One caller of the same raycast is not a selection: the audio listener. `SoundListener.LateUpdateSingleton` casts a
+ray from the screen centre through `BlockObjectRaycaster` on every frame the camera moves (every frame with
+`SoundListener = false`), which would bring the sync back on all those frames. Its answer is the first block object
+along the ray: `BlockObjectRaycaster` steps through anything else it hits (a beaver, an icon) by casting again with
+that object on the ignore layer, and block objects do not move once placed, so a ray inside the listener's update is
+left on the last sync (a prefix and finalizer on that method mark it; an optional patch). Sound only; the line counts
+those rays.
+
+```
+[LateGamePerformance] Last 1000 ticks. PhysicsSync: the per-frame collider sync was left out in 5480 of 5570 frames;
+one sync costs about 2.100 ms (sampled every 64th frame, longest 4.800 ms); 3 syncs before a selection raycast
+(6.5 ms in total); 1900 audio listener rays left on the last sync
+```
+
+A sampled sync covers what moved over up to 64 frames, which for walking beavers is about what one frame's sync
+covered, so "one sync costs about" is close to what every frame paid before. User interface only. The harness checks
+the rule (the first and every 64th frame, one sync before a raycast after a frame that left it out, none after a
+frame that synced), the prefixes over 128 frames with a listener ray on every frame, a sync that throws, and that
+all three targets resolve.
+
+### Shaft animator speeds once per tick (on by default, new in 0.4.28)
+
+Every tick `ModularShaftAnimatorUpdater` goes through every finished shaft, and `ModularShaftAnimator.UpdateAnimation`
+switches its animators on or off and, while it is powered, sets each animator's speed to the node's power
+efficiency times `NonlinearAnimationManager.SpeedMultiplier`. That getter reads `Time.timeScale` three times and takes
+a `Mathf.Pow` on every call, once per animator (the singleton was 49 us per tick in the 0.4.23 session). The time
+scale cannot change inside one `Tick`: the game sets it only in `SpeedManager.LateUpdateSingleton` (the speed
+buttons), the main menu and the scene loader, and a shaft's update only assigns `IsAnimated` and its animators'
+`Enabled` and `Speed`. `ShaftAnimators = true` (the default) takes the multiplier once per `Tick` call, from the game's
+own getter on the first powered animator, and uses it for every animator of that call: the same float, the same
+assignments in the same order, the same `IsAnimated`. Outside the tick (a shaft's model rebuilt, a shaft finished)
+the game's own method runs. A prefix and finalizer on the tick mark it; a replacing prefix on `UpdateAnimation` does
+the rest. If anything throws, the feature is off and the game's method runs (every assignment already made is one it
+makes again). The `ShaftAnimators:` line counts ticks, shafts and animator speeds set. Presentation only: an
+animator's speed is how fast a model turns on screen, and it already differs between players at different game
+speeds. The harness runs the mod's method on the game's real shaft, mechanical node, graph (with a battery's share)
+and blockable object against a model of the game's method, requiring the same assignments bit for bit over three
+ticks at different speeds, and the game's real method on unpowered and blocked shafts.
 
 ### Diagnostics (off by default)
 
@@ -1196,11 +1313,13 @@ search check asks the game's own dwelling predicates. The game's own versions of
 | `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well and compare every entity; the mod's is saved. Measurement only. For testing. |
 | `SoundListener` | `true` | Place the audio listener when the camera moved, while it glides, and every tenth frame otherwise. Sound only; may differ between peers. |
 | `AnimatorCulling` | `true` | Leave out the pose update of animated objects with no renderer on screen; their time keeps running. Rendering only; may differ between peers. |
-| `UiThrottle` | `true` | Status alert lists every fourth frame, the selected entity's panel every second frame. Interface only; may differ between peers. |
+| `UiThrottle` | `true` | Status alert lists every sixteenth frame (alerts with a value every fourth), the selected entity's panel every second frame, the top bar every fourth. Interface only; may differ between peers. |
 | `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
 | `VerifyAll` | `false` | Every verify mode above at once, for one correctness session. Measurement only; slower. Also a box on the settings page. |
-| `AnimatorLod` | `true` | Animated objects far from the camera have their pose written every second or fourth frame; their time keeps running. Rendering only; may differ between peers. |
-| `AnimatorLodDistance` | `80` | Tiles from the camera beyond which the above applies (twice it: every fourth frame). `0` switches it off. |
+| `AnimatorLod` | `true` | Animated objects far from the camera have their pose written every second, fourth or eighth frame; their time keeps running. Rendering only; may differ between peers. |
+| `AnimatorLodDistance` | `80` | Tiles from the camera beyond which the above applies (twice it: every fourth frame; three times it: every eighth). `0` switches it off. |
+| `DeferPhysicsSync` | `true` | Sync the colliders with their objects right before each selection raycast and every 64th frame instead of every frame, with the physics simulation mode set to Script. Interface only; may differ between peers. |
+| `ShaftAnimators` | `true` | Shaft and gear animator speeds from one speed multiplier per tick instead of one per animator; the same speeds. Presentation only; may differ between peers. |
 | `UnityMarkers` | the list above | The engine's profiler counters sampled per frame while `Diagnostics` is on, separated by `;`. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
