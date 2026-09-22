@@ -33,8 +33,9 @@ namespace LateGamePerformance
         public bool HomeSearch => true;
 
         public bool HaulCache => true;
-        // Nothing cached survives a tick: the conservative choice, and the only one ever played.
-        public int HaulCacheFlushEveryTicks => 1;
+        // 0 from 0.4.28: nothing is dropped on a timer, a building's hauling jobs are kept until one of their inputs
+        // changes (see HaulCache). Up to 0.4.27 it was 1: nothing cached survived a tick.
+        public int HaulCacheFlushEveryTicks => 0;
         public bool RouteMaps => true;
         public bool YielderSearch => true;
 

@@ -3,9 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
 using HarmonyLib;
+using Timberborn.Common;
 using Timberborn.Goods;
 using Timberborn.InventorySystem;
 using Timberborn.ResourceCountingSystem;
@@ -13,92 +12,58 @@ using Timberborn.ResourceCountingSystem;
 namespace LateGamePerformance
 {
     // Every tick each district adds up, for every good, what all its storage holds and how much room it has
-    // (DistrictResourceCounter.Tick -> UpdateCounters): 1.07 ms per tick in the colony this was measured in. The
-    // numbers feed the top bar, the stockpile tooltips and, inside the simulation, the automation resource counter,
-    // so they have to be the game's numbers at the game's moment; counting later or less often is not an option.
+    // (DistrictResourceCounter.Tick -> UpdateCounters). The numbers feed the top bar, the stockpile tooltips and,
+    // inside the simulation, the automation resource counter, so they have to be the game's numbers at the game's
+    // moment; counting later or less often is not an option.
     //
-    // Most of the cost is the capacity question, which the game asks per inventory per allowed good with a linear
-    // search inside (a warehouse that allows 30 goods does some 900 string comparisons to report one number).
-    // Both questions are pure reads of the inventory, and the answer is a sum of whole numbers, which comes out the
-    // same in any order. So the inventories are dealt out to worker threads, each worker asks the game's own
-    // questions (Inventory.Stock, Gives, PublicInput, GetCapacity) and adds up into its own tables, and the main
-    // thread adds the workers' tables into the game's tables. Then the two steps that go through interfaces a mod
-    // may implement (goods inside workshops, goods being carried) run as the game's own code on the main thread.
+    // Most of the cost is the room question. The game asks it per inventory per allowed good (Inventory.GetCapacity:
+    // LimitedAmount = Min(the capacity rule's AllowedAmount, StorableGoodRegistry.GetAmount)), and GetAmount searches
+    // the allowed goods from the start for the first entry with that id, so a warehouse that allows 25 goods does
+    // some 300 string comparisons to report one number; CapacityCounter then asks Gives (a set lookup) per good.
     //
-    // What may run on a worker is decided per inventory. GetCapacity asks the inventory's IGoodDisallower, which a
-    // mod may implement; only the game's four implementations, which were read and are pure, go to workers. Any
-    // other inventory is counted on the main thread with the same code. And if another mod has patched one of the
-    // methods the workers call, everything stays on the main thread (the game's own code runs).
+    // Here (0.4.28), one walk per inventory. An inventory's allowed goods are only ever added to, in
+    // Inventory.Initialize: they live in a StorableGoodRegistry (the list, its input and output sets) that nothing
+    // else can reach, and it has no way to remove or change an entry. So for each inventory the mod asks the game
+    // once, in the list's order, for each allowed good's id, what GetAmount returns for it (the first entry with that
+    // id) and whether the inventory Gives it, and keeps the answers until the inventory holds a different registry
+    // or its registry a different number of goods (a second Initialize), or the inventory itself is a different
+    // object. Each count then does what GetCapacity and CapacityCounter do, in their order, with those answers:
+    // skip an inventory with ignorable capacity (read every time; the emptying registry switches it), then for every
+    // allowed good call the real AllowedAmount of the inventory's current capacity rule (any other mod's patch on it
+    // runs, as it would for the game), take the Min with the kept amount, and add it when it is above 0 and the good
+    // is given. The stock part is the game's own loop. Both write straight into the game's tables, stock for every
+    // inventory first and then room, in the district's set order, with the same additions: the tables end up equal
+    // to the game's, down to which keys they hold and the order they were added in.
     //
-    // A key the game would have stored as 0 may be absent here and the other way round; the game only ever reads
-    // these tables with "value or 0", so that cannot be observed.
+    // It runs on the main thread, for every district however small. From 0.4.13 to 0.4.27 the inventories were dealt
+    // out to worker threads (districts under 96 inventories were left to the game), each thread still doing the
+    // game's search per good. Measured in 0.4.23 (236 inventories, 7 threads) that took 0.66-0.93 ms per count with
+    // a 14.6 ms maximum, no better than the game's own loop: the threads had to be woken every tick, and
+    // MixedStorage's allocation rule looks each storage up in a ConditionalWeakTable on every AllowedAmount call,
+    // which takes a lock under Mono, so the threads queued on it. With one walk per inventory the work left is a few
+    // thousand calls. The tests time it at the logged colony's size (236 inventories, 38 warehouses of 25 goods,
+    // under .NET 8, several runs): the game's loop 95-160 us, the walk on the main thread 40-65 us; the same walk on
+    // 7 worker threads 25-35 us only while they are still awake, 140-350 us once they have gone to sleep between
+    // counts (as they do between ticks), and 115-140 us even awake once every warehouse's rule takes a shared lock.
+    //
+    // If another mod patches a method whose answers are kept or stood in for (GetCapacity, LimitedAmount, Gives,
+    // the allowed and output goods, GetAmount) or the game's counting itself (StockCounter, CapacityCounter), the
+    // feature stands down with one log line and the game's own count runs.
     internal static class DistrictCounts
     {
-        // Below this many inventories the game's own loop is as fast as starting workers.
-        private const int MinInventories = 96;
-
-        private static readonly string[] PureDisallowers =
+        // What the mod keeps of one inventory's allowed goods (see above).
+        internal sealed class AllowedGoods
         {
-            "Timberborn.InventorySystem.NullGoodDisallower",
-            "Timberborn.InventorySystem.SingleGoodAllower",
-            "Timberborn.Workshops.RecipeGoodDisallower",
-            "Timberborn.Yielding.InRangeYielderGoodAllower"
-        };
-
-        internal sealed class Tally
-        {
-            public readonly Dictionary<string, int> OutputStock = new Dictionary<string, int>();
-            public readonly Dictionary<string, int> InputOutputStock = new Dictionary<string, int>();
-            public readonly Dictionary<string, int> OutputCapacity = new Dictionary<string, int>();
-            public readonly Dictionary<string, int> InputOutputCapacity = new Dictionary<string, int>();
-            private readonly List<GoodAmount> _capacity = new List<GoodAmount>();
-
-            public void Clear()
-            {
-                OutputStock.Clear();
-                InputOutputStock.Clear();
-                OutputCapacity.Clear();
-                InputOutputCapacity.Clear();
-                _capacity.Clear();
-            }
-
-            // StockCounter.CountInventoryStock and CapacityCounter.CountInventoryCapacity, for one inventory.
-            public void Count(Inventory inventory)
-            {
-                bool publicInput = inventory.PublicInput;
-                foreach (GoodAmount good in inventory.Stock)
-                {
-                    if (inventory.Gives(good.GoodId))
-                    {
-                        Add(publicInput ? InputOutputStock : OutputStock, good.GoodId, good.Amount);
-                    }
-                }
-                _capacity.Clear();
-                inventory.GetCapacity(_capacity);
-                foreach (GoodAmount good in _capacity)
-                {
-                    if (inventory.Gives(good.GoodId))
-                    {
-                        Add(publicInput ? InputOutputCapacity : OutputCapacity, good.GoodId, good.Amount);
-                    }
-                }
-                _capacity.Clear();
-            }
-
-            public static void Add(Dictionary<string, int> table, string goodId, int amount)
-            {
-                table.TryGetValue(goodId, out int sum);
-                table[goodId] = unchecked(sum + amount);
-            }
-
-            public static void AddAll(Dictionary<string, int> target, Dictionary<string, int> source)
-            {
-                foreach (KeyValuePair<string, int> pair in source)
-                {
-                    Add(target, pair.Key, pair.Value);
-                }
-            }
+            public StorableGoodRegistry Registry;
+            public int Count;
+            public string[] Ids = new string[0];
+            public int[] Amounts = new int[0];
+            public bool[] Gives = new bool[0];
+            public long Seen;
         }
+
+        // Kept lists not used by any count for this many counts are dropped (an inventory that was destroyed).
+        private const int PruneEveryCounts = 4096;
 
         private static Func<object, DistrictInventoryRegistry> _registryOf;
         private static Func<object, object> _stockCounterOf;
@@ -109,17 +74,16 @@ namespace LateGamePerformance
         private static Func<object, Dictionary<string, int>> _outputCapacityOf;
         private static Func<object, Dictionary<string, int>> _inputOutputCapacityOf;
         private static Func<object, IGoodDisallower> _disallowerOf;
+        private static Func<object, StorableGoodRegistry> _allowedGoodsOf;
+        private static Func<object, bool> _ignorableCapacityOf;
         private static Action<object> _updateProcessed;
         private static Action<object> _updateCarried;
-        private static MethodInfo _gameUpdateStock;
-        private static MethodInfo _gameUpdateCapacity;
-        private static MethodBase[] _workerMethods = new MethodBase[0];
+        private static Action<object, ReadOnlyHashSet<Inventory>> _gameUpdateStock;
+        private static Action<object, ReadOnlyHashSet<Inventory>> _gameUpdateCapacity;
+        private static MethodBase[] _standInFor = new MethodBase[0];
 
-        private static readonly Dictionary<Type, bool> PureByType = new Dictionary<Type, bool>();
-        private static Inventory[] _parallel = new Inventory[0];
-        private static Inventory[] _direct = new Inventory[0];
-        private static Tally[] _tallies = new Tally[0];
-        private static readonly Tally MainTally = new Tally();
+        private static readonly Dictionary<Inventory, AllowedGoods> Allowed = new Dictionary<Inventory, AllowedGoods>();
+        private static readonly List<Inventory> PruneScratch = new List<Inventory>();
 
         private static bool _active;
         private static bool _checkedForeignPatches;
@@ -130,21 +94,18 @@ namespace LateGamePerformance
         }
 
         private static bool _verify;
-        private static int _workers;
+        private static long _stamp;
 
         private static long _passes;
-        private static long _smallPasses;
         private static long _inventories;
-        private static long _directInventories;
+        private static long _listsRead;
         private static long _stopwatchTicks;
+        private static long _verifyStopwatchTicks;
         private static long _verifyMismatches;
 
         public static Feature CreateFeature(Config config)
         {
             _verify = config.DistrictCountsVerify;
-            _workers = config.RouteMapsWorkers > 0
-                ? Math.Min(config.RouteMapsWorkers, 32)
-                : Math.Max(1, Math.Min(7, Environment.ProcessorCount / 2 - 1));
             Feature feature = new Feature { Name = "DistrictCounts" };
             // Tick calls UpdateCounters and nothing else; both are patched so that it does not matter whether the
             // runtime has inlined the one into the other.
@@ -180,7 +141,14 @@ namespace LateGamePerformance
         {
             _active = false;
             _checkedForeignPatches = false;
-            _passes = _smallPasses = _inventories = _directInventories = _stopwatchTicks = _verifyMismatches = 0;
+            Allowed.Clear();
+            _passes = _inventories = _listsRead = _stopwatchTicks = _verifyStopwatchTicks = _verifyMismatches = 0;
+        }
+
+        // A new game scene: the previous scene's inventories must not be kept alive by this cache.
+        public static void SceneCreated()
+        {
+            Allowed.Clear();
         }
 
         // Resolves everything this feature touches; throws if the game no longer matches.
@@ -199,14 +167,12 @@ namespace LateGamePerformance
             _outputCapacityOf = Reflect.FieldGetter<Dictionary<string, int>>(capacity, "_outputCapacity");
             _inputOutputCapacityOf = Reflect.FieldGetter<Dictionary<string, int>>(capacity, "_inputOutputCapacity");
             _disallowerOf = Reflect.FieldGetter<IGoodDisallower>(typeof(Inventory), "_goodDisallower");
+            _allowedGoodsOf = Reflect.FieldGetter<StorableGoodRegistry>(typeof(Inventory), "_allowedGoods");
+            _ignorableCapacityOf = Reflect.FieldGetter<bool>(typeof(Inventory), "_ignorableCapacity");
             _updateProcessed = Reflect.InstanceCall<Action<object>>(Parameterless(processed, "UpdateStock"));
             _updateCarried = Reflect.InstanceCall<Action<object>>(Parameterless(counter, "UpdateCarriedGoods"));
-            _gameUpdateStock = AccessTools.Method(stock, "UpdateStock");
-            _gameUpdateCapacity = AccessTools.Method(capacity, "UpdateCapacity");
-            if (_gameUpdateStock == null || _gameUpdateCapacity == null)
-            {
-                throw new MissingMethodException("StockCounter.UpdateStock / CapacityCounter.UpdateCapacity");
-            }
+            _gameUpdateStock = Reflect.InstanceCall<Action<object, ReadOnlyHashSet<Inventory>>>(AccessTools.Method(stock, "UpdateStock"));
+            _gameUpdateCapacity = Reflect.InstanceCall<Action<object, ReadOnlyHashSet<Inventory>>>(AccessTools.Method(capacity, "UpdateCapacity"));
 
             // The shape of the game's counting this feature stands in for. If a game update adds a step to
             // UpdateCounters, these fields change and the feature does not start.
@@ -221,28 +187,27 @@ namespace LateGamePerformance
                 throw new MissingMemberException($"DistrictResourceCounter has {fields} fields where 7 were expected");
             }
 
-            List<MethodBase> workerMethods = new List<MethodBase>
+            List<MethodBase> standInFor = new List<MethodBase>
             {
                 AccessTools.Method(typeof(Inventory), "GetCapacity"),
                 AccessTools.Method(typeof(Inventory), "LimitedAmount"),
                 AccessTools.Method(typeof(Inventory), "Gives"),
-                AccessTools.Method(typeof(Inventory), "AmountInStock", new[] { typeof(string) }),
-                AccessTools.PropertyGetter(typeof(Inventory), "Stock"),
-                AccessTools.PropertyGetter(typeof(Inventory), "PublicInput")
+                AccessTools.PropertyGetter(typeof(Inventory), "AllowedGoods"),
+                AccessTools.PropertyGetter(typeof(Inventory), "OutputGoods"),
+                AccessTools.Method(typeof(StorableGoodRegistry), "GetAmount"),
+                AccessTools.PropertyGetter(typeof(StorableGoodRegistry), "Goods"),
+                AccessTools.PropertyGetter(typeof(StorableGoodRegistry), "OutputGoods")
             };
-            foreach (string name in PureDisallowers)
-            {
-                Type type = Reflect.GameType(name);
-                workerMethods.Add(AccessTools.Method(type, "AllowedAmount"));
-            }
-            foreach (MethodBase method in workerMethods)
+            standInFor.AddRange(AccessTools.GetDeclaredMethods(stock));
+            standInFor.AddRange(AccessTools.GetDeclaredMethods(capacity));
+            foreach (MethodBase method in standInFor)
             {
                 if (method == null)
                 {
-                    throw new MissingMethodException("a method the workers call was not found");
+                    throw new MissingMethodException("a method this feature stands in for was not found");
                 }
             }
-            _workerMethods = workerMethods.ToArray();
+            _standInFor = standInFor.ToArray();
         }
 
         private static Type FieldType(Type type, string name)
@@ -265,6 +230,8 @@ namespace LateGamePerformance
             return method;
         }
 
+        // "ms each" is the stock and room count, the part the mod does instead of the game; the verify part times the
+        // game's own count of the same (StockCounter.UpdateStock + CapacityCounter.UpdateCapacity), so the two compare.
         public static string TakeStatsLine()
         {
             if (!_active && _passes == 0)
@@ -272,13 +239,17 @@ namespace LateGamePerformance
                 return null;
             }
             double ms = _stopwatchTicks * 1000.0 / Stopwatch.Frequency;
+            double gameMs = _verifyStopwatchTicks * 1000.0 / Stopwatch.Frequency;
             string line = string.Format(CultureInfo.InvariantCulture,
-                "DistrictCounts: {0} counts of {1} inventories on {2} workers in {3:0.0} ms ({4:0.000} ms each); " +
-                "{5} inventories per count on the main thread; {6} counts of small districts left to the game{7}",
-                _passes, _passes > 0 ? _inventories / _passes : 0, _workers, ms, _passes > 0 ? ms / _passes : 0,
-                _passes > 0 ? _directInventories / _passes : 0, _smallPasses,
-                _verify ? $"; verify mismatches {_verifyMismatches}" : "");
-            _passes = _smallPasses = _inventories = _directInventories = _stopwatchTicks = 0;
+                "DistrictCounts: {0} counts of {1} inventories on the main thread in {2:0.0} ms ({3:0.000} ms each); " +
+                "allowed goods read anew for {4} inventories{5}",
+                _passes, _passes > 0 ? _inventories / _passes : 0, ms, _passes > 0 ? ms / _passes : 0, _listsRead,
+                _verify
+                    ? string.Format(CultureInfo.InvariantCulture,
+                        "; verify mismatches {0}; the game's own count of the same took {1:0.0} ms ({2:0.000} ms each)",
+                        _verifyMismatches, gameMs, _passes > 0 ? gameMs / _passes : 0)
+                    : "");
+            _passes = _inventories = _listsRead = _stopwatchTicks = _verifyStopwatchTicks = 0;
             return line;
         }
 
@@ -286,17 +257,17 @@ namespace LateGamePerformance
         [HarmonyPriority(Priority.Last)]
         internal static bool TickPrefix(object __instance)
         {
-            return Update(__instance, false);
+            return Update(__instance);
         }
 
         // ReSharper disable once InconsistentNaming
         [HarmonyPriority(Priority.Last)]
         internal static bool UpdatePrefix(object __instance)
         {
-            return Update(__instance, true);
+            return Update(__instance);
         }
 
-        private static bool Update(object __instance, bool countSmall)
+        private static bool Update(object __instance)
         {
             if (!_active)
             {
@@ -307,18 +278,12 @@ namespace LateGamePerformance
                 if (!_checkedForeignPatches)
                 {
                     _checkedForeignPatches = true;
-                    List<string> accepted = new List<string>();
-                    string patched = ForeignPatch(accepted);
-                    foreach (string reviewed in accepted)
-                    {
-                        Log.Info($"DistrictCounts: another mod patches {reviewed}; that patch was read and is safe to " +
-                                 "run on worker threads, so counting stays on them.");
-                    }
+                    string patched = ForeignPatch(null);
                     if (patched != null)
                     {
                         _active = false;
-                        Log.Info($"DistrictCounts: another mod patches {patched}, which this feature would call on " +
-                                 "worker threads. The game's own counting runs instead. The numbers are the same.");
+                        Log.Info($"DistrictCounts: another mod patches {patched}, which this feature stands in for. " +
+                                 "The game's own counting runs instead. The numbers are the same.");
                         return true;
                     }
                 }
@@ -327,17 +292,11 @@ namespace LateGamePerformance
                 {
                     return true;
                 }
-                var inventories = registry.Inventories;
-                if (inventories.Count < MinInventories)
-                {
-                    if (countSmall)
-                    {
-                        _smallPasses++;
-                    }
-                    return true;
-                }
+                ReadOnlyHashSet<Inventory> inventories = registry.Inventories;
+                _stamp++;
                 long started = Stopwatch.GetTimestamp();
-                Count(__instance, inventories.Count, inventories.GetEnumerator());
+                Count(__instance, inventories);
+                _stopwatchTicks += Stopwatch.GetTimestamp() - started;
                 if (_verify)
                 {
                     Verify(__instance, inventories);
@@ -345,7 +304,11 @@ namespace LateGamePerformance
                 _updateProcessed(_processedCounterOf(__instance));
                 _updateCarried(__instance);
                 _passes++;
-                _stopwatchTicks += Stopwatch.GetTimestamp() - started;
+                _inventories += inventories.Count;
+                if (_stamp % PruneEveryCounts == 0)
+                {
+                    Prune();
+                }
                 return false;
             }
             catch (Exception exception)
@@ -358,102 +321,30 @@ namespace LateGamePerformance
             }
         }
 
-        // Another mod's patch that was read and may run on worker threads: target, Harmony id, patch method.
-        //
-        // MixedStorage (kyler.mixedstorage, read at 0.5.7): LimitPatch.Prefix answers AllowedAmount for its multi-good
-        // warehouses and piles from the allocation the player set and Inventory.Capacity. It only reads, except for
-        // its own per-storage cache of limits, which it rebuilds from those same two values; each storage belongs to
-        // one inventory, and each inventory is counted by exactly one worker, so no two threads touch one cache. The
-        // allocation only changes on the main thread (the panel, loading), never during a count.
+        // Another mod's patch that was read and may stay: target, Harmony id, patch method. None since 0.4.28: the
+        // count now calls the capacity rules on the main thread exactly as the game does, so a patch on
+        // AllowedAmount runs for the mod as it would for the game. (MixedStorage's LimitPatch on
+        // SingleGoodAllower.AllowedAmount was listed here from 0.4.15 as safe on worker threads.)
         internal static readonly (string Target, string Owner, string Patch)[] ReviewedPatches =
-        {
-            ("SingleGoodAllower.AllowedAmount", "kyler.mixedstorage", "MixedStorage.LimitPatch.Prefix")
-        };
+            new (string Target, string Owner, string Patch)[0];
 
-        // Every patch on a method, as (Harmony id, "Namespace.Type.Method" of the patch); swapped by the tests,
-        // where Harmony's patch registry cannot run.
-        internal static Func<MethodBase, IEnumerable<(string Owner, string Patch)>> PatchesOn = method =>
+        // Every patch on a method; swapped by the tests. Shared with HaulCache (ForeignPatches).
+        internal static Func<MethodBase, IEnumerable<(string Owner, string Patch)>> PatchesOn
         {
-            Patches info = Harmony.GetPatchInfo(method);
-            if (info == null)
-            {
-                return null;
-            }
-            List<(string, string)> all = new List<(string, string)>();
-            foreach (IEnumerable<Patch> kind in new[] { info.Prefixes, info.Postfixes, info.Transpilers, info.Finalizers })
-            {
-                foreach (Patch patch in kind)
-                {
-                    all.Add((patch.owner, patch.PatchMethod.DeclaringType?.FullName + "." + patch.PatchMethod.Name));
-                }
-            }
-            return all;
-        };
-
-        // The first patch by another mod that has not been read, or null. Reviewed ones are listed in `accepted`.
-        internal static string ForeignPatch(List<string> accepted)
-        {
-            foreach (MethodBase method in _workerMethods)
-            {
-                IEnumerable<(string Owner, string Patch)> patches = PatchesOn(method);
-                if (patches == null)
-                {
-                    continue;
-                }
-                string target = $"{method.DeclaringType?.Name}.{method.Name}";
-                foreach ((string owner, string patch) in patches)
-                {
-                    if (owner.StartsWith(Plugin.HarmonyId, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-                    if (Array.Exists(ReviewedPatches, reviewed =>
-                            reviewed.Target == target && reviewed.Owner == owner && reviewed.Patch == patch))
-                    {
-                        accepted?.Add($"{target} ({owner}, {patch})");
-                        continue;
-                    }
-                    return $"{target} ({owner}, {patch})";
-                }
-            }
-            return null;
+            get => ForeignPatches.PatchesOn;
+            set => ForeignPatches.PatchesOn = value;
         }
 
-        private static void Count(object counter, int count, HashSet<Inventory>.Enumerator enumerator)
+        // The first patch by another mod on a method this feature stands in for that has not been read, or null.
+        // Reviewed ones are listed in `accepted`.
+        internal static string ForeignPatch(List<string> accepted)
         {
-            if (_parallel.Length < count)
-            {
-                _parallel = new Inventory[count + count / 4];
-                _direct = new Inventory[count + count / 4];
-            }
-            int parallel = 0, direct = 0;
-            while (enumerator.MoveNext())
-            {
-                Inventory inventory = enumerator.Current;
-                if (IsPure(_disallowerOf(inventory)))
-                {
-                    _parallel[parallel++] = inventory;
-                }
-                else
-                {
-                    _direct[direct++] = inventory;
-                }
-            }
+            return ForeignPatches.First(_standInFor, ReviewedPatches, accepted);
+        }
 
-            int workers = Math.Max(1, Math.Min(_workers, parallel));
-            Exception failure = CountParallel(_parallel, parallel, workers, out int used);
-            if (failure != null)
-            {
-                throw failure;
-            }
-            MainTally.Clear();
-            for (int i = 0; i < direct; i++)
-            {
-                MainTally.Count(_direct[i]);
-            }
-            Array.Clear(_parallel, 0, parallel);
-            Array.Clear(_direct, 0, direct);
-
+        // StockCounter.UpdateStock and then CapacityCounter.UpdateCapacity, with the kept allowed goods.
+        private static void Count(object counter, ReadOnlyHashSet<Inventory> inventories)
+        {
             object stockCounter = _stockCounterOf(counter);
             object capacityCounter = _capacityCounterOf(counter);
             Dictionary<string, int> outputStock = _outputStockOf(stockCounter);
@@ -462,73 +353,120 @@ namespace LateGamePerformance
             Dictionary<string, int> inputOutputCapacity = _inputOutputCapacityOf(capacityCounter);
             outputStock.Clear();
             inputOutputStock.Clear();
+            foreach (Inventory inventory in inventories)
+            {
+                CountStock(inventory, outputStock, inputOutputStock);
+            }
             outputCapacity.Clear();
             inputOutputCapacity.Clear();
-            for (int worker = -1; worker < used; worker++)
+            foreach (Inventory inventory in inventories)
             {
-                Tally tally = worker < 0 ? MainTally : _tallies[worker];
-                Tally.AddAll(outputStock, tally.OutputStock);
-                Tally.AddAll(inputOutputStock, tally.InputOutputStock);
-                Tally.AddAll(outputCapacity, tally.OutputCapacity);
-                Tally.AddAll(inputOutputCapacity, tally.InputOutputCapacity);
+                CountCapacity(inventory, AllowedOf(inventory), outputCapacity, inputOutputCapacity);
             }
-            _inventories += count;
-            _directInventories += direct;
         }
 
-        // Worker w counts items w, w + workers, w + 2 * workers... into its own tally, on this mod's own worker
-        // threads (TickWorkers). `used` is how many workers shared the count. Returns the first exception a worker
-        // hit, or null; it never throws.
-        internal static Exception CountParallel(Inventory[] items, int count, int workers, out int used)
+        // StockCounter.CountInventoryStock, for one inventory.
+        internal static void CountStock(Inventory inventory, Dictionary<string, int> output, Dictionary<string, int> inputOutput)
         {
-            if (_tallies.Length < workers)
+            foreach (GoodAmount good in inventory.Stock)
             {
-                Tally[] tallies = new Tally[workers];
-                for (int i = 0; i < workers; i++)
+                if (inventory.Gives(good.GoodId))
                 {
-                    tallies[i] = i < _tallies.Length ? _tallies[i] : new Tally();
+                    Add(inventory.PublicInput ? inputOutput : output, good.GoodId, good.Amount);
                 }
-                _tallies = tallies;
             }
-            Tally[] current = _tallies;
-            int shared = 1;
-            Exception failure = TickWorkers.Run(workers, (worker, sharing) =>
-            {
-                if (worker == 0)
-                {
-                    shared = sharing;
-                }
-                Tally tally = current[worker];
-                tally.Clear();
-                for (int i = worker; i < count; i += sharing)
-                {
-                    tally.Count(items[i]);
-                }
-            });
-            used = shared;
-            return failure;
         }
 
-        private static bool IsPure(IGoodDisallower disallower)
+        // Inventory.GetCapacity and CapacityCounter.CountInventoryCapacity, for one inventory, with its kept list.
+        internal static void CountCapacity(Inventory inventory, AllowedGoods allowed, Dictionary<string, int> output,
+            Dictionary<string, int> inputOutput)
         {
-            if (disallower == null)
+            if (_ignorableCapacityOf(inventory))
             {
-                return false;
+                return;
             }
-            Type type = disallower.GetType();
-            if (!PureByType.TryGetValue(type, out bool pure))
+            IGoodDisallower disallower = _disallowerOf(inventory);
+            string[] ids = allowed.Ids;
+            int[] amounts = allowed.Amounts;
+            bool[] gives = allowed.Gives;
+            for (int i = 0; i < allowed.Count; i++)
             {
-                pure = Array.IndexOf(PureDisallowers, type.FullName) >= 0;
-                PureByType[type] = pure;
+                int amount = Math.Min(disallower.AllowedAmount(ids[i]), amounts[i]);
+                if (amount > 0 && gives[i])
+                {
+                    Add(inventory.PublicInput ? inputOutput : output, ids[i], amount);
+                }
             }
-            return pure;
         }
 
-        // Lets the game count into its own tables, compares with what the mod had just written there, and puts the
-        // mod's numbers back: the setting is each player's own, so in co-op the one player who has it on must read the
-        // same numbers as the others (up to 0.4.26 a difference left the game's in the tables). Refilled in the order
-        // they were copied out, so the tables end up as they are with the setting off.
-        private static void Verify(object counter, object inventories)
+        // The kept list of an inventory, read from the game again if its allowed goods are not the ones it was read
+        // from. Main thread only.
+        internal static AllowedGoods AllowedOf(Inventory inventory)
+        {
+            if (!Allowed.TryGetValue(inventory, out AllowedGoods allowed))
+            {
+                allowed = new AllowedGoods();
+                Allowed[inventory] = allowed;
+            }
+            StorableGoodRegistry registry = _allowedGoodsOf(inventory);
+            if (!ReferenceEquals(allowed.Registry, registry) || allowed.Count != registry.Goods.Count)
+            {
+                ReadAllowed(inventory, registry, allowed);
+            }
+            allowed.Seen = _stamp;
+            return allowed;
+        }
+
+        private static void ReadAllowed(Inventory inventory, StorableGoodRegistry registry, AllowedGoods allowed)
+        {
+            ReadOnlyList<StorableGoodAmount> goods = registry.Goods;
+            int count = goods.Count;
+            if (allowed.Ids.Length < count)
+            {
+                allowed.Ids = new string[count];
+                allowed.Amounts = new int[count];
+                allowed.Gives = new bool[count];
+            }
+            for (int i = 0; i < count; i++)
+            {
+                string goodId = goods[i].StorableGood.GoodId;
+                allowed.Ids[i] = goodId;
+                allowed.Amounts[i] = registry.GetAmount(goodId);
+                allowed.Gives[i] = inventory.Gives(goodId);
+            }
+            allowed.Registry = registry;
+            allowed.Count = count;
+            _listsRead++;
+        }
+
+        private static void Prune()
+        {
+            PruneScratch.Clear();
+            foreach (KeyValuePair<Inventory, AllowedGoods> pair in Allowed)
+            {
+                if (pair.Value.Seen < _stamp - PruneEveryCounts)
+                {
+                    PruneScratch.Add(pair.Key);
+                }
+            }
+            foreach (Inventory inventory in PruneScratch)
+            {
+                Allowed.Remove(inventory);
+            }
+            PruneScratch.Clear();
+        }
+
+        internal static void Add(Dictionary<string, int> table, string goodId, int amount)
+        {
+            table.TryGetValue(goodId, out int sum);
+            table[goodId] = unchecked(sum + amount);
+        }
+
+        // Lets the game count into its own tables (timed), compares with what the mod had just written there, and
+        // puts the mod's numbers back: the setting is each player's own, so in co-op the one player who has it on must
+        // read the same numbers as the others (up to 0.4.26 a difference left the game's in the tables). Refilled in
+        // the order they were copied out, so the tables end up as they are with the setting off.
+        private static void Verify(object counter, ReadOnlyHashSet<Inventory> inventories)
         {
             object stockCounter = _stockCounterOf(counter);
             object capacityCounter = _capacityCounterOf(counter);
@@ -540,8 +478,10 @@ namespace LateGamePerformance
             {
                 mine[i] = new Dictionary<string, int>(tables[i](i < 2 ? stockCounter : capacityCounter));
             }
-            _gameUpdateStock.Invoke(stockCounter, new[] { inventories });
-            _gameUpdateCapacity.Invoke(capacityCounter, new[] { inventories });
+            long started = Stopwatch.GetTimestamp();
+            _gameUpdateStock(stockCounter, inventories);
+            _gameUpdateCapacity(capacityCounter, inventories);
+            _verifyStopwatchTicks += Stopwatch.GetTimestamp() - started;
             for (int i = 0; i < 4; i++)
             {
                 Dictionary<string, int> games = tables[i](i < 2 ? stockCounter : capacityCounter);
