@@ -35,9 +35,23 @@ namespace LateGamePerformance
     // not set, so the same cells are updated in the same order with the same values.
     //
     // SoilScansVerify also walks every cell the game's way and compares the list of cells updated.
+    //
+    // Looked at in 0.4.28 and not built: a fast path for a changed contamination cell that stays on the same side of
+    // zero and whose soil colour value (the game's GetMapSoilContamination) is bit for bit unchanged, writing only the
+    // level. The game's SetContaminationLevel does three things: the contaminated object's enter or exit call when
+    // the cell crosses zero, TerrainMaterialMap.SetSoilContamination, and the level write. The second compares the new
+    // colour value with the pixel the texture map holds at those coordinates, not with what the old level maps to,
+    // and those two can differ: a terrain height change resets the pixels of the cells it moved to 0 (through the
+    // map's own queue) while the level stays, and a colour change queued earlier is not in the pixel until the
+    // map's own tick applies it. Skipping the call would then leave a pixel uncoloured that the game recolours, a
+    // lasting difference on screen. The exact form would read that pixel and compare as the game does, which keeps
+    // the coordinates and the pixel read and saves only the calls, a few of the ~47 ns per cell. So instead every
+    // 8th contamination pass counts how many changed cells the fast path would take (the stats line), and the
+    // moisture side (the same shape, SetDesertIntensity, 0.02 ms per tick) is left alone.
     internal static class SoilScans
     {
         private const int Block = 8;
+        internal const int SampleEvery = 8;
 
         // What the scan needs to know about one kind of soil state. Allocated once per kind.
         internal abstract class Cells
@@ -75,6 +89,13 @@ namespace LateGamePerformance
             public MapIndexService MapIndex;
             public float[] Levels;
             public List<int> Visited;
+            // Set in a sampled pass only: the service's own levels (what the cell stood at before), and the two
+            // numbers its soil colour is worked out from.
+            public float[] Stored;
+            public float Threshold;
+            public float MaxMap;
+            public int Sampled;
+            public int SameLook;
 
             public override int ColumnCount(int index2D) => Terrain.GetColumnCount(index2D);
 
@@ -82,9 +103,43 @@ namespace LateGamePerformance
             {
                 ChangedCount++;
                 Visited?.Add(index3D);
+                if (Stored != null && (uint)index3D < (uint)Stored.Length)
+                {
+                    // Measurement only, read before the game's method writes the new level.
+                    Sampled++;
+                    if (KeepsLook(Stored[index3D], Levels[index3D], Threshold, MaxMap))
+                    {
+                        SameLook++;
+                    }
+                }
                 Vector3Int coordinates = MapIndex.IndexToCoordinates(index2D, Terrain.GetColumnCeiling(index3D));
                 _setContamination(Service, coordinates, index3D, Levels[index3D]);
             }
+        }
+
+        // A changed contamination cell that neither enters nor leaves the contaminated state and whose soil colour value
+        // (the game's GetMapSoilContamination, as decompiled) is bit for bit the same before and after: the cells a
+        // "write the level only" fast path would take. Counted, never acted on: that fast path is not exact (see the
+        // note at the top of this class).
+        internal static bool KeepsLook(float before, float after, float threshold, float maxMap)
+        {
+            bool flips = after > 0f && before <= 0f || after <= 0f && before > 0f;
+            return !flips && BitConverter.SingleToInt32Bits(Look(before, threshold, maxMap)) ==
+                BitConverter.SingleToInt32Bits(Look(after, threshold, maxMap));
+        }
+
+        private static float Look(float contamination, float threshold, float maxMap)
+        {
+            if (contamination > 0f)
+            {
+                if (contamination <= threshold)
+                {
+                    float num = 1f - contamination / threshold;
+                    return 1f - maxMap * num;
+                }
+                return 1f;
+            }
+            return 0f;
         }
 
         // One tick's list of changed cells: published by the main thread before the soil tasks exist, finished by
@@ -145,6 +200,10 @@ namespace LateGamePerformance
         private static Func<object, ICollection> _contaminationActions;
         private static Func<object, ICollection> _contaminationHeightChanges;
         private static Func<object, SimulationController> _contaminationController;
+        // For the sampled count only; null when the game's fields are not there, and then nothing is counted.
+        private static Func<object, float[]> _contaminationStored;
+        private static Func<object, float> _contaminationThreshold;
+        private static Func<object, float> _maxMapContamination;
 
         private static Func<object, bool[]> _boolArray;
         private static Func<object, float[]> _floatArray;
@@ -191,6 +250,9 @@ namespace LateGamePerformance
         private static long _editedOnMain;
         private static long _arrayChanged;
         private static long _verifyMismatches;
+        private static int _contaminationPasses;
+        private static long _sampledCells;
+        private static long _sameLookCells;
 
         public static Feature CreateFeature(Config config)
         {
@@ -329,10 +391,23 @@ namespace LateGamePerformance
             _contaminationLevels = Reflect.FieldGetter<TickOnlyArray<float>>(contaminationSim, "_contaminationLevels");
             _setContamination = Reflect.InstanceCall<Action<object, Vector3Int, int, float>>(
                 HarmonyLib.AccessTools.Method(contamination, "SetContaminationLevel"));
+            try
+            {
+                _contaminationStored = Reflect.FieldGetter<float[]>(contamination, "_threadSafeContaminationLevels");
+                _contaminationThreshold = Reflect.FieldGetter<float>(contamination, "_contaminationThreshold");
+                _maxMapContamination = Reflect.FieldGetter<float>(contamination, "_maxMapContamination");
+            }
+            catch (Exception)
+            {
+                _contaminationStored = null;
+            }
 
             _boolArray = Reflect.FieldGetter<bool[]>(typeof(TickOnlyArray<bool>), "_array");
             _floatArray = Reflect.FieldGetter<float[]>(typeof(TickOnlyArray<float>), "_array");
         }
+
+        // For the tests: whether the next contamination pass is one that counts.
+        internal static bool NextContaminationPassSampled => (_contaminationPasses + 1) % SampleEvery == 0;
 
         public static void BindListAccessors()
         {
@@ -373,12 +448,14 @@ namespace LateGamePerformance
                 "SoilScans: {0} moisture and contamination passes in {1:0.0} ms ({2:0.000} ms each); {3} went through a list of " +
                 "changed cells made on a worker ({4:0.000} ms there per list), {5} scanned the map on the main thread " +
                 "({6:0.0}% of {7}-tile groups had nothing changed and were passed over); lists not usable: {8} not finished, " +
-                "{9} after a main-thread edit, {10} after the flag array was replaced; {11} changed cells updated{12}",
+                "{9} after a main-thread edit, {10} after the flag array was replaced; {11} changed cells updated; in every " +
+                "{13}th contamination pass {14} of {15} changed cells kept their contaminated state and their soil colour " +
+                "value{12}",
                 _passes, ms, _passes > 0 ? ms / _passes : 0, _listPasses, _listPasses > 0 ? workerMs / _listPasses : 0,
                 _scanPasses, _blocks > 0 ? 100.0 * _blocksSkipped / _blocks : 0, Block, _notReady, _editedOnMain, _arrayChanged,
-                _changed, _verify ? $"; verify mismatches {_verifyMismatches}" : "");
+                _changed, _verify ? $"; verify mismatches {_verifyMismatches}" : "", SampleEvery, _sameLookCells, _sampledCells);
             _passes = _listPasses = _scanPasses = _blocks = _blocksSkipped = _changed = _stopwatchTicks = 0;
-            _workerStopwatchTicks = _notReady = _editedOnMain = _arrayChanged = 0;
+            _workerStopwatchTicks = _notReady = _editedOnMain = _arrayChanged = _sampledCells = _sameLookCells = 0;
             return line;
         }
 
@@ -426,7 +503,17 @@ namespace LateGamePerformance
                 cells.Terrain = _contaminationTerrain(__instance);
                 cells.MapIndex = _contaminationMapIndex(__instance);
                 cells.Levels = _floatArray(_contaminationLevels(simulator));
-                return Run(ContaminationKind, cells, _boolArray(_contaminationFlags(simulator)), cells.MapIndex, cells.Visited);
+                cells.Sampled = cells.SameLook = 0;
+                if (++_contaminationPasses % SampleEvery == 0 && _contaminationStored != null)
+                {
+                    cells.Stored = _contaminationStored(__instance);
+                    cells.Threshold = _contaminationThreshold(__instance);
+                    cells.MaxMap = _maxMapContamination(__instance);
+                }
+                bool runOriginal = Run(ContaminationKind, cells, _boolArray(_contaminationFlags(simulator)), cells.MapIndex, cells.Visited);
+                _sampledCells += cells.Sampled;
+                _sameLookCells += cells.SameLook;
+                return runOriginal;
             }
             catch (Exception exception)
             {
@@ -436,6 +523,7 @@ namespace LateGamePerformance
             {
                 cells.Service = null;
                 cells.Levels = null;
+                cells.Stored = null;
             }
         }
 
