@@ -15,7 +15,8 @@ namespace LateGamePerformance
         internal static readonly string[] SimulationFeatureNames =
         {
             "HaulCache", "RouteMaps", "YielderSearch", "TerrainMaps", "PlantWater", "DistrictCounts", "WaterMapCopy",
-            "SoilScans", "TerrainSearch", "IdleEntities", "HomeSearch"
+            "SoilScans", "TerrainSearch", "IdleEntities", "HomeSearch",
+            "PathFollow", "Reachability"
         };
 
         private static Config _config = new Config();
@@ -128,6 +129,16 @@ namespace LateGamePerformance
             {
                 HomeSearch.Activate();
             }
+            bool pathFollow = config.PathFollow && PathFollow.CreateFeature(config).Apply(HarmonyId);
+            if (pathFollow)
+            {
+                PathFollow.Activate();
+            }
+            bool reachability = config.Reachability && Reachability.CreateFeature(config).Apply(HarmonyId);
+            if (reachability)
+            {
+                Reachability.Activate();
+            }
             // The soil lists ride on the scans; the plant water levels on the water map copy. Each falls back to the
             // feature it rides on, so neither is a simulation feature of its own.
             if (soilScans && SoilScans.CreateListsFeature().Apply(HarmonyId))
@@ -156,13 +167,14 @@ namespace LateGamePerformance
             {
                 MapChanges.Activate();
             }
+            // In the order of SimulationFeatureNames.
             _started = new[]
             {
                 haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts, waterMapCopy, soilScans,
-                terrainSearch, idleEntities, homeSearch
+                terrainSearch, idleEntities, homeSearch,
+                pathFollow, reachability
             };
-            Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts,
-                waterMapCopy, soilScans, terrainSearch, idleEntities, homeSearch));
+            Log.Info(SimulationFeaturesLine(_started));
             if (config.WaterRendering)
             {
                 if (WaterRendering.CreateTilesFeature().Apply(HarmonyId))
@@ -225,15 +237,12 @@ namespace LateGamePerformance
 
         // The parts that replace simulation code are not settings, so they can only differ between two players if
         // one failed to start (a game update moved something) or turned itself off after an error (TurnedOffLine).
-        // One line, the same words for everyone, so two players' logs can be compared at a glance.
-        internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch,
-            bool terrainMaps, bool plantWater, bool districtCounts, bool waterMapCopy, bool soilScans, bool terrainSearch,
-            bool idleEntities, bool homeSearch)
+        // One line, the same words for everyone, so two players' logs can be compared at a glance. `started` holds one
+        // entry per SimulationFeatureNames entry, in that order.
+        internal static string SimulationFeaturesLine(bool[] started)
         {
-            string line = FeatureList(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts,
-                waterMapCopy, soilScans, terrainSearch, idleEntities, homeSearch);
-            return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater && districtCounts && waterMapCopy &&
-                   soilScans && terrainSearch && idleEntities && homeSearch
+            string line = FeatureList(started);
+            return Array.TrueForAll(started, on => on)
                 ? line + " These are the same for every player on this version."
                 : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
                   "own code for it. In multiplayer, check that the other players' logs show the same line.";
@@ -259,24 +268,26 @@ namespace LateGamePerformance
                 on[i] = started[i] && Array.IndexOf(off, SimulationFeatureNames[i]) < 0;
             }
             bool one = off.Length == 1;
-            return FeatureList(on[0], on[1], on[2], on[3], on[4], on[5], on[6], on[7], on[8], on[9], on[10]) + " " +
+            return FeatureList(on) + " " +
                    string.Join(", ", off) + (one ? " turned itself" : " turned themselves") + " off during this " +
                    "session after an error (see the " + (one ? "warning" : "warnings") + " above), so this computer " +
                    "runs the game's own code for " + (one ? "it" : "them") + ". In multiplayer every player should " +
                    "restart the game before playing on together.";
         }
 
-        private static string FeatureList(bool haulCache, bool routeMaps, bool yielderSearch, bool terrainMaps,
-            bool plantWater, bool districtCounts, bool waterMapCopy, bool soilScans, bool terrainSearch,
-            bool idleEntities, bool homeSearch)
+        // "Simulation features: HaulCache on, RouteMaps OFF, ...", one entry per SimulationFeatureNames entry.
+        private static string FeatureList(bool[] on)
         {
-            return "Simulation features: HaulCache " + (haulCache ? "on" : "OFF") + ", RouteMaps " +
-                   (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") +
-                   ", TerrainMaps " + (terrainMaps ? "on" : "OFF") + ", PlantWater " + (plantWater ? "on" : "OFF") +
-                   ", DistrictCounts " + (districtCounts ? "on" : "OFF") + ", WaterMapCopy " +
-                   (waterMapCopy ? "on" : "OFF") + ", SoilScans " + (soilScans ? "on" : "OFF") + ", TerrainSearch " +
-                   (terrainSearch ? "on" : "OFF") + ", IdleEntities " + (idleEntities ? "on" : "OFF") +
-                   ", HomeSearch " + (homeSearch ? "on" : "OFF") + ".";
+            if (on.Length != SimulationFeatureNames.Length)
+            {
+                throw new ArgumentException($"{on.Length} states for {SimulationFeatureNames.Length} simulation features");
+            }
+            string[] parts = new string[on.Length];
+            for (int i = 0; i < on.Length; i++)
+            {
+                parts[i] = SimulationFeatureNames[i] + (on[i] ? " on" : " OFF");
+            }
+            return "Simulation features: " + string.Join(", ", parts) + ".";
         }
 
         // The settings page's "verify every feature" box: on, every verify mode; off, each back to its .cfg value.
@@ -292,6 +303,8 @@ namespace LateGamePerformance
             HomeSearch.VerifyEnabled = on || cfg.HomeSearchVerify;
             TerrainSearch.VerifyEnabled = on || cfg.TerrainSearchVerify;
             SaveSnapshot.VerifyEnabled = on || cfg.SaveSnapshotVerify;
+            PathFollow.VerifyEnabled = on || cfg.PathFollowVerify;
+            Reachability.VerifyEnabled = on || cfg.ReachabilityVerify;
         }
 
         internal static Feature CreateTickFeature()
@@ -379,7 +392,8 @@ namespace LateGamePerformance
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
                              TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), HomeSearch.TakeStatsLine(),
                              TerrainReach.TakeStatsLine(), BehaviorLog.TakeStatsLine(), WalkerMove.TakeStatsLine(),
-                             TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine()
+                             TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine(),
+                             PathFollow.TakeStatsLine(), Reachability.TakeStatsLine()
                          })
                 {
                     if (line != null)

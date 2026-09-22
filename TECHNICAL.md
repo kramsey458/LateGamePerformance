@@ -956,7 +956,7 @@ maximum and a maximum below one.
 
 ### A simulation feature that turns itself off (always on, new in 0.4.27)
 
-Each of the eleven simulation features hands its call to the game's own code and stays off for the rest of the
+Each simulation feature (those named in the `Simulation features:` line) hands its call to the game's own code and stays off for the rest of the
 session if something throws inside it that it cannot recover from (road and terrain maps first build a map that threw
 again on the main thread, and turn off only if that throws too: see When a map build throws). From then on this computer runs the game's code for it where the other players
 may still run the mod's, and a multiplayer game can drift apart; a new game scene (a BeaverBuddies rehost included)
@@ -972,7 +972,7 @@ Now a feature that turns itself off after an error is also said:
 
 ```
 [LateGamePerformance] Simulation features: HaulCache on, RouteMaps OFF, YielderSearch on, TerrainMaps on, ...,
-HomeSearch on. RouteMaps turned itself off during this session after an error (see the warning above), so this
+Reachability on. RouteMaps turned itself off during this session after an error (see the warning above), so this
 computer runs the game's own code for it. In multiplayer every player should restart the game before playing on
 together.
 ```
@@ -1052,6 +1052,118 @@ and Harmony then skipped the timer's, so the terrain A* numbers left out every s
 Since `TerrainSearch` runs at Harmony's last priority (see Build and test) the timer's prefix runs first, and the
 terrain A* numbers include those searches, timed as the mod answers them (resumed or from its previous search).
 Numbers from before and after that change are not comparable; the `TerrainSearch:` stats line is unchanged.
+
+### Walking without moving the beaver at every step (always on, new in 0.4.28)
+
+Every tick every walking beaver is moved along its path by `PathFollower.MoveAlongPath`, in steps of at most a tenth
+of a tile: about twenty steps per beaver per tick. Each step reads the beaver's Unity transform twice (the position to
+move from, and "has it reached the last corner") and writes it once, and a write moves the whole beaver: its model,
+its status icons and their colliders. In the 0.4.23 session `WalkerMover` took 2.1 ms per tick, about 26 us per beaver
+that moved.
+
+The mod runs the game's loop with the position kept in a local instead of in the transform, and writes the transform
+where something outside the loop could look at it: right before each call of the speed provider (the walker's speed
+manager looks up the water at the beaver's tile when a corner is reached), read back right after it, and once after
+the loop, before the game's own smoothing corner, the animator and the `MovedAlongPath` event (ziplines, tubes). The
+result is the game's to the bit:
+
+- Everything before the loop is the game's own private methods, called with the real transform. The loop is the
+  game's, statement for statement, with the game's own `MoveInDirection`, `InStoppingProximity`,
+  `Vector3.Distance` and `GetMovementSpeed`, and the one expression it computes itself (the corner's time) written the
+  same way; only where the game reads the transform, the mod reads its local.
+- The local holds exactly what the transform would: a beaver is the root of its entity (the game instantiates every
+  entity without a parent), and a root transform gives back the floats it was given. A beaver whose transform has a
+  parent (a wonder's pilot) is left to the game's method. Nothing reads the transform between two writes but the speed
+  provider, which is handed the right one, and Unity runs nobody's code when a position is written.
+- The corners go into a list of the mod's and are copied into the game's after the loop. If anything throws before
+  that, the beaver, its corner index and (in verify mode) its corners are put back, the feature turns itself off (see
+  A simulation feature that turns itself off) and the game's own method moves it.
+- A transpiler on `MoveAlongPath`, or another mod's patch on the two helpers the loop no longer calls
+  (`AddAnimatedPathCorner`, `ReachedLastPathCorner`), would not run in the mod's loop; then every move is the game's,
+  with one log line. Other mods' prefixes and postfixes on `MoveAlongPath` run as before (the prefix runs at Harmony's
+  last priority). `WalkerMove` still calls `MoveAlongPath` through its patched entry point, with its kept delegate as the
+  speed provider.
+
+`PathFollowVerify = true` runs the game's loop first, through the game's own `AddAnimatedPathCorner`,
+`ReachedLastPathCorner` and `AddSmoothingAnimatedPathCorner`, reading and writing the real transform as the game does,
+puts the beaver back, runs the mod's loop, and compares the final position, the corner index and every animated
+corner bit for bit. This is the check of the one thing the harness cannot run: Unity's transform. The mod's move is
+kept; the animator and the event run once.
+
+The tests copy the IL of `MoveAlongPath` and of every private method it calls, as compiled in the installed game, into
+dynamic methods whose Unity calls (the transform, `Time.time`, the animator: nine calls) go to a stand-in that stores
+exactly the floats it is given; the rest is the game's code, including the real `NavigationService`'s stopping
+distance. The mod's prefix moves a second `PathFollower` over the same paths with its game-method delegates pointed at
+those copies: 113,000 moves in 1,500 random walks (steps of every length including none and ones below the game's
+threshold, corners with instant speed, speed changes, ticks of a fortieth to half a second, new paths mid-walk,
+verify mode on in every fourth walk) are identical to the game's, bit for bit: position, corner index, animated
+corners, what the animator is handed, the `MovedAlongPath` events. They also check that a beaver with a parent and a
+foreign patch are left to the game, that verify mode on a transform that does not give back what it was given counts
+a mismatch and still hands over the mod's move, and that a failure after the transform was written puts everything
+back and hands the move to the game, which then moves the beaver as without the mod.
+
+```
+[LateGamePerformance] Last 1000 ticks. PathFollow: 75000 moves along a path, 19.6 steps each, in 21.0 ms (0.28 us
+each); the transform was written 76500 times where the game writes it 1545000 times; 0 moves left to the game (a
+parent transform or another mod's patch)
+```
+
+(An illustration, not a measurement: how much a move costs in the game now is what the line is there to show; the
+harness has no Unity to measure the transform writes that are left out.)
+
+### Reachability areas without a table per update (always on, new in 0.4.28)
+
+"Can a beaver standing here reach that at all?" is answered by `GlobalReachabilityService`: every terrain node gets
+the number of its area, found by a breadth-first flood over the instant terrain graph the first time a node of that
+area is asked about. Every instant nav-mesh update (a building, a path, a levee) forgets every area, and the next
+question floods the whole area again: the game clears a flag for every node of the map (a bool per node, over a
+million on a large map), then stores every node of the area in a `Dictionary`, one insert per node. After a road
+change the district citizen assigner asks for every beaver, so the whole walkable colony is flooded: 74 us per tick
+on average and single ticks of 5 to 8 ms in the 0.4.23 session.
+
+The mod replaces `GetAreaOfNode`, the one method that reads the areas and starts a flood, with the same flood into two
+arrays: an int per node holding its area above a base, and a byte per node holding the number of the last flood that
+visited it. Forgetting every area is moving the base past every number handed out, and a new flood is a new number,
+so nothing is cleared per update or per flood (the bytes once every 255 floods). Every answer is the game's:
+
+- The flood is the game's: from the same node, through the game's own `GetNeighbors`, once per node in the same
+  order, first in first out, a neighbour taken when not yet visited by this flood. It visits exactly the game's nodes
+  in the game's order and gives each the same area number, taking a node over from an earlier area where the game's
+  `Dictionary` would (the game's graph is symmetric, so that does not happen there, but it is kept).
+- The numbers are the game's `_areaCounter`, which the mod keeps in step. The game's own `ClearAreas` still runs on
+  every update and puts the counter back to 0; the mod sees the counter move away from what it left there and forgets
+  its areas before it answers. Only `ClearAreas` and `GetAreaOfNode` write the counter, so it cannot move and come back
+  unseen. No hook on the update is needed.
+- The `Dictionary`, the flags and the queue are private to the service and only read by these methods, so what the
+  game is told (`AreaReachable`) is the same, question for question, on every computer.
+- A flood's areas are kept only once it has finished. If anything throws, the game's `Dictionary` and counter are
+  filled with the mod's areas from before it, the feature turns itself off, and the game's own method answers from
+  there, that question included. The areas belong to one service (one game scene); a new scene's service gets new
+  arrays at its first question, and the old one is only held weakly.
+- Another mod's patch on the flood's methods (`CreateAreaReachableFromNode`, `VisitNeighbors`, `VisitNode`), or a
+  transpiler on `GetAreaOfNode`, would not run in the mod's flood: then the game's code answers every question,
+  decided at the first one.
+
+`ReachabilityVerify = true` lets the game's own flood fill the game's own `Dictionary` as well (the game does not read
+it while the mod answers) and compares every node's area before each answer and after each flood; the mod's answer is
+the one given.
+
+The tests drive two of the game's real `GlobalReachabilityService`s over one real `InstantTerrainNavMeshGraph` of
+three levels with holes and a few one-way connections, one answering with the game's code and one through the mod's
+prefix: 90,000 questions and 400 nav-mesh updates with graph changes, the mod starting late from the game's areas;
+every area number is the game's, and at every checkpoint the game's `Dictionary` and counter equal the mod's areas node
+for node. Verify mode agrees for 1,500 operations, counts a broken area and still hands over the mod's answer; a flood
+forced to throw hands over the areas, after which the game's own code answers exactly as the other service does. On a
+map the size of a large one (1.6 million nodes, a walkable area of 65,000) the harness times a whole flood by the game's
+code and by the mod's on .NET 8; the game runs Mono, where the `Dictionary` and `Queue` calls cost more, so the stats
+line is what says what it saves in the game (compare with the `DistrictCitizenAssigner` timers of Diagnostics).
+
+```
+[LateGamePerformance] Last 1000 ticks. Reachability: 2400 area questions, 30 of which flooded an area (1900000 nodes,
+45.0 ms in total, longest 2.10 ms); the areas were forgotten 28 times; 0 questions left to the game
+```
+
+(An illustration, not a measurement.)
 
 ### Stats
 
@@ -1159,8 +1271,8 @@ features, disable the mod.
 **The verify keys only measure.** Each runs the game's own code beside the mod's, and logs and counts
 every difference in the stats lines, but the game is handed the mod's result either way: the hauling list, the tree
 search, the plant water levels, the district counts (put back after the game's count), the water map (the worker's
-copy swapped in after the comparison), the soil cells, the terrain path searches, the home search and the save
-snapshot. So one player may switch them on alone, from this file or from the settings page, even in the middle of a
+copy swapped in after the comparison), the soil cells, the terrain path searches, the home search, the save
+snapshot, the walking beaver's move and the reachability areas. So one player may switch them on alone, from this file or from the settings page, even in the middle of a
 game. Up to 0.4.26 the hauling list, tree search, plant water, district count, water map and home search checks
 handed over the game's result when they found a difference: harmless alone, but in multiplayer the one player with
 a key on then took a different answer from the others the moment the mod had a bug, and the colonies drifted apart.
@@ -1169,7 +1281,9 @@ key off. What a key on still changes is how much of the game's code runs, and wi
 into it: the tree search check looks up every candidate, which fills terrain route maps that a player with the key
 off may fill a tick later (a fill's timing cannot change a result, see Tree and plant search); the district count
 check asks every good disallower twice; the hauling list check asks every haul provider on every request; the home
-search check asks the game's own dwelling predicates. The game's own versions of these only read.
+search check asks the game's own dwelling predicates; the path follow check moves the beaver's transform through the
+game's loop, asks its speed again and puts it back; the reachability check floods into the game's own table. The game's
+own versions of these only read.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -1191,6 +1305,8 @@ search check asks the game's own dwelling predicates. The game's own versions of
 | `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
 | `HomeSearchVerify` | `false` | Run the game's own walk for a beaver to move in as well and compare the pick; logs and counts mismatches, the mod's pick moves in. For testing. |
+| `PathFollowVerify` | `false` | Run the game's path-following loop through the beaver's transform first, then the mod's, and compare the move bit for bit; logs and counts mismatches, the mod's move is kept. For testing. |
+| `ReachabilityVerify` | `false` | Let the game's own flood fill the game's own area table as well and compare every node's area; logs and counts mismatches, the mod's answer is given. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `SaveSnapshot` | `true` | Snapshot trees, crops, paths, levees and platforms on worker threads at every save. Saving only; may differ between peers. |
 | `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well and compare every entity; the mod's is saved. Measurement only. For testing. |

@@ -10,7 +10,9 @@ namespace LateGamePerformance
     // Several hundred walking beavers, eleven ticks a second: about a hundred kilobytes of garbage a second for
     // the same delegate over and over. The mod makes that delegate once per beaver and passes the same one every
     // tick; the calls, their arguments and their order are the game's own. Nothing the simulation computes
-    // changes.
+    // changes. MoveAlongPath is called through its Harmony-patched entry point, so the path follower's own
+    // replacement (PathFollow) and any other mod's patches on it run as they would for the game's call; the kept
+    // delegate is the speed provider PathFollow asks at every corner.
     internal static class WalkerMove
     {
         private const string MoverType = "Timberborn.WalkingSystem.WalkerMover";
