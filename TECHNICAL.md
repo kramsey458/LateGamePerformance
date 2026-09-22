@@ -499,6 +499,54 @@ no difference that could be told from noise, and a player has no way to judge it
 the per-frame hook it needed. Unity's fixed 3 ms slice from `boot.config` applies, and the `Timing:` line still
 reports it.
 
+### Terrain path searches resumed instead of restarted (always on, new in 0.4.18)
+
+When no route map answers a path question, the game runs an A* search over the terrain graph on the main thread,
+inside the beaver's tick (`TerrainAStarPathfinder.FillFlowFieldWithPath`). That happens when a beaver standing off
+the road network, in a field or a forest beyond the roads' spill range, prices every building that could satisfy a
+need (`DistrictNeedBehaviorService.PickShortestAction` asks for a round trip per provider), or walks to a random
+spot. The game keeps the last search in one `PathFlowField` and answers the next question from it only if that
+search happened to reach the new target; otherwise it clears the field and starts again from the same tile. Pricing
+thirty buildings from one spot can mean thirty searches over the same ground. In the logged 354-beaver colony single
+beaver ticks of 6 to 14 ms and the slump at the end of every day pointed here, by reading the code; the
+`Diagnostics` line of 0.4.16 measures it.
+
+The mod replaces the single-destination search with the game's own algorithm, run on the game's own heap and flow
+field, operation for operation: a search that has to start from scratch is the game's search to the bit, tie-breaks
+included. When the next question starts from the same tile and nothing else has touched the field or the heap
+since (the same field object, the same start, the same tile count, no terrain change, not fully explored), the
+mod keeps the explored tiles and the frontier, re-prices the frontier for the new target, pushes the neighbours of
+the previous target (the game returns the moment it pops its target, before those are pushed, so without this a
+route through the previous target would never be found) and carries on. Explored tiles are never explored again, so
+a resumed search never does more than the game's restart would.
+
+What is the same and what is not:
+
+- A fresh search is identical to the game's.
+- A resumed search gives the same distance. The game's heuristic never overestimates a terrain step (0.9 per
+  straight tile and 1.273 per diagonal, against costs of 1 and 1.414), so every explored tile already holds its
+  shortest distance when the search continues. The one exception is floating-point rounding in the last bits when
+  the shortest distance is reached by a different but equally short route, and in that case the route itself can be
+  a different one of equal length. Ziplines and tubes carry their own costs; a route through them can be priced
+  differently by the game's own search too, because its heuristic does not know them.
+- Every player on this version gets the same answer: the search state depends only on the simulation's own
+  sequence of questions. The only other caller of this search is the game's debug-mode cursor tool.
+- `TerrainSearchVerify = true` runs the unmodified algorithm alongside on a shadow field and heap, compares what
+  the game is told after every search and counts: identical, same distance within rounding, equally short but
+  different route, different distance, different reachability. It never changes the answer, so it may differ
+  between players; after a terrain change or a list-of-destinations search the comparison restarts from the mod's
+  state. Slower; for testing.
+- The `TerrainSearch:` stats line counts searches answered from the previous search, started from scratch and
+  resumed, with the tiles each explored and the time.
+- Measured in the harness (`tests/TerrainSearchTests.cs`, the game's real `TerrainAStarPathfinder`, `PathFlowField`,
+  `BinaryHeap` and `HeuristicsCalculator` on a random 90 x 90 terrain with the game's default costs): 300 searches
+  from scratch identical to the game's node for node; in 1,200 searches from 150 tiles, 8 per tile, reachability and
+  distance agree every time (88% bit for bit, 12% within rounding), the mod explored 376,000 tiles where the game's
+  restarts explore 747,000, and in 79% of the searches with the same distance the route was a different, equally
+  short one. Verify mode over 600 searches with 17 list-of-destinations searches and 11 terrain changes mixed in
+  reported no distance or reachability difference.
+- If anything throws, the feature switches itself off for the session and the game's own search runs.
+
 ### Memory clean-up right after a save (on by default, new in 0.4.17)
 
 A save allocates a lot: the snapshot of the world, then the JSON tree and the compressed bytes. In the logged
@@ -672,6 +720,7 @@ features, disable the mod.
 | `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result. For testing. |
 | `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare. For testing. |
 | `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy. For testing. |
+| `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `CollectAfterSave` | `true` | Collect garbage right after each save's main-thread part instead of a second later. Memory only; may differ between peers. |

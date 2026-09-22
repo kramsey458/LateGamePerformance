@@ -51,6 +51,7 @@
       <ul>
         <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.14 has been played since and reported as working well).</li>
         <li>On a computer that had memory clean-up freezes of most of a second about once a minute, incremental garbage collection removed them and made the frame rate much steadier at high tick rates.</li>
+        <li>Preview <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.18">0.4.18</a> (pre-release, not yet played) is aimed at the single slow beaver ticks and the end-of-day slump: terrain path searches from the same tile continue instead of restarting.</li>
         <li>Previews <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.16">0.4.16</a> and <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.17">0.4.17</a> (pre-releases, not yet played) stop the second of stutter that followed every autosave and memory clean-up in a logged 354-beaver session, by not letting one frame catch up everything a long frame missed, and move the memory clean-up that followed each autosave into the save's own frame.</li>
       </ul>
       <p>There is no controlled frame rate benchmark yet. The mod logs its own <a href="#timing">timing line</a> so you can see your colony's numbers.</p>

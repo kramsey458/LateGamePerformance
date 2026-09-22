@@ -28,6 +28,7 @@ namespace LateGamePerformance
         public bool DistrictCounts => true;
         public bool WaterMapCopy => true;
         public bool SoilScans => true;
+        public bool TerrainSearch => true;
 
         public bool HaulCache => true;
         // Nothing cached survives a tick: the conservative choice, and the only one ever played.
@@ -44,6 +45,7 @@ namespace LateGamePerformance
         public bool DistrictCountsVerify = false;
         public bool WaterMapCopyVerify = false;
         public bool SoilScansVerify = false;
+        public bool TerrainSearchVerify = false;
         // Rendering only, so it may differ between players. A way out, not a setting.
         public bool WaterRendering = true;
         // Not part of the simulation, so it may differ between players. A way out, not a setting.
@@ -124,6 +126,7 @@ namespace LateGamePerformance
             DistrictCountsVerify = Bool(values, nameof(DistrictCountsVerify), DistrictCountsVerify);
             WaterMapCopyVerify = Bool(values, nameof(WaterMapCopyVerify), WaterMapCopyVerify);
             SoilScansVerify = Bool(values, nameof(SoilScansVerify), SoilScansVerify);
+            TerrainSearchVerify = Bool(values, nameof(TerrainSearchVerify), TerrainSearchVerify);
             WaterRendering = Bool(values, nameof(WaterRendering), WaterRendering);
             BackgroundSave = Bool(values, nameof(BackgroundSave), BackgroundSave);
             CollectAfterSave = Bool(values, nameof(CollectAfterSave), CollectAfterSave);
@@ -144,10 +147,10 @@ namespace LateGamePerformance
         {
             return $"(fixed: HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
                    $"RouteMaps={RouteMaps}, YielderSearch={YielderSearch}, TerrainMaps={TerrainMaps}, PlantWater={PlantWater}, DistrictCounts={DistrictCounts}, " +
-                   $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}) " +
+                   $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}, TerrainSearch={TerrainSearch}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
-                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }
