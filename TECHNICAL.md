@@ -1134,7 +1134,9 @@ paste into `SaveSnapshot.Allowed` and `SaveGuard.HelpersHash` after an update; t
 listed hash against what is installed.
 
 `tools/benchmark-timberborn.ps1` runs the game's built-in benchmark on a save with per-component tick timings
-(`-metrics`), for before/after comparisons.
+(`-metrics`), for before/after comparisons. With `-SaveCount N` it runs the game's save benchmark instead
+(`-benchmarkSaveCount`): after the warm-up the game saves N times into memory, writes the average, median, 90th
+percentile, minimum and maximum to `Player.log` and quits; the Save timing line splits each of those saves.
 
 ## Uninstall
 
