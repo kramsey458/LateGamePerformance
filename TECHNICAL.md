@@ -499,6 +499,40 @@ no difference that could be told from noise, and a player has no way to judge it
 the per-frame hook it needed. Unity's fixed 3 ms slice from `boot.config` applies, and the `Timing:` line still
 reports it.
 
+### Memory clean-up right after a save (on by default, new in 0.4.17)
+
+A save allocates a lot: the snapshot of the world, then the JSON tree and the compressed bytes. In the logged
+354-beaver session every autosave was followed by a garbage collection within about ten ticks, so each save was two
+hitches: the save frame, and a collection frame of 100 to 190 ms a second later. `CollectAfterSave = true` (the
+default) runs a collection right after the save's main-thread part, inside `SaveWriter.WriteToSaveStream`, so it
+lands in the frame that is long anyway; the allocation budget starts over and the rest of the save's garbage no
+longer tips it over on its own. One `SaveCollect:` line per save says how long it took and how much it freed; the
+`Timing:` line counts the save frame with its collection separately from ordinary collections, which is how to see
+whether the collection a second later is gone. It also runs after the save BeaverBuddies writes for a joining
+player. Memory only; it changes nothing the game computes.
+
+### Audio listener placed only when needed (on by default, new in 0.4.17)
+
+Every frame `SoundListener.LateUpdateSingleton` casts a ray from the screen centre against the terrain and every
+block object to find what is under it, then moves the listener a tenth of the way there: about 0.3 ms per frame and
+50 KB/s of garbage in a large colony. `SoundListener = true` (the default) runs it when the camera moved (position,
+rotation or screen size), while the listener is still gliding towards its target (the last placement moved it more
+than a hundredth of a unit), and otherwise once every ten frames so that something built under the screen centre is
+picked up within a fraction of a second. The `SoundListener:` stats line says in how many frames it ran. Sound only.
+
+### User interface work every few frames (on by default, new in 0.4.17)
+
+`UiThrottle = true` (the default) covers two of the game's per-frame systems that only the screen reads:
+
+- `StatusAggregator.UpdateSingleton` goes through every status in the colony every frame to fill the alert lists
+  the top bar and the alert buttons read, about 0.35 ms per frame. It runs every fourth frame now; a status that
+  appears or clears reaches the alert count a few frames later. Removing a subject still updates the lists at once.
+- `EntityPanel.UpdateSingleton` refreshes every fragment of the selected entity's panel every frame, the largest
+  single source of garbage among the game's systems at about 120 KB/s. It runs every second frame now, and always
+  on the frame a different entity is shown.
+
+The `UiThrottle:` stats line counts both. Neither is read by the simulation.
+
 ### Catch-up limit (on by default, new in 0.4.16)
 
 The game turns each frame's `Time.deltaTime` into simulation buckets, and Unity caps that delta at a third of a
@@ -624,6 +658,9 @@ features, disable the mod.
 | `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
+| `CollectAfterSave` | `true` | Collect garbage right after each save's main-thread part instead of a second later. Memory only; may differ between peers. |
+| `SoundListener` | `true` | Place the audio listener when the camera moved, while it glides, and every tenth frame otherwise. Sound only; may differ between peers. |
+| `UiThrottle` | `true` | Status alert lists every fourth frame, the selected entity's panel every second frame. Interface only; may differ between peers. |
 | `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 

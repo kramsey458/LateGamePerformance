@@ -43,7 +43,9 @@ internal static class Program
                      "Timberborn.Yielding", "Timberborn.Goods", "Timberborn.SerializationSystem",
                      "Timberborn.WaterSystem", "Timberborn.SoilMoistureSystem", "Timberborn.SoilContaminationSystem",
                      "Timberborn.WaterSystemRendering", "Timberborn.TerrainSystemRendering", "Timberborn.MapIndexSystem",
-                     "Timberborn.MapStateSystem", "Timberborn.TerrainSystem", "Timberborn.BlockSystem", "Timberborn.WalkingSystem" })
+                     "Timberborn.MapStateSystem", "Timberborn.TerrainSystem", "Timberborn.BlockSystem", "Timberborn.WalkingSystem",
+                     "Timberborn.CoreSound", "Timberborn.CameraSystem", "Timberborn.SoundSystem", "Timberborn.StatusSystem",
+                     "Timberborn.EntityPanelSystem" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -67,6 +69,7 @@ internal static class Program
         TestYielderSearch();
         TestGarbageCollection();
         TestCatchUp();
+        TestSaveCollectSoundAndUi();
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
@@ -77,7 +80,8 @@ internal static class Program
             WaterMapCopy.CreateFeature(new Config()), SoilScans.CreateFeature(new Config()),
             WaterRendering.CreateTilesFeature(), WaterRendering.CreateUploadsFeature(),
             MetricsDump.CreateFeature(new Config()),
-            Diagnostics.CreateFeature(), CatchUp.CreateFeature(), Plugin.CreateTickFeature()
+            Diagnostics.CreateFeature(), CatchUp.CreateFeature(), SaveCollect.CreateFeature(),
+            SoundListenerSkip.CreateFeature(), UiThrottle.CreateFeature(), Plugin.CreateTickFeature()
         };
         int patchCount = 0;
         foreach (Feature feature in features)
@@ -92,7 +96,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 79, $"79 patches declared (found {patchCount})");
+        Check(patchCount == 83, $"83 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -101,7 +105,7 @@ internal static class Program
         WaterAndSoilTests.Run(Check);
         string[] expectedWarnings =
         {
-            "CatchUp failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
+            "CatchUp failed", "SaveCollect failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
             "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
@@ -161,6 +165,57 @@ internal static class Program
         Check(untouched == 1f && !CatchUp.IsActive, "catch-up: an exception switches it off and leaves the delta alone");
     }
 
+    private static void TestSaveCollectSoundAndUi()
+    {
+        // Save collect: collects once, reports what it freed, never runs into itself, and switches off on failure.
+        long heap = 900L << 20;
+        int collections = 0;
+        SaveCollect.HeapBytes = () => heap;
+        SaveCollect.Collect = () =>
+        {
+            collections++;
+            heap = 600L << 20;
+            SaveCollect.WritePostfix();
+        };
+        SaveCollect.Activate();
+        SaveCollect.WritePostfix();
+        Check(collections == 1 && SaveCollect.IsActive, "save collect: one collection per save, none from inside itself");
+        SaveCollect.Collect = () => throw new InvalidOperationException("no collector");
+        SaveCollect.WritePostfix();
+        Check(!SaveCollect.IsActive, "save collect: a failure switches it off for the session");
+        SaveCollect.Collect = () => collections++;
+        SaveCollect.WritePostfix();
+        Check(collections == 1, "save collect: and then nothing runs");
+
+        // Sound listener: runs when the camera moved, while the listener glides, and every tenth frame otherwise.
+        SoundListenerSkip.Policy policy = new SoundListenerSkip.Policy();
+        Check(policy.ShouldRun(true), "sound listener: the first frame runs");
+        policy.Ran(0.5f);
+        Check(policy.ShouldRun(false), "sound listener: runs again while the listener is still gliding");
+        policy.Ran(0.001f);
+        int ran = 0;
+        for (int i = 0; i < 100; i++)
+        {
+            if (policy.ShouldRun(false))
+            {
+                ran++;
+                policy.Ran(0f);
+            }
+        }
+        Check(ran == 10, $"sound listener: a still camera with a settled listener runs one frame in ten (ran {ran} of 100)");
+        Check(policy.ShouldRun(true), "sound listener: a camera move runs at once");
+
+        // UI throttle: the alert lists every fourth frame, the panel every second frame and when the entity changes.
+        int statusRuns = 0, panelRuns = 0;
+        for (int frame = 0; frame < 100; frame++)
+        {
+            statusRuns += UiThrottle.StatusDue(frame) ? 1 : 0;
+            panelRuns += UiThrottle.PanelDue(frame, false) ? 1 : 0;
+        }
+        Check(statusRuns == 25 && panelRuns == 50, $"ui throttle: 25 status and 50 panel updates in 100 frames (got {statusRuns}, {panelRuns})");
+        Check(UiThrottle.PanelDue(1, true), "ui throttle: a newly shown entity is refreshed on its first frame");
+    }
+
     private static void TestConfigParsing()
     {
         Config config = new Config();
@@ -168,8 +223,10 @@ internal static class Program
         {
             "# comment", "HaulCache = false", "haulcacheflusheveryticks=5 # trailing", "Diagnostics = TRUE",
             "StatsEveryTicks = -3", "Nonsense", "GcReport = maybe", "RouteMaps = false", "RouteMapsMinFields = 0",
-            "LimitCatchUp = false"
+            "LimitCatchUp = false", "UiThrottle = false"
         }));
+        Check(!config.UiThrottle && config.SoundListener && config.CollectAfterSave,
+            "config: CollectAfterSave, SoundListener and UiThrottle are ways out, on by default");
         Check(!config.LimitCatchUp && new Config().LimitCatchUp, "config: LimitCatchUp is a setting, on by default");
         Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch,
             "config: what decides which simulation code runs cannot be changed from the file");

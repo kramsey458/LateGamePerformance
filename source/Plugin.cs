@@ -114,6 +114,18 @@ namespace LateGamePerformance
             {
                 BackgroundSave.Activate();
             }
+            if (config.CollectAfterSave && SaveCollect.CreateFeature().Apply(HarmonyId))
+            {
+                SaveCollect.Activate();
+            }
+            if (config.SoundListener && SoundListenerSkip.CreateFeature().Apply(HarmonyId))
+            {
+                SoundListenerSkip.Activate();
+            }
+            if (config.UiThrottle && UiThrottle.CreateFeature().Apply(HarmonyId))
+            {
+                UiThrottle.Activate();
+            }
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
                 Timing.Activate();
@@ -220,7 +232,10 @@ namespace LateGamePerformance
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {districtLine}");
                 }
                 foreach (string line in new[]
-                         { WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine() })
+                         {
+                             WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine(),
+                             SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine()
+                         })
                 {
                     if (line != null)
                     {
