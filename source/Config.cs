@@ -52,6 +52,7 @@ namespace LateGamePerformance
         public bool CollectAfterSave = true;
         public bool SoundListener = true;
         public bool UiThrottle = true;
+        public bool AnimatorCulling = true;
         public bool Timing = true;
         // Pacing only (how much simulation one frame may catch up after a hitch), never which ticks run.
         public bool LimitCatchUp = true;
@@ -128,6 +129,7 @@ namespace LateGamePerformance
             CollectAfterSave = Bool(values, nameof(CollectAfterSave), CollectAfterSave);
             SoundListener = Bool(values, nameof(SoundListener), SoundListener);
             UiThrottle = Bool(values, nameof(UiThrottle), UiThrottle);
+            AnimatorCulling = Bool(values, nameof(AnimatorCulling), AnimatorCulling);
             Timing = Bool(values, nameof(Timing), Timing);
             LimitCatchUp = Bool(values, nameof(LimitCatchUp), LimitCatchUp);
             SaveTiming = Bool(values, nameof(SaveTiming), SaveTiming);
@@ -145,7 +147,7 @@ namespace LateGamePerformance
                    $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
-                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }

@@ -45,7 +45,7 @@ internal static class Program
                      "Timberborn.WaterSystemRendering", "Timberborn.TerrainSystemRendering", "Timberborn.MapIndexSystem",
                      "Timberborn.MapStateSystem", "Timberborn.TerrainSystem", "Timberborn.BlockSystem", "Timberborn.WalkingSystem",
                      "Timberborn.CoreSound", "Timberborn.CameraSystem", "Timberborn.SoundSystem", "Timberborn.StatusSystem",
-                     "Timberborn.EntityPanelSystem" })
+                     "Timberborn.EntityPanelSystem", "Timberborn.TimbermeshAnimations" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -81,7 +81,8 @@ internal static class Program
             WaterRendering.CreateTilesFeature(), WaterRendering.CreateUploadsFeature(),
             MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), CatchUp.CreateFeature(), SaveCollect.CreateFeature(),
-            SoundListenerSkip.CreateFeature(), UiThrottle.CreateFeature(), Plugin.CreateTickFeature()
+            SoundListenerSkip.CreateFeature(), UiThrottle.CreateFeature(), AnimatorCulling.CreateFeature(),
+            Plugin.CreateTickFeature()
         };
         int patchCount = 0;
         foreach (Feature feature in features)
@@ -96,7 +97,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 83, $"83 patches declared (found {patchCount})");
+        Check(patchCount == 84, $"84 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -225,8 +226,8 @@ internal static class Program
             "StatsEveryTicks = -3", "Nonsense", "GcReport = maybe", "RouteMaps = false", "RouteMapsMinFields = 0",
             "LimitCatchUp = false", "UiThrottle = false"
         }));
-        Check(!config.UiThrottle && config.SoundListener && config.CollectAfterSave,
-            "config: CollectAfterSave, SoundListener and UiThrottle are ways out, on by default");
+        Check(!config.UiThrottle && config.SoundListener && config.CollectAfterSave && config.AnimatorCulling,
+            "config: CollectAfterSave, SoundListener, UiThrottle and AnimatorCulling are ways out, on by default");
         Check(!config.LimitCatchUp && new Config().LimitCatchUp, "config: LimitCatchUp is a setting, on by default");
         Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch,
             "config: what decides which simulation code runs cannot be changed from the file");

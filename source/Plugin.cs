@@ -126,6 +126,10 @@ namespace LateGamePerformance
             {
                 UiThrottle.Activate();
             }
+            if (config.AnimatorCulling && AnimatorCulling.CreateFeature().Apply(HarmonyId))
+            {
+                AnimatorCulling.Activate();
+            }
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
                 Timing.Activate();
@@ -234,7 +238,7 @@ namespace LateGamePerformance
                 foreach (string line in new[]
                          {
                              WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine(),
-                             SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine()
+                             SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine()
                          })
                 {
                     if (line != null)

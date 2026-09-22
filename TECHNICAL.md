@@ -533,6 +533,22 @@ picked up within a fraction of a second. The `SoundListener:` stats line says in
 
 The `UiThrottle:` stats line counts both. Neither is read by the simulation.
 
+### Animated objects off screen (on by default, new in 0.4.17)
+
+Every frame `AnimatorRegistry` advances every Timbermesh animator in the colony and writes its pose: node
+animators move child transforms, vertex animators set a material time. In the logged colony that was about 1.1 ms
+per frame, and twice that in the working day when every beaver is out walking, whether or not the object was on
+screen. `AnimatorCulling = true` (the default) hooks `TimbermeshAnimator.UpdateAnimation`: when none of the
+object's renderers is visible (Unity's `Renderer.isVisible`, which counts shadow casters), the mod runs the game's
+own private `UpdateTime` and leaves out the pose writes. So `Time`, `RepeatedTime`, `PlayingFinished`, the
+`AnimationChanged` event and the wonder's saved animation time are exactly what they would have been, and only the
+transforms and material values of something nobody can see go unwritten. When the object comes back into view its
+pose is written again on that frame's update, from the time it would have had anyway; on the single frame in which
+it first reappears it can show the pose it had when it left the screen. The renderer list of each animator is
+looked up on first sight and again every 600 frames or when one was destroyed. The `AnimatorCulling:` stats line
+counts updates left out. Rendering only: the simulation reads animator time (the wonder, the clutch, particle
+triggers, the character model), never a node transform or a material.
+
 ### Catch-up limit (on by default, new in 0.4.16)
 
 The game turns each frame's `Time.deltaTime` into simulation buckets, and Unity caps that delta at a third of a
@@ -660,6 +676,7 @@ features, disable the mod.
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `CollectAfterSave` | `true` | Collect garbage right after each save's main-thread part instead of a second later. Memory only; may differ between peers. |
 | `SoundListener` | `true` | Place the audio listener when the camera moved, while it glides, and every tenth frame otherwise. Sound only; may differ between peers. |
+| `AnimatorCulling` | `true` | Leave out the pose update of animated objects with no renderer on screen; their time keeps running. Rendering only; may differ between peers. |
 | `UiThrottle` | `true` | Status alert lists every fourth frame, the selected entity's panel every second frame. Interface only; may differ between peers. |
 | `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
