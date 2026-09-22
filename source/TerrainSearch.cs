@@ -32,8 +32,9 @@ namespace LateGamePerformance
     // know; wherever a search pushes across a step cheaper than the heuristic allows, the guarantee is gone, so
     // such a search is never resumed from and a resumed search that meets one starts over the game's way. Every
     // player on this version gets the same answer, because the search state depends only on the simulation's
-    // own sequence of questions (the only other caller is the game's debug-mode cursor tool); when the host
-    // writes the save a joining player loads, both forget their history so the next question is fresh on both.
+    // own sequence of questions (the only other caller is the game's debug-mode cursor tool). A multiplayer game
+    // needs nothing more: BeaverBuddies has every player, the host included, load the same save file into a new
+    // scene, and a new scene starts with no history.
     // TerrainSearchVerify runs the unmodified algorithm alongside on a shadow field and counts every difference;
     // it never changes what the game is told, so it may differ between players, and a failure in it only switches
     // the comparison off.
@@ -112,8 +113,11 @@ namespace LateGamePerformance
             });
             feature.Patches.Add(new PatchSpec
             {
-                // The save a multiplayer host writes for a joining player. The joiner starts with an empty field, so
-                // the host forgets its own history too: the next question is a fresh search on both.
+                // The game's save into memory: its save benchmark (GameSaver.BenchmarkSavingToMemory, run by the
+                // -benchmarkSaveCount option) and the save it attaches to a crash report after the first uncaught
+                // exception has already stopped the scene. No multiplayer mod calls it: BeaverBuddies sends the save
+                // file itself, and every player loads that into a new scene (SceneCreated). So players do not rely
+                // on this hook to agree; forgetting the history here is harmless in both cases.
                 Name = "GameSaver.SaveWithoutFinishingTick",
                 Required = false,
                 Target = () => Reflect.Method(GameSaverType, "SaveWithoutFinishingTick"),

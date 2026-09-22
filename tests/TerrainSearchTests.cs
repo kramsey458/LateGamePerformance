@@ -186,7 +186,8 @@ internal static class TerrainSearchTests
         check(restarted > 0 && Number(line, @"(\d+) resumed") >= 0, $"terrain search on uneven costs: {restarted} resumed searches met a cheap step and started over the game's way");
         check(TerrainSearch.IsActive, "terrain search on uneven costs: feature still active");
 
-        // Forgetting: after the join save the field answers nothing and the next search is fresh.
+        // Forgetting: after the game's save into memory (its save benchmark) the field answers nothing and the next
+        // search is fresh.
         TerrainSearch.CreateFeature(new Config());
         TerrainSearch.Activate();
         int s0 = nodes[random.Next(nodes.Count)];
@@ -194,7 +195,7 @@ internal static class TerrainSearchTests
         TerrainSearch.TakeStatsLine();
         TerrainSearch.JoinSavePostfix();
         check(Count(modField) == 0 && (int)modField.GetType().GetField("_startNodeId", Any).GetValue(modField) == -1,
-            "terrain search: the join save empties the field");
+            "terrain search: the save into memory empties the field");
         TerrainSearch.FillPrefix(modPathfinder, graph, modField, s0, nodes[random.Next(nodes.Count)]);
         line = TerrainSearch.TakeStatsLine();
         check(line != null && line.Contains("1 started from scratch") && line.Contains("0 resumed"), "terrain search: and the next search is fresh (" + line + ")");
