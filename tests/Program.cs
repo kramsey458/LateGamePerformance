@@ -69,6 +69,15 @@ internal static class Program
         LoadEveryGameAssembly();
         int missing = 0;
         Console.WriteLine("        // dotnet run --project tests -c Release -- --hashes");
+        try
+        {
+            Console.WriteLine($"        internal const string HelpersHash = \"{SaveGuard.HelpersHashNow()}\";");
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine("        // HELPERS NOT FOUND: " + exception.Message);
+            missing++;
+        }
         foreach (KeyValuePair<string, string> entry in SaveSnapshot.Allowed)
         {
             Type type = FindType(entry.Key);

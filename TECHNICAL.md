@@ -738,6 +738,22 @@ would have written; only the thread that wrote part of it down differs.
   main thread, with one log line naming it, until the method is read again and the hash renewed with
   `dotnet run --project tests -c Release -- --hashes`, which prints the list ready to paste. The harness checks
   every listed type against the installed game and fork on each run.
+- **Guarded against other mods' patches (0.4.26).** A Harmony patch leaves a method's IL untouched and runs
+  inside the call all the same, on whichever thread makes it, so the hash cannot see one. Before a type is used
+  on a worker, `SaveGuard` reads Harmony's registry for its `Save`, for every method that `Save` calls directly
+  (read from its IL: calls, virtual calls, constructors, delegates) and for every value serializer it loads from
+  a field; the shared helpers every entity goes through (`EntitySaver`, `ObjectSaver`, `ValueSaver`, the keys,
+  `SerializedEntity`, `SerializedObject`, `SaveConversions`, `PrimitiveTypeSerialization`, the common number,
+  date and good serializers) are checked once per session, for patches and, with one hash over all their IL,
+  for changes. A patch by this mod, or one that was read and listed as safe in `SaveGuard.ReviewedPatches`, is
+  fine; any other keeps that type on the main thread with one log line, or, on a helper, leaves the whole save
+  to the game (`SaveSnapshot:` then counts the saves left to it). The registry is read again whenever the number
+  of patched methods changes, so a mod that patches late is seen at the next save. Reviewed so far: MixedStorage's
+  postfix on `SingleGoodAllower.Save` (it writes its storage's allocation into the same entity from a
+  ConditionalWeakTable lookup; read at 1.0.0, the same since 0.5.8), which in 0.4.25 ran on the workers unchecked.
+  The harness reads the IL of every listed `Save` in the installed game (386 calls, 7 serializers), and with a
+  stand-in registry checks that a foreign patch on a `Save`, on a callee, on a serializer or on a helper is refused,
+  that a reviewed one and this mod's own are not, and that a changed registry is judged again.
 - Why those are safe: the simulation is not running during a save (the tick was finished first), the main thread
   is inside `Create` until the workers have joined, every worker writes only into its own entities' dictionaries,
   and the shared helpers they call (`PrimitiveTypeSerialization`, `SaveConversions`, `GoodAmountSerializer`,
@@ -1108,8 +1124,9 @@ contained. The background rebuild is run for 25 rounds with maps requested in sh
 are busy: every map must be complete and correct at the moment it is asked for. They do not run the game.
 
 `dotnet run --project tests -c Release -- --hashes` prints the current hash of every listed snapshot component's
-`Save` (game and, when installed, the BeaverBuddies MultiColony fork), ready to paste into `SaveSnapshot.Allowed`
-after an update; the ordinary run checks every listed hash against what is installed.
+`Save` (game and, when installed, the BeaverBuddies MultiColony fork) and of the shared saving helpers, ready to
+paste into `SaveSnapshot.Allowed` and `SaveGuard.HelpersHash` after an update; the ordinary run checks every
+listed hash against what is installed.
 
 `tools/benchmark-timberborn.ps1` runs the game's built-in benchmark on a save with per-component tick timings
 (`-metrics`), for before/after comparisons.

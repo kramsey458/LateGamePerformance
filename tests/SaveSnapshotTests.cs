@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using System.Threading;
 using LateGamePerformance;
 using Timberborn.Persistence;
@@ -127,7 +129,12 @@ internal static class SaveSnapshotTests
         check(failure == null && Equal(many, sequential), "save snapshot: more workers than a machine has still give the same result");
         check(SaveSnapshot.Allowed.ContainsKey("Timberborn.BlockSystem.BlockObject") && SaveSnapshot.Allowed.Count >= 90,
             "save snapshot: the allowed list holds the audited components");
-        // The hash guard (0.4.25): a listed type is used only while its Save is the one that was read.
+        // The hash guard (0.4.25): a listed type is used only while its Save is the one that was read. Harmony's registry
+        // cannot run here, so the guard sees an empty one.
+        SaveGuard.PatchesOn = _ => null;
+        SaveGuard.PatchedMethodCount = () => 0;
+        SaveGuard.ResetForTests();
+        SaveSnapshot.ForgetVerdictsForTests();
         Program.LoadEveryGameAssembly();
         int listed = 0, found = 0, allowed = 0;
         foreach (KeyValuePair<string, string> entry in SaveSnapshot.Allowed)
@@ -158,6 +165,66 @@ internal static class SaveSnapshotTests
         SaveSnapshot.Allowed.Remove(typeof(Part).FullName);
         SaveSnapshot.ForgetVerdictsForTests();
         check(refused && stillRefused && allowedNow, "save snapshot: a listed type whose Save changed is refused once per session, with a log line, and allowed again once its hash is renewed");
+
+        // The patch guard (0.4.26): what a Save calls is read from its IL, and a patch by another mod on the Save, on a
+        // method it calls, on a serializer it loads or on a shared helper keeps the type, or every entity, on the main thread.
+        check(SaveGuard.ParkedReason == null, "save guard: the shared saving helpers are the ones that were read, and nothing patches them");
+        MethodBase partSave = SaveGuard.SaveMethod(typeof(Part));
+        SaveGuard.ReadForTests(partSave, out List<MethodBase> callees, out List<Type> serializers);
+        MethodBase currentThread = typeof(Thread).GetProperty("CurrentThread").GetGetMethod();
+        check(callees.Contains(currentThread) && callees.Any(m => m.Name == "GetComponent" && m.DeclaringType == typeof(IEntitySaver)) &&
+              callees.Any(m => m.Name == "Set" && m.DeclaringType == typeof(IObjectSaver) && m.IsGenericMethod) &&
+              callees.Any(m => m.Name == "Set" && m.DeclaringType == typeof(IObjectSaver) && !m.IsGenericMethod) &&
+              callees.Any(m => m is ConstructorInfo && m.DeclaringType == typeof(InvalidOperationException)),
+            $"save guard: the calls a Save makes are read from its IL, interface, generic and constructor calls included ({callees.Count} callees)");
+        check(serializers.SequenceEqual(new[] { typeof(PairSerializer) }), "save guard: the serializer a Save loads from a field is found");
+        int gameCallees = 0, gameSerializers = 0;
+        foreach (KeyValuePair<string, string> entry in SaveSnapshot.Allowed)
+        {
+            Type type = Program.FindType(entry.Key);
+            if (type == null) continue;
+            SaveGuard.ReadForTests(SaveGuard.SaveMethod(type), out List<MethodBase> theirs, out List<Type> theirSerializers);
+            gameCallees += theirs.Count;
+            gameSerializers += theirSerializers.Count;
+        }
+        check(gameCallees > 200 && gameSerializers > 5, $"save guard: every listed Save's IL reads cleanly ({gameCallees} calls, {gameSerializers} serializers over the list)");
+        SaveSnapshot.Allowed[typeof(Part).FullName] = hash;
+        SaveGuard.PatchesOn = m => m == partSave ? new[] { ("some.other.mod", "Other.Mod.SavePatch.Postfix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool refusedForPatch = !SaveSnapshot.IsAllowed(typeof(Part));
+        SaveGuard.ReviewedPatches.Add(("Part.Save", "some.other.mod", "Other.Mod.SavePatch.Postfix"));
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool allowedReviewed = SaveSnapshot.IsAllowed(typeof(Part));
+        SaveGuard.ReviewedPatches.RemoveAt(SaveGuard.ReviewedPatches.Count - 1);
+        SaveGuard.PatchesOn = m => m == partSave ? new[] { (Plugin.HarmonyId, "LateGamePerformance.Something.Prefix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool allowedOwn = SaveSnapshot.IsAllowed(typeof(Part));
+        SaveGuard.PatchesOn = m => m == currentThread ? new[] { ("some.other.mod", "Other.Mod.ThreadPatch.Prefix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool refusedCallee = !SaveSnapshot.IsAllowed(typeof(Part));
+        MethodBase serialize = typeof(PairSerializer).GetMethod("Serialize");
+        SaveGuard.PatchesOn = m => m == serialize ? new[] { ("some.other.mod", "Other.Mod.PairPatch.Postfix") } : null;
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool refusedSerializer = !SaveSnapshot.IsAllowed(typeof(Part));
+        check(refusedForPatch && allowedReviewed && allowedOwn && refusedCallee && refusedSerializer,
+            "save guard: another mod's patch on a Save, on a method it calls or on its serializer keeps the type on the main thread; a reviewed one or this mod's own does not");
+        MethodBase saverConstructor = typeof(EntitySaver).GetConstructors()[0];
+        SaveGuard.PatchesOn = m => m == saverConstructor ? new[] { ("some.other.mod", "Other.Mod.SaverPatch.Prefix") } : null;
+        SaveGuard.PatchedMethodCount = () => 1;
+        bool registryChanged = SaveGuard.RegistryChanged();
+        string parked = SaveGuard.ParkedReason;
+        check(registryChanged && parked != null && parked.Contains("EntitySaver..ctor") && parked.Contains("some.other.mod"),
+            "save guard: another mod's patch on a shared saving helper leaves the whole save to the game, naming the patch");
+        SaveGuard.PatchesOn = _ => null;
+        SaveGuard.PatchedMethodCount = () => 2;
+        check(SaveGuard.RegistryChanged() && SaveGuard.ParkedReason == null && !SaveGuard.RegistryChanged(),
+            "save guard: when the number of patched methods changes everything is judged again; unchanged, nothing is");
+        SaveGuard.PatchedMethodCount = () => throw new InvalidOperationException("no registry");
+        check(SaveGuard.RegistryChanged() && SaveGuard.ParkedReason == null, "save guard: a registry that cannot be counted still lets the helpers be judged");
+        SaveGuard.PatchedMethodCount = () => 0;
+        SaveSnapshot.Allowed.Remove(typeof(Part).FullName);
+        SaveSnapshot.ForgetVerdictsForTests();
+        SaveGuard.ResetForTests();
         // The deep comparison tells a changed value apart, which the game's reference comparison of lists cannot.
         SerializedEntity x = new SerializedEntity(Guid.Empty, "t"), y = new SerializedEntity(Guid.Empty, "t");
         new Part(7, "s").Save(new EntitySaver(x));

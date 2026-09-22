@@ -167,9 +167,12 @@ namespace LateGamePerformance
         private static readonly Dictionary<string, int> Unlisted = new Dictionary<string, int>();
         private static bool _unlistedLogged;
         private static readonly Dictionary<Type, bool> Verdicts = new Dictionary<Type, bool>();
+        private static long _leftToGame;
+        private static bool _parkedLogged;
 
-        // Whether this component type may be snapshotted on a worker: on the list, and its Save unchanged since
-        // it was read. Decided once per type per session.
+        // Whether this component type may be snapshotted on a worker: on the list, its Save unchanged since it
+        // was read, and nothing of another mod's patched into its Save or what it calls (SaveGuard). Decided once
+        // per type per session, and again whenever the patched methods change.
         internal static bool IsAllowed(Type type)
         {
             if (Verdicts.TryGetValue(type, out bool allowed))
@@ -188,13 +191,19 @@ namespace LateGamePerformance
                 return false;
             }
             string actual = SaveHash(type);
-            if (actual == expected)
+            if (actual != expected)
             {
-                return true;
+                Log.Warning($"SaveSnapshot: the saving code of {type.FullName} is not the one that was read (it hashes to {actual}, " +
+                            $"the one read to {expected}); its entities stay on the main thread until it is read again.");
+                return false;
             }
-            Log.Warning($"SaveSnapshot: the saving code of {type.FullName} is not the one that was read (it hashes to {actual}, " +
-                        $"the one read to {expected}); its entities stay on the main thread until it is read again.");
-            return false;
+            string refusal = SaveGuard.Refusal(type);
+            if (refusal != null)
+            {
+                Log.Info($"SaveSnapshot: the entities of {type.FullName} stay on the main thread: {refusal}.");
+                return false;
+            }
+            return true;
         }
 
         // A hash (FNV-1a, 64 bits) of the IL bytes of the type's Save(IEntitySaver): what the method does, as compiled.
@@ -267,8 +276,9 @@ namespace LateGamePerformance
             string line = $"SaveSnapshot: {_saves} snapshot(s); per snapshot {_onWorkers / _saves} entities on worker threads and " +
                           $"{_onMain / _saves} on the main thread; the main thread spent {mainMs / _saves:0} ms per snapshot " +
                           $"(workers {workerMs / _saves:0} ms alongside)" +
+                          (_leftToGame > 0 ? $"; {_leftToGame} save(s) left entirely to the game because of another mod's patch or a changed helper (see the log)" : "") +
                           (_verify ? $"; verify mismatches {_verifyMismatches}" : "");
-            _saves = _onWorkers = _onMain = _mainStopwatchTicks = _workerStopwatchTicks = _verifyMismatches = 0;
+            _saves = _onWorkers = _onMain = _mainStopwatchTicks = _workerStopwatchTicks = _verifyMismatches = _leftToGame = 0;
             return line;
         }
 
@@ -279,6 +289,25 @@ namespace LateGamePerformance
         {
             if (!_active)
             {
+                return true;
+            }
+            // Other mods' patches are read again whenever their number changed (SaveGuard); a patch on one of the
+            // helpers every entity goes through leaves this save to the game.
+            if (SaveGuard.RegistryChanged())
+            {
+                Verdicts.Clear();
+                _parkedLogged = false;
+            }
+            string parked = SaveGuard.ParkedReason;
+            if (parked != null)
+            {
+                if (!_parkedLogged)
+                {
+                    Log.Info("SaveSnapshot: every entity stays on the main thread and the game takes its own snapshot until the " +
+                             "patched methods change: " + parked + ".");
+                    _parkedLogged = true;
+                }
+                _leftToGame++;
                 return true;
             }
             long stamp = Stopwatch.GetTimestamp();
