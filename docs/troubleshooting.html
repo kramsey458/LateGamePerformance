@@ -41,12 +41,14 @@
   <table>
     <thead><tr><th>Message</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td><code><span data-release="version">0.4.26</span> loading.</code></td><td>The mod started. Normal.</td></tr>
-      <tr><td><code>HaulCache: enabled (13/13 patches).</code> and similar for <code>RouteMaps</code>, <code>YielderSearch</code></td><td>A feature installed all its hooks. Normal.</td></tr>
+      <tr><td><code><span data-release="version">0.4.27</span> loading.</code></td><td>The mod started. Normal.</td></tr>
+      <tr><td><code>HaulCache: enabled (14/14 patches).</code> and similar for <code>RouteMaps</code>, <code>YielderSearch</code></td><td>A feature installed all its hooks. Normal.</td></tr>
       <tr><td><code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on.</code></td><td>All eleven features that affect the simulation are running. Normal, and it should read the same for every player.</td></tr>
       <tr><td><code>Simulation features: … OFF …</code></td><td>A feature could not start. <a href="#off">What to do</a>.</td></tr>
       <tr><td><code>… required patch '…' failed … Feature disabled; the game runs unmodified for this part.</code></td><td>The reason a feature could not start. <a href="#off">What to do</a>.</td></tr>
-      <tr><td><code>… failed and turned itself off for this session: …</code></td><td>A feature hit an unexpected error and switched itself off. <a href="#failed">Report it</a>.</td></tr>
+      <tr><td><code>… failed and turned itself off for this session: …</code></td><td>A feature hit an unexpected error and switched itself off. <a href="#failed">What to do</a>.</td></tr>
+      <tr><td><code>Simulation features: … OFF … turned itself off during this session after an error …</code></td><td>The startup line, said again after a feature switched itself off, with that feature <code>OFF</code>. <a href="#failed">What to do</a>.</td></tr>
+      <tr><td><code>… could not be built on the first try; it was built again on the main thread …</code></td><td>A route or terrain map failed on a worker thread and the main thread built it instead. The feature stays on and every player keeps the same maps. <a href="#report">Report it</a>.</td></tr>
       <tr><td><code>GC: incremental=True</code> or <code>False</code></td><td>Whether memory clean-ups are spread out. <a href="#gc-off">If False</a>.</td></tr>
       <tr><td><code>Settings: '…' is ignored. It is no longer a setting…</code></td><td>An old settings file has a key that no longer exists. <a href="#ignored">Harmless</a>.</td></tr>
       <tr><td><code>Last 1000 ticks. Timing: …</code>, <code>HaulCache: …</code>, <code>RouteMaps: …</code>, <code>YielderSearch: …</code></td><td>Stats lines. Normal. <a href="faq.html#timing">What they show</a>.</td></tr>
@@ -89,7 +91,7 @@
   <details id="crash">
     <summary>The game crashes while loading</summary>
     <div class="answer">
-      <p>Use the latest release. Version 0.4.3 is broken and crashes the game while loading; if that is what you have, replace it. If you are on <span data-release="version">0.4.26</span> and it still crashes, <a href="#report">report it</a> with <code>Player.log</code>, and try the game once with only Harmony, Mod Settings and this mod enabled.</p>
+      <p>Use the latest release. Version 0.4.3 is broken and crashes the game while loading; if that is what you have, replace it. If you are on <span data-release="version">0.4.27</span> and it still crashes, <a href="#report">report it</a> with <code>Player.log</code>, and try the game once with only Harmony, Mod Settings and this mod enabled.</p>
     </div>
   </details>
 
@@ -108,7 +110,7 @@
   <details id="failed">
     <summary>A log line says a feature "failed and turned itself off for this session"</summary>
     <div class="answer">
-      <p>The feature hit an unexpected error, so it switched itself off and the game's own code took over for the rest of the session. Nothing is broken, but it should not happen. <a href="#report">Report it</a> with the whole line, including the error text that follows it. In multiplayer, a <code>RouteMaps</code> line on one computer is the one worth noticing: tell the other players and include everyone's log in the report.</p>
+      <p>The feature hit an unexpected error, so it switched itself off and the game's own code took over for the rest of the session. Since 0.4.27 the game shows a dialog saying so, and <code>Player.log</code> repeats the <code>Simulation features:</code> line with that feature <code>OFF</code> at once, on every stats interval and in each new game. In single player nothing is lost but speed. In multiplayer the other players may still be running the mod's code for that part, so every player should quit and restart the game before playing on together; the feature is back after a restart. Either way, <a href="#report">report it</a> with the whole line, including the error text that follows it, and in multiplayer include everyone's log.</p>
     </div>
   </details>
 
@@ -154,7 +156,7 @@
     <summary>The game got slower after I changed a setting</summary>
     <div class="answer">
       <ul>
-        <li><code>HaulCacheVerify = true</code> and <code>YielderSearchVerify = true</code> run the game's own code as well and compare. They are slower than no mod and are for testing only. Set them back to <code>false</code>.</li>
+        <li>The verify settings (<code>HaulCacheVerify = true</code>, <code>YielderSearchVerify = true</code>, the <strong>Verify every feature</strong> box and the others) run the game's own code as well and compare. They are slower than no mod and are for testing only. Set them back to <code>false</code>.</li>
         <li><strong>Record per-component timings</strong> adds two stopwatch calls around every component tick, so the game runs a little slower while it is on. Untick it after a profiling session.</li>
         <li><code>Diagnostics = true</code> adds overhead to hot code. Switch it off again after collecting numbers.</li>
       </ul>
@@ -188,7 +190,7 @@
   <div class="wrap foot">
     <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.26</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.27</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>

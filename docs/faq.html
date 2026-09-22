@@ -46,12 +46,12 @@
 
   <details id="how-much">
     <summary>How much faster will my game be?</summary>
-    <div class="answer" data-release-pinned="0.4.26">
+    <div class="answer" data-release-pinned="0.4.27">
       <p>There is no single figure, because it depends on your colony and your computer. What has been reported so far:</p>
       <ul>
         <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.14 was reported as working well; 0.4.23, the last release played, as working amazingly well).</li>
         <li>On a computer that had memory clean-up freezes of most of a second about once a minute, incremental garbage collection removed them and made the frame rate much steadier at high tick rates.</li>
-        <li>0.4.26, the latest release, has not been played yet; it is the round built from a recorded 0.4.23 session, reviewed for production safety and tested against the game's classes: fewer tree-search lookups, plant water ticks that stay on the fast path when a plant is planted or cut, the mod&rsquo;s own worker threads, route map caches walked only after a change, no behaviour log strings until a save reads them, far-away animated objects posed less often, more of the save snapshot on worker threads (with a guard against other mods&rsquo; patches on the saving code, 0.4.26), and 0.4.24&rsquo;s removal of the memory clean-up that froze every save for about a second.</li>
+        <li>0.4.27, the latest release, has not been played yet, and neither has 0.4.26. 0.4.27 adds no new speed-up: it makes the verify settings only measure, builds a route map that failed on a worker thread again on the main thread, and shows a dialog if a feature turns itself off. 0.4.26 is the round built from a recorded 0.4.23 session, reviewed for production safety and tested against the game's classes: fewer tree-search lookups, plant water ticks that stay on the fast path when a plant is planted or cut, the mod&rsquo;s own worker threads, route map caches walked only after a change, no behaviour log strings until a save reads them, far-away animated objects posed less often, more of the save snapshot on worker threads (with a guard against other mods&rsquo; patches on the saving code, 0.4.26), and 0.4.24&rsquo;s removal of the memory clean-up that froze every save for about a second.</li>
         <li>0.4.21 to 0.4.23 stop visiting the ten thousand trees, crops and paths that have nothing to tick, take most of a save's snapshot on worker threads, and move the plant water levels and the soil change lists to the workers that already hold the data.</li>
         <li>0.4.16 to 0.4.18 are aimed at what a logged 354-beaver session showed: the second of stutter after every autosave and memory clean-up, and the single slow beaver ticks and end-of-day slump from terrain path searches that restarted from the same tile.</li>
       </ul>
@@ -139,12 +139,12 @@
 
   <details id="safety">
     <summary>What if something goes wrong?</summary>
-    <div class="answer"><p>If anything throws inside a feature, that feature switches itself off for the rest of the session and the game's own code runs. If a game method a feature needs is missing (for example after a game update), the feature does not start at all and the startup line says <code>OFF</code>. Patches on methods that Harmony cannot patch safely are refused. See <a href="troubleshooting.html#off">Troubleshooting</a>.</p></div>
+    <div class="answer"><p>If anything throws inside a feature, that feature switches itself off for the rest of the session and the game's own code runs. Since 0.4.27 the game then shows a dialog asking every player to restart, and <code>Player.log</code> repeats the <code>Simulation features:</code> line with that feature <code>OFF</code>. A route or terrain map that fails on a worker thread is built again on the main thread first; the feature turns off only if that fails too. If a game method a feature needs is missing (for example after a game update), the feature does not start at all and the startup line says <code>OFF</code>. Patches on methods that Harmony cannot patch safely are refused. See <a href="troubleshooting.html#off">Troubleshooting</a>.</p></div>
   </details>
 
   <details id="verify">
     <summary>Can I check it against the game?</summary>
-    <div class="answer"><p>Yes. Every feature that replaces a game calculation has a verify setting in <code>LateGamePerformance.cfg</code> (<code>HaulCacheVerify</code>, <code>YielderSearchVerify</code>, <code>PlantWaterVerify</code>, <code>DistrictCountsVerify</code>, <code>WaterMapCopyVerify</code>, <code>SoilScansVerify</code>, <code>HomeSearchVerify</code>, <code>TerrainSearchVerify</code> and <code>SaveSnapshotVerify</code>; the last two are also boxes on the settings page). Each runs the game's own code as well, and compares and logs any difference. In 0.4.26 and earlier most of them then hand the game the game's own result, so in a multiplayer game leave them off; from 0.4.27 the game is always handed the mod's own result and the checks only measure. They are slower than no mod, so use them for a test session and switch them off afterwards. In the stats lines look for <code>verify mismatches 0</code>; any mismatch is a bug worth reporting. Since 0.4.26 one box, <strong>Verify every feature</strong>, turns all of them on for a session.</p></div>
+    <div class="answer"><p>Yes. Every feature that replaces a game calculation has a verify setting in <code>LateGamePerformance.cfg</code> (<code>HaulCacheVerify</code>, <code>YielderSearchVerify</code>, <code>PlantWaterVerify</code>, <code>DistrictCountsVerify</code>, <code>WaterMapCopyVerify</code>, <code>SoilScansVerify</code>, <code>HomeSearchVerify</code>, <code>TerrainSearchVerify</code> and <code>SaveSnapshotVerify</code>; the last two are also boxes on the settings page). Each runs the game's own code as well, and compares and logs any difference. Since 0.4.27 the game is always handed the mod's own result, so the checks only measure and one player may have them on in a multiplayer game; in 0.4.26 and earlier most of them handed the game its own result, so leave them off there. They are slower than no mod, so use them for a test session and switch them off afterwards. In the stats lines look for <code>verify mismatches 0</code>; any mismatch is a bug worth reporting. Since 0.4.26 one box, <strong>Verify every feature</strong>, turns all of them on for a session.</p></div>
   </details>
 
   <h2 id="gc-section">Memory clean-up (garbage collection)</h2>
@@ -219,7 +219,7 @@
   <div class="wrap foot">
     <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.26</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.27</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>
