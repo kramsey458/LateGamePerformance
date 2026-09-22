@@ -33,11 +33,11 @@
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow">Timberborn 1.1 mod &middot; Version <span data-release="version">0.4.20</span></span>
+      <span class="eyebrow">Timberborn 1.1 mod &middot; Version <span data-release="version">0.4.23</span></span>
       <h1>Late-game colonies that keep up.</h1>
       <p class="lead">Big colonies make the game repeat the same work again and again: finding jobs for haulers, rebuilding routes, searching for trees, cleaning up memory. Late Game Performance removes that repeated work, so you get fewer lag spikes and freezes. It is built to change how quickly the game finds its answers, not what the answers are.</p>
       <div class="cta">
-        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.20</span></span></a>
+        <a class="btn" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.23</span></span></a>
         <a class="btn ghost" href="install.html">Install guide</a>
       </div>
       <ul class="badges" aria-label="Facts">
@@ -45,8 +45,8 @@
         <li>Needs Harmony and Mod Settings</li>
         <li>Built against Timberborn 1.1.2.4</li>
       </ul>
-      <div class="notice ok" role="note" data-release-pinned="0.4.20">
-        <p><strong>Played in a real late-game colony up to 0.4.14.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8; 0.4.14 has been played since and reported as working well). What 0.4.15 to 0.4.20 add has not been played yet. <a href="#status">See exactly what is and isn't tested.</a></p>
+      <div class="notice ok" role="note" data-release-pinned="0.4.23">
+        <p><strong>Played in a real late-game colony, most recently as 0.4.23.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8), was reported as working well as 0.4.14, and as 0.4.23 as working amazingly well. The stats lines from those sessions have not been read yet, so the savings are not measured. <a href="#status">See exactly what is and isn't tested.</a></p>
       </div>
     </div>
     <figure class="diagram">
@@ -110,17 +110,32 @@
       <article class="card">
         <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18c3-6 6-9 9-9"/><path d="M13 9l3-3"/><path d="M16 6h4v4"/><circle cx="4" cy="18" r="1.5"/></svg></div>
         <h3>Beavers off the roads stop re-searching (0.4.18)</h3>
-        <p>A beaver in a field or forest that weighs up where to eat, drink or rest makes the game search the terrain once per building, restarting from the same tile each time. The mod continues the previous search instead, so ground already covered is never covered again. The distances are the game&rsquo;s; when two routes are equally short the mod can pick the other one, the same for every player. Not yet played in a colony.</p>
+        <p>A beaver in a field or forest that weighs up where to eat, drink or rest makes the game search the terrain once per building, restarting from the same tile each time. The mod continues the previous search instead, so ground already covered is never covered again. The distances are the game&rsquo;s; when two routes are equally short the mod can pick the other one, the same for every player.</p>
       </article>
       <article class="card">
         <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14h4l3-8 4 12 3-6h4"/></svg></div>
         <h3>One hitch stays one hitch (0.4.16, 0.4.17)</h3>
-        <p>After an autosave or a memory clean-up the game tried to run everything the long frame had missed in the next frames: about a second of stutter per hitch in a logged 354-beaver session. One frame now catches up at most twice an ordinary frame&rsquo;s worth, and the memory clean-up that followed every autosave a second later happens inside the save frame. Not yet played in a colony.</p>
+        <p>After an autosave or a memory clean-up the game tried to run everything the long frame had missed in the next frames: about a second of stutter per hitch in a logged 354-beaver session. One frame now catches up at most twice an ordinary frame&rsquo;s worth, and the memory clean-up that followed every autosave a second later happens inside the save frame.</p>
       </article>
       <article class="card">
         <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg></div>
         <h3>Less work per frame (0.4.17)</h3>
-        <p>The audio listener is placed only when the camera moved instead of casting rays every frame; the alert lists and the selected entity&rsquo;s panel refresh every few frames; animated objects entirely off screen keep their timing but skip writing a pose nobody sees. None of it touches the simulation. Not yet played in a colony.</p>
+        <p>The audio listener is placed only when the camera moved instead of casting rays every frame; the alert lists and the selected entity&rsquo;s panel refresh every few frames; animated objects entirely off screen keep their timing but skip writing a pose nobody sees. None of it touches the simulation.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21v-7"/><path d="M12 14c-3 0-5-2-5-5V5c3 0 5 2 5 5 0-3 2-5 5-5v4c0 3-2 5-5 5z"/></svg></div>
+        <h3>Trees, crops and paths stop being visited every tick (0.4.21)</h3>
+        <p>Every tree, crop, path, levee and platform is a tickable entity whose only tick part is switched off nearly all the time, yet the game visits all ten thousand of them on every tick. The mod ticks only entities with a part switched on, in the game&rsquo;s own order, and moves entities in and out the moment a part is switched. Same result, about a third of the tick&rsquo;s entity work gone.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3"/><rect x="8" y="13" width="8" height="5"/></svg></div>
+        <h3>Saves freeze the game for less (0.4.22)</h3>
+        <p>The snapshot a save starts with was the last part of a save still on the main thread. Trees, crops, paths, levees and platforms, nearly all of a big colony, are now snapshotted on worker threads, using only components whose saving code has been read; beavers and workplaces stay on the main thread, which does its share alongside. The save is the same file, and a settings-page box compares it with the game&rsquo;s own snapshot.</p>
+      </article>
+      <article class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h10"/><path d="M4 17h13"/><path d="M17 10l3 2-3 2"/></svg></div>
+        <h3>Three more chores leave the main thread (0.4.23)</h3>
+        <p>The water level of every plant is read on the water worker right after the water map is copied there; the list of soil cells whose moisture or contamination changed is written by the worker that finishes the soil simulation; and the every-tick search for a beaver to move into a home asks the same beavers the same questions without the lookups the game made for each of them. Each gives the game&rsquo;s own result.</p>
       </article>
       <article class="card">
         <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.4"/><path d="M16.5 14.2A5 5 0 0 1 21 19"/></svg></div>
@@ -264,7 +279,7 @@
       </div>
       <div class="tiles wide" style="grid-template-columns:repeat(2,1fr)">
         <div class="tile"><div class="t-value">about 350</div><div class="t-label">beavers in the late-game save it was played in</div><div class="t-note">noticeably fewer lag spikes</div></div>
-        <div class="tile"><div class="t-value">264</div><div class="t-label">automated checks pass</div><div class="t-note">including 88 patch targets checked against the game (297 and 106 in preview 0.4.23)</div></div>
+        <div class="tile"><div class="t-value">297</div><div class="t-label">automated checks pass</div><div class="t-note">including 106 patch targets checked against the game</div></div>
         <div class="tile"><div class="t-value">0</div><div class="t-label">differences from the game's tree search</div><div class="t-note">in 4,000 random forests</div></div>
         <div class="tile"><div class="t-value">9.5 million</div><div class="t-label">route map nodes compared with the game's own</div><div class="t-note">every one identical</div></div>
       </div>
@@ -274,7 +289,7 @@
 
 <section id="status">
   <div class="wrap">
-    <div class="section-head" data-release-pinned="0.4.20">
+    <div class="section-head" data-release-pinned="0.4.23">
       <span class="eyebrow">Status</span>
       <h2>What is tested, and what isn't</h2>
       <p class="lead">Tested extensively, but it is still a young mod, so here is the honest picture. Try it on a copy of a save first.</p>
@@ -283,9 +298,10 @@
       <div class="notice ok" style="margin:0">
         <p><strong>Verified</strong></p>
         <ul class="checks">
-          <li>Played in a late-game save of about 350 beavers (as 0.4.8): noticeably fewer lag spikes.</li>
+          <li>Played in a late-game save of about 350 beavers: noticeably fewer lag spikes as 0.4.8, reported as working well as 0.4.14 and as working amazingly well as 0.4.23.</li>
           <li>Played in multiplayer sessions on two computers, including a 35-minute session logged on both.</li>
-          <li>264 automated checks pass against the installed game's own assemblies, including 88 patch targets.</li>
+          <li>297 automated checks pass against the installed game's own assemblies, including 106 patch targets.</li>
+          <li>The tick loop that passes over entities with nothing to tick, the save snapshot on worker threads, the plant water levels from the water worker and the soil lists from the soil workers are each tested against the game's real classes: the same ticks in the same order, the same save entity for entity, the same levels and events, the same cells.</li>
           <li>Resumed terrain searches run against the game's real search classes on a random terrain: every search from scratch is identical node for node, and 1,200 searches in pricing runs all give the game's distance.</li>
           <li>The water map copy made on a worker thread holds the same bytes as the game's own, and the soil scans update the same cells in the same order, tested against the game's real classes.</li>
           <li>Rebuilt route maps are identical to the game's, node for node, whoever built them, and every map is complete at the moment it is asked for (25 shuffled rounds with workers busy).</li>
@@ -296,9 +312,8 @@
       <div class="notice" style="margin:0">
         <p><strong>Not yet verified</strong></p>
         <ul class="checks no">
-          <li>Previews <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.21">0.4.21</a>, <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.22">0.4.22</a> and <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.23">0.4.23</a> (pre-releases, not yet played): trees, crops and paths with nothing to tick are passed over in the tick loop; the save snapshot of those same entities is taken on worker threads, with a verify box; and (0.4.23) the plant water levels and the soil changed-cell lists are made on the workers that already hold the data, while the home search drops its per-beaver overhead. All are checked against the game's real classes in the harness, 0.4.21 and 0.4.22 were code-reviewed and 0.4.23 builds what that review proposed; the game running with them is not yet tested.</li>
-          <li>Everything added in 0.4.15 to 0.4.20 (resumed terrain searches, the catch-up limit after a long frame, the memory clean-up inside the save frame, the audio listener and interface work every few frames, off-screen animation, the settings-page boxes) is tested against the game's assemblies but has not been played in a colony yet. A code review of all of it was done before 0.4.20 and its findings fixed.</li>
-          <li>0.4.14 has been played and reported as working well, but no stats lines from that session have been read yet, so the in-game savings are not measured.</li>
+          <li>No stats lines from a played session (0.4.14 or 0.4.23) have been read yet, so the in-game savings are not measured; the improvement is reported from play.</li>
+          <li>The verify settings, which run the game's own code alongside the mod's and compare, have not been run inside the game; every comparison so far is in the harness against the game's real classes.</li>
           <li>The tree search against the game's own search inside a running game (the model comes from reading the game's code).</li>
           <li>A controlled frame rate benchmark. The improvement is reported from play and logs, and it depends on your colony.</li>
           <li>The main menu notice about incremental collection, because the test computers already have it on.</li>
@@ -318,7 +333,7 @@
   <div class="wrap foot">
     <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.20</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.23</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>
