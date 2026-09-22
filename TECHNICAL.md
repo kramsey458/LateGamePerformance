@@ -622,8 +622,25 @@ so BeaverBuddies' own prefix on the same method, which hashes the game's list be
 and metered components, with components switched on and off and entities added and removed both between passes
 and from inside another entity's tick, and requires the sequence of effective ticks to be identical to a model of
 the game's loop; a directed case removes an entity during a pass and switches it on later in the same pass. The
-`IdleEntities:` stats line says how many entities per tick were ticked and how many left out. If any bookkeeping
-throws, the feature switches itself off and the game's loop runs.
+`IdleEntities:` stats line says how many entities per tick were ticked and how many left out, and on how many passes
+the keys were compared (below). If any bookkeeping throws, the feature switches itself off and the game's loop runs.
+
+Each pass starts by making sure the mirror's keys are still the game's, and rebuilds the mirror from the game's list
+if they are not (the stats line counts rebuilds; there should be none). The walk over every key for that is skipped
+while the list's own change counter (`SortedList`'s private `version`, which every insert, removal and clear moves)
+stands where it stood when the keys last matched. The mirror's keys change only in step with the game's list: after
+the game's `Add`, which moves the counter, and in removals that take a key from both lists or find it in neither.
+So an unmoved counter means the walk would have found the keys equal, skipping it changes nothing the game does,
+and players with and without the skip stay in step. A bucket whose list changed since its last pass gets the walk
+once. Each bucket's keys are walked anyway on every 128th of its passes, which would catch a change that bypasses
+the counter (only a write to the list's private fields could). If the runtime's list has no counter under a known
+name (`version`, or `_version`), the keys are walked on every pass, as before. In the harness on .NET 8, a tick's
+128 passes over 11,700 entities in 128 buckets, 1 in 12 awake, take about 47 us with the walk on every pass and
+30 us with it skipped; it has not been measured under the game's Mono. The harness checks both kinds of change made
+behind the hooks: one that moves the counter is found on the next pass, as before, and one that puts the counter
+back is found on the 128th. It also replays a 400-pass history that changes the game's list behind the hooks as
+well as through them, once with the skip and once with the walk on every pass, and requires the same ticks and the
+same rebuilds.
 
 ### Terrain path searches resumed instead of restarted (always on, new in 0.4.18)
 
