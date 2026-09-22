@@ -1,3 +1,4 @@
+using HarmonyLib;
 using System;
 using System.Runtime.CompilerServices;
 using UnityEngine;
@@ -124,6 +125,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         private static bool UpdatePrefix(object __instance, float deltaTime)
         {
             if (!_active)

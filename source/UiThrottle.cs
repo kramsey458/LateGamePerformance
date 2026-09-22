@@ -128,6 +128,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         private static bool StatusPrefix()
         {
             if (!_active)
@@ -152,6 +153,7 @@ namespace LateGamePerformance
             }
         }
 
+        [HarmonyPriority(Priority.Last)]
         private static bool TopBarPrefix()
         {
             if (!_active)
@@ -175,6 +177,7 @@ namespace LateGamePerformance
             }
         }
 
+        [HarmonyPriority(Priority.Last)]
         private static bool ReachabilityPrefix()
         {
             if (!_active)
@@ -189,6 +192,7 @@ namespace LateGamePerformance
             return false;
         }
 
+        [HarmonyPriority(Priority.Last)]
         private static bool PanelPrefix(object __instance)
         {
             if (!_active)

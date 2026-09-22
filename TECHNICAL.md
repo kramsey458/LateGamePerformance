@@ -76,11 +76,12 @@ game's own node ids: every tile of every map is inside its box, a tile just outs
 answers maybe. The stats line now says how many were left out for each reason (`of which 12000 dead plants and
 300000 plants outside the route map's reach`).
 
-- Up to 0.4.24 the first candidate of a search was always looked up, so that the lookup refilled the building's
-  terrain route map on the same tick as without the mod. Since 0.4.12 every cached terrain map is built at the end
-  of each navigation tick anyway, and in the game's code the only reader of a terrain map's filled state is the
-  fill itself (`TerrainFlowFieldGenerator.FillFlowFieldUpToDistance`, which returns at once when the map is
-  filled), so when a map gets filled cannot change any result. The guarantee is dropped in 0.4.25.
+- The first lookup of a search is still made, whatever the plant: it is also what fills the building's terrain
+  route map, and the game reads whether a cached map is filled without filling it when a walker asks for a path
+  (`PathfindingService.FindTerrainPathIfCached`, through `AccessFlowField.FoundPath`), so a map filled a tick
+  later could route a beaver differently. Dead plants are left out only once the search has looked something
+  up (a review of 0.4.26 caught a draft that dropped the first lookup); the reach box never suppresses a fill,
+  because it only answers for a map that is already filled.
 - `YielderSearchVerify = true` runs the game's own search as well, compares, logs any difference and uses the
   game's result. It is slower than no mod and only for testing.
 - If anything throws, the feature switches itself off for the session and the game's own code runs.
@@ -118,6 +119,9 @@ difference between the two made the tick read every level again: 35 to 49% of pa
 because a plant is planted or cut in most ticks of a large colony. From 0.4.12 to 0.4.22 the reads were spread
 over thread-pool workers started inside the tick, 0.4 ms per tick of starting and joining in the logged colony;
 that is now the fallback for a tick with no usable copy, on this mod's own worker threads (see Worker threads).
+Since 0.4.26 the mirror's two hooks (register and unregister) are required together, so that a game update
+which moved only one of them cannot leave a mirror that grows; and a level change handler that changes the
+list (which the game's own `foreach` would refuse) makes the feature hand the tick to the game's loop.
 
 Reading first gives the same values because a handler cannot change the water map or an object's tile, and it
 cannot add or remove an object from the list: the game walks that list with `foreach` and would throw if one
@@ -1120,7 +1124,8 @@ dotnet run --project tests -c Release
 The tests load the installed game's assemblies and check that every patch target, private field and property
 the mod relies on still exists with a compatible signature, plus settings parsing. A patch target containing
 an exception filter (`catch ... when`) is refused: Harmony cannot patch those under the game's Mono runtime, and
-the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). They also build a road
+the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). Every prefix that can replace
+a game method must carry `Priority.Last`, so that other mods' prefixes see the call first (checked since 0.4.26). They also build a road
 network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
 contained. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers

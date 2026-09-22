@@ -406,6 +406,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool MapUpdatePrefix(object __instance)
         {
             if (!_active)

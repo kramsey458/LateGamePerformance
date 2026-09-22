@@ -1,3 +1,4 @@
+using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -164,14 +165,14 @@ namespace LateGamePerformance
             feature.Patches.Add(new PatchSpec
             {
                 Name = "WaterObjectService.RegisterWaterObject",
-                Required = false,
+                Required = true,
                 Target = () => HarmonyLib.AccessTools.Method(typeof(WaterObjectService), "RegisterWaterObject"),
                 Postfix = Reflect.Own(self, nameof(RegisterPostfix))
             });
             feature.Patches.Add(new PatchSpec
             {
                 Name = "WaterObjectService.UnregisterWaterObject",
-                Required = false,
+                Required = true,
                 Target = () => HarmonyLib.AccessTools.Method(typeof(WaterObjectService), "UnregisterWaterObject"),
                 Postfix = Reflect.Own(self, nameof(UnregisterPostfix))
             });
@@ -201,6 +202,7 @@ namespace LateGamePerformance
             _mirrorVersion = 0;
             foreach (Snapshot snapshot in Snapshots)
             {
+                Array.Clear(snapshot.Objects, 0, snapshot.Objects.Length);
                 snapshot.Count = 0;
                 snapshot.Version = -1;
             }
@@ -369,6 +371,7 @@ namespace LateGamePerformance
             }
         }
 
+        [HarmonyPriority(Priority.Last)]
         internal static bool TickPrefix(object __instance)
         {
             if (!_active)
@@ -418,13 +421,19 @@ namespace LateGamePerformance
                 {
                     Verify(objects, count, levels);
                 }
-                for (int i = 0; i < count && i < objects.Count; i++)
+                for (int i = 0; i < count; i++)
                 {
                     WaterObject waterObject = items != null ? items[i] : objects[i];
                     if (levels[i] != waterObject.WaterAboveBase)
                     {
                         _setLevel(waterObject, levels[i]);
                         _changes++;
+                        if (objects.Count != count)
+                        {
+                            // A handler changed the list, which the game's own foreach would refuse: this feature
+                            // refuses too and hands the tick to the game's loop, which then throws as it would.
+                            throw new InvalidOperationException("the water object list changed inside a level change handler");
+                        }
                     }
                 }
                 long applied = Stopwatch.GetTimestamp();

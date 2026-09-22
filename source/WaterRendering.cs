@@ -1,3 +1,4 @@
+using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -235,6 +236,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool DisableAllTilesPrefix(object __instance)
         {
             if (!_tilesActive)
@@ -261,6 +263,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool EnableTilePrefix(object __instance, Vector3Int tileIndex)
         {
             if (!_tilesActive || !_known || !ReferenceEquals(__instance, _mesh))
@@ -333,12 +336,14 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool UploadVector2Prefix(object __instance, int columnIndex)
         {
             return Uploads<Vector2>.Prefix(__instance, columnIndex);
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool UploadFloatPrefix(object __instance, int columnIndex)
         {
             return Uploads<float>.Prefix(__instance, columnIndex);
@@ -429,6 +434,7 @@ namespace LateGamePerformance
                 _closed = closed;
             }
 
+            [HarmonyPriority(Priority.Last)]
             public static bool Prefix(object instance, int layer)
             {
                 Tracked tracked = TrackedFor(instance);

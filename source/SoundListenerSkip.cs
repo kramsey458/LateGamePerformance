@@ -1,3 +1,4 @@
+using HarmonyLib;
 using System;
 using Timberborn.CameraSystem;
 using Timberborn.SoundSystem;
@@ -107,6 +108,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         private static bool LateUpdatePrefix(object __instance)
         {
             if (!_active)

@@ -267,7 +267,26 @@ namespace LateGamePerformance
             return feature;
         }
 
+        private static bool _tickHookFailed;
+
         private static void TickStartedPrefix()
+        {
+            try
+            {
+                TickStarted();
+            }
+            catch (Exception exception)
+            {
+                // Only counters and lines: nothing a game tick depends on, so never let it reach the game's loop.
+                if (!_tickHookFailed)
+                {
+                    _tickHookFailed = true;
+                    Log.Warning("LateGamePerformance: the per-tick housekeeping threw and is skipped from now on: " + exception);
+                }
+            }
+        }
+
+        private static void TickStarted()
         {
             HaulCache.OnTickStarted();
             MetricsDump.OnTickStarted();

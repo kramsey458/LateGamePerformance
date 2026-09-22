@@ -1,3 +1,4 @@
+using HarmonyLib;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -168,6 +169,12 @@ namespace LateGamePerformance
                 {
                     Moisture.Visited = Moisture.Visited ?? new List<int>();
                     Contamination.Visited = Contamination.Visited ?? new List<int>();
+                }
+                else
+                {
+                    // The comparison walk runs while these exist; off means off.
+                    Moisture.Visited = null;
+                    Contamination.Visited = null;
                 }
             }
         }
@@ -376,6 +383,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool MoisturePrefix(object __instance)
         {
             if (!_active)
@@ -403,6 +411,7 @@ namespace LateGamePerformance
             }
         }
 
+        [HarmonyPriority(Priority.Last)]
         internal static bool ContaminationPrefix(object __instance)
         {
             if (!_active)

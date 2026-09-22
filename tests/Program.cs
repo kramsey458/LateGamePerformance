@@ -185,6 +185,20 @@ internal static class Program
                 Console.WriteLine("     " + problem);
             }
         }
+        // Every prefix that can replace a game method (returns bool) runs last, so other mods' prefixes see the call first.
+        List<string> unordered = new List<string>();
+        foreach (Feature feature in features)
+        {
+            foreach (PatchSpec patch in feature.Patches)
+            {
+                if (patch.Prefix != null && patch.Prefix.ReturnType == typeof(bool) &&
+                    patch.Prefix.GetCustomAttribute<HarmonyLib.HarmonyPriority>()?.info.priority != HarmonyLib.Priority.Last)
+                {
+                    unordered.Add(feature.Name + "/" + patch.Name);
+                }
+            }
+        }
+        Check(unordered.Count == 0, "every replacing prefix carries Priority.Last" + (unordered.Count > 0 ? ": missing on " + string.Join(", ", unordered) : ""));
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
         Check(patchCount == 120, $"120 patches declared (found {patchCount})");
@@ -664,17 +678,18 @@ internal static class Program
             Func<Plant, Plant> lookUp = plant => plant.Reachable ? plant : null;
             string games = GamesAnswer(plants.Select(lookUp));
             string mods = GamesAnswer(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding,
-                plant => plant.Alive, plant => { if (plant.Exists && !plant.Yielding && !plant.Alive) lookedUpDead++; return lookUp(plant); },
+                plant => plant.Alive, plant => { if (plant.Exists && !plant.Yielding && !plant.Alive && counters.Lookups > 1) lookedUpDead++; return lookUp(plant); },
                 reached => reached != null, counters));
             cases++;
             if (games != mods) differences++;
             if (lookedUpDead > 0) differences++;
+            if (plants.Exists(plant => plant.Exists) && counters.Lookups == 0) differences++;   // the first lookup fills the route map on the game's tick
             lookupsSaved += counters.Candidates - counters.Lookups;
             deadSkipped += counters.DeadSkipped;
             if (counters.Candidates != count) differences++;
         }
         Check(differences == 0, $"yielder search: same answer as the game's search in {cases} random forests ({differences} differences)");
-        Check(deadSkipped > 5000, $"yielder search: a plant neither yielding nor alive is never looked up ({deadSkipped} left out)");
+        Check(deadSkipped > 5000, $"yielder search: a plant neither yielding nor alive is never looked up once the search has looked anything up ({deadSkipped} left out)");
         Check(lookupsSaved > 10000, $"yielder search: lookups are actually left out ({lookupsSaved})");
         // The reach pre-filter (0.4.25): an oracle that is only ever wrong on the safe side (it never says "no" about a
         // plant the lookup would reach) leaves the result the game's, whatever it says about the unreachable ones.
@@ -707,8 +722,8 @@ internal static class Program
             plainLookups += without.Lookups;
         }
         Check(reachDifferences == 0, $"yielder search: the reach pre-filter leaves the result the game's in 4000 random forests ({reachDifferences} differences)");
-        Check(outOfReach > 5000 && reachLookups + outOfReach == plainLookups,
-            $"yielder search: every candidate the pre-filter rules out is one lookup fewer ({outOfReach} ruled out)");
+        Check(outOfReach > 5000 && reachLookups < plainLookups && reachLookups + outOfReach >= plainLookups,
+            $"yielder search: the pre-filter only ever removes lookups ({outOfReach} candidates ruled out, {plainLookups - reachLookups} lookups fewer)");
 
         // With the building's room for each good taken into account (0.4.11): the answer, not just the candidates
         // fed to the search, must be the game's, whatever there is room for.

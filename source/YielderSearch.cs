@@ -1,3 +1,4 @@
+using HarmonyLib;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -59,14 +60,18 @@ namespace LateGamePerformance
 
         // The rule, free of game types so the tests can check it against a model of the game's search. A plant that
         // is neither yielding nor alive can neither be the answer nor set "found something", whatever its distance,
-        // so it is never looked up (0.4.25); one that may be reached is told by mayReach, a pre-filter that only ever
-        // says "no" when the game's lookup would say "unreachable" (TerrainReach), so the lookup is skipped for it.
+        // so it is not looked up (0.4.25), except as the search's first lookup: that lookup is also what fills the
+        // building's terrain route map, and walkers' path requests read whether a cached map is filled without
+        // filling it (PathfindingService.FindTerrainPathIfCached), so the map has to be filled on the same tick as
+        // without the mod. One that may be reached is told by mayReach, a pre-filter that only ever says "no" when
+        // the game's lookup would say "unreachable" (TerrainReach), so the lookup is skipped for it.
         internal static IEnumerable<TReached> LazyCandidates<TPlant, TReached>(IEnumerable<TPlant> plants,
             Func<TPlant, bool> exists, Func<TPlant, bool> isYielding, Func<TPlant, bool> isAlive,
             Func<TPlant, TReached> lookUp, Func<TReached, bool> wasReached, Counters counters,
             Func<TPlant, bool> canBeTaken = null, Func<TPlant, bool> mayReach = null)
         {
             bool foundSomething = false;
+            bool lookedUpAny = false;
             foreach (TPlant plant in plants)
             {
                 counters.Candidates++;
@@ -74,11 +79,12 @@ namespace LateGamePerformance
                 if (!exists(plant))
                 {
                     counters.Lookups++;
+                    lookedUpAny = true;
                     yield return lookUp(plant);
                     continue;
                 }
                 bool yielding = isYielding(plant);
-                if (!yielding && !isAlive(plant))
+                if (lookedUpAny && !yielding && !isAlive(plant))
                 {
                     counters.DeadSkipped++;
                     continue;
@@ -94,10 +100,10 @@ namespace LateGamePerformance
                     continue;
                 }
                 counters.Lookups++;
+                lookedUpAny = true;
                 TReached reached = lookUp(plant);
-                if (!foundSomething && wasReached(reached))
+                if (!foundSomething && wasReached(reached) && (yielding || isAlive(plant)))
                 {
-                    // Yielding or alive, as established above.
                     foundSomething = true;
                 }
                 yield return reached;
@@ -250,6 +256,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         private static bool FindPrefix(object __instance, Inventory receivingInventory, Accessible start,
             int liftingCapacity, IEnumerable<Yielder> yielders, ref YielderSearchResult __result)
         {
@@ -268,6 +275,7 @@ namespace LateGamePerformance
                 YielderSearchResult result = finder.FindLivingYielder(receivingInventory, liftingCapacity,
                     LazyCandidates(yielders, Exists, IsYielding, IsAlive, plant => LookUp(start, plant), WasReached, Totals,
                         plant => CanBeTaken(calculator, liftingCapacity, receivingInventory, plant), mayReach));
+                _reachBox = null;
                 _searches++;
                 _stopwatchTicks += Stopwatch.GetTimestamp() - started;
                 if (result.HasYielder) _found++;
