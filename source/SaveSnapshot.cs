@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading;
 using HarmonyLib;
 using Timberborn.EntitySystem;
 using Timberborn.SerializationSystem;
 using Timberborn.Persistence;
+using Timberborn.SingletonSystem;
 using Timberborn.TemplateSystem;
 using Timberborn.Versioning;
 using Timberborn.WorldPersistence;
@@ -26,13 +29,21 @@ namespace LateGamePerformance
     // whose Character reads a transform; workplaces, whose Worker uses the reference serializer's cache; any
     // component this mod has not read, including other mods') stays on the main thread, which does its share
     // while the workers do theirs. The entities are then assembled in the game's own order, and the singletons
-    // are saved by the game's own code afterwards, so the save is the one the game would have written.
+    // are saved afterwards on the main thread by the game's own loop (written out here since 0.4.28 so each one
+    // can be timed; SaveSingletons), so the save is the one the game would have written.
     //
     // The list of components allowed on workers is exactly the ones whose Save this mod has read (see
     // TECHNICAL.md). An entity is eligible only if every persistent component on it is on that list. If a worker
     // throws for any reason, everything is discarded and the game's own Create runs; the feature is then off for
     // the session. SaveSnapshotVerify also runs the game's own snapshot and compares every entity; the mod's is
     // saved either way. Not part of the simulation: what is saved does not change, only which thread writes it down.
+    //
+    // 0.4.28: every finished-pausable building, dwelling, floodgate and gate carries the game's Automatable, which
+    // was not on the list, so the building entries added in 0.4.25 kept almost none of those buildings off the main
+    // thread. It is on the list now for the buildings whose automation input is not connected (see Conditional),
+    // with WorkshopRandomNeedApplier (workshops, zipline stations). The stats line splits the main thread's time into
+    // its steps and names the slowest singletons, and SaveGuard judges every listed type at the first tick of a game
+    // scene instead of at the first save.
     internal static class SaveSnapshot
     {
         private const string FactoryType = "Timberborn.WorldPersistence.SerializedWorldFactory";
@@ -113,6 +124,8 @@ namespace LateGamePerformance
             { "Timberborn.AutomationBuildings.Speaker", "53739f49bc97c2ee" },
             { "Timberborn.AutomationBuildings.WeatherStation", "bc8f6a193cf3a63f" },
             { "Timberborn.Automation.Automator", "a6136a8b45c586ab" },
+            // 0.4.28, only while its input is not connected: see Conditional.
+            { "Timberborn.Automation.Automatable", "9a5dc0c754e5e8f2" },
             { "Timberborn.Explosions.Dynamite", "a7d63be6d520d3e6" },
             { "Timberborn.Explosions.UnstableCore", "b024707ff3f321ab" },
             { "Timberborn.Wonders.Wonder", "a75134dffdfb5482" },
@@ -134,6 +147,9 @@ namespace LateGamePerformance
             { "Timberborn.NeedApplication.AreaNeedApplier", "9ddd8168deb416aa" },
             { "Timberborn.NeedApplication.DemolisherNeedApplier", "b3750869c2b361b8" },
             { "Timberborn.NeedApplication.YieldRemoverNeedApplier", "53c8d9a9aedee3be" },
+            // 0.4.28: the progress of its own time trigger (ITimeTrigger.Progress, which reads the day-night cycle's
+            // time), set into its own entity; the same Save as AreaNeedApplier's and the same read as Growable's.
+            { "Timberborn.NeedApplication.WorkshopRandomNeedApplier", "a6fa1368d111df5c" },
             { "Timberborn.FireworkSystem.FireworkLauncher", "3845e4dd4e324f72" },
             { "BeaverBuddies.Colonies.ColonyStamp", "ae23955dc80c940f" },
         };
@@ -147,10 +163,47 @@ namespace LateGamePerformance
             public bool OnWorkers;
         }
 
+        // Listed types whose Save is safe on a worker only in some states: the state that keeps an entity on the main
+        // thread (as the once-per-session line names it) and how to read it, built from the type when it is judged.
+        //
+        // Automatable. Its Save (read in 1.1.2.4, pinned by its hash above) is
+        //     if (_inputConnection.IsConnected)
+        //         entitySaver.GetComponent(AutomatableKey).Set(InputKey, Input, _referenceSerializer.Of<Automator>());
+        // Connected, it goes through the reference serializer, whose Of<T> adds to a plain Dictionary on first use:
+        // not safe on a worker, so such an entity stays on the main thread. Not connected, it reads one field and one
+        // property (AutomatorConnection.IsConnected is `Transmitter != null`, a reference compare; BaseComponent has
+        // no == operator) and writes nothing. Which branch the Save will take is read here, in Collect, on the main
+        // thread, by the very expression the Save branches on: the same private field and the same property getter,
+        // compiled, so a getter changed by an update is changed for both. Nothing can connect the input between
+        // Collect and the worker's Save: connections change only on the main thread (a player's action, BeaverBuddies'
+        // replayed event, an entity deleted), and the main thread is inside Create until the workers have joined. A
+        // patch by another mod on the getter or on anything else the Save reaches keeps the type on the main thread
+        // (SaveGuard), and a field or property that is not there any more refuses the type with a log line.
+        internal static readonly Dictionary<string, (string State, Func<Type, Func<object, bool>> Build)> Conditional =
+            new Dictionary<string, (string State, Func<Type, Func<object, bool>> Build)>(StringComparer.Ordinal)
+            {
+                { "Timberborn.Automation.Automatable", ("automation input connected", type => Getter(type, "_inputConnection", "IsConnected")) }
+            };
+
+        // What was decided about a component type: whether it may go to a worker, and for a conditional one when it
+        // may not after all.
+        private sealed class Verdict
+        {
+            public static readonly Verdict Refused = new Verdict();
+            public static readonly Verdict Plain = new Verdict { Allowed = true };
+
+            public bool Allowed;
+            public Func<object, bool> MainOnlyWhen;
+            public string State;
+        }
+
         private static Func<object, TemplateNameRetriever> _retriever;
         private static Func<object, EntityRegistry> _registry;
         private static Action<object, SerializedWorld> _saveSingletons;
         private static Action<object, SerializedWorld> _saveEntities;
+        private static Func<object, ISingletonRepository> _singletonRepository;
+        private static Func<SerializedWorld, ISingletonSaver> _newSingletonSaver;
+        private static string _singletonLoopBindFailure;
 
         // Swappable for the test harness (the game's version property reads Unity).
         internal static Func<int> Workers = () => Math.Max(1, RouteMaps.WorkerCount);
@@ -163,47 +216,99 @@ namespace LateGamePerformance
         private static long _onMain;
         private static long _mainStopwatchTicks;
         private static long _workerStopwatchTicks;
+        private static long _collectStopwatchTicks;
+        private static long _mainShareStopwatchTicks;
+        private static long _waitStopwatchTicks;
+        private static long _assembleStopwatchTicks;
+        private static long _singletonsStopwatchTicks;
+        private static long _takenByMain;
         private static long _verifyMismatches;
         private static readonly Dictionary<string, int> Unlisted = new Dictionary<string, int>();
         private static bool _unlistedLogged;
-        private static readonly Dictionary<Type, bool> Verdicts = new Dictionary<Type, bool>();
+        private static readonly Dictionary<Type, Verdict> Verdicts = new Dictionary<Type, Verdict>();
         private static long _leftToGame;
         private static bool _parkedLogged;
+        private static bool _judgeAheadPending;
+        // Each singleton's Save time over the snapshots of this stats interval, by type name; and this snapshot's.
+        private static readonly Dictionary<string, long> SingletonStopwatchTicks = new Dictionary<string, long>(StringComparer.Ordinal);
+        private static readonly List<KeyValuePair<string, long>> ThisSnapshotsSingletons = new List<KeyValuePair<string, long>>();
+        private static string _singletonSaving;
+        private static bool _singletonLoopJudged;
+        private static string _singletonLoopRefusal;
 
         // Whether this component type may be snapshotted on a worker: on the list, its Save unchanged since it
         // was read, and nothing of another mod's patched into its Save or what it calls (SaveGuard). Decided once
-        // per type per session, and again whenever the patched methods change.
+        // per type per session, and again whenever the patched methods change. A conditional type (Conditional) is
+        // allowed here and then checked per entity in Collect.
         internal static bool IsAllowed(Type type)
         {
-            if (Verdicts.TryGetValue(type, out bool allowed))
-            {
-                return allowed;
-            }
-            allowed = Judge(type);
-            Verdicts[type] = allowed;
-            return allowed;
+            return VerdictOf(type).Allowed;
         }
 
-        private static bool Judge(Type type)
+        private static Verdict VerdictOf(Type type)
+        {
+            if (Verdicts.TryGetValue(type, out Verdict verdict))
+            {
+                return verdict;
+            }
+            verdict = Judge(type);
+            Verdicts[type] = verdict;
+            return verdict;
+        }
+
+        private static Verdict Judge(Type type)
         {
             if (!Allowed.TryGetValue(type.FullName ?? "", out string expected))
             {
-                return false;
+                return Verdict.Refused;
             }
             string actual = SaveHash(type);
             if (actual != expected)
             {
                 Log.Warning($"SaveSnapshot: the saving code of {type.FullName} is not the one that was read (it hashes to {actual}, " +
                             $"the one read to {expected}); its entities stay on the main thread until it is read again.");
-                return false;
+                return Verdict.Refused;
             }
             string refusal = SaveGuard.Refusal(type);
             if (refusal != null)
             {
                 Log.Info($"SaveSnapshot: the entities of {type.FullName} stay on the main thread: {refusal}.");
-                return false;
+                return Verdict.Refused;
             }
-            return true;
+            if (!Conditional.TryGetValue(type.FullName, out (string State, Func<Type, Func<object, bool>> Build) condition))
+            {
+                return Verdict.Plain;
+            }
+            Func<object, bool> check;
+            try
+            {
+                check = condition.Build(type);
+            }
+            catch (Exception exception)
+            {
+                Log.Info($"SaveSnapshot: the entities of {type.FullName} stay on the main thread: the check of when its Save " +
+                         $"may run on a worker could not be built ({exception.Message}).");
+                return Verdict.Refused;
+            }
+            return new Verdict { Allowed = true, MainOnlyWhen = check, State = condition.State };
+        }
+
+        // For a conditional type: reads component.field.property, compiled, as the Save itself does.
+        internal static Func<object, bool> Getter(Type type, string fieldName, string propertyName)
+        {
+            FieldInfo field = type.GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (field == null)
+            {
+                throw new MissingFieldException(type.Name, fieldName);
+            }
+            PropertyInfo property = field.FieldType.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (property == null || property.PropertyType != typeof(bool) || property.GetGetMethod(true) == null)
+            {
+                throw new MissingMemberException(field.FieldType.Name, propertyName);
+            }
+            ParameterExpression component = Expression.Parameter(typeof(object), "component");
+            Expression read = Expression.Property(Expression.Field(Expression.Convert(component, type), field), property);
+            return Expression.Lambda<Func<object, bool>>(read, component).Compile();
         }
 
         // A hash (FNV-1a, 64 bits) of the IL bytes of the type's Save(IEntitySaver): what the method does, as compiled.
@@ -211,16 +316,25 @@ namespace LateGamePerformance
         {
             MethodInfo save = type.GetMethod("Save", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
                 new[] { typeof(IEntitySaver) }, null);
-            byte[] il = save?.GetMethodBody()?.GetILAsByteArray();
-            if (il == null)
-            {
-                return "none";
-            }
+            return IlHash(save);
+        }
+
+        // The same hash over the IL of several methods one after another; "none" if one of them is missing.
+        internal static string IlHash(params MethodBase[] methods)
+        {
             ulong hash = 14695981039346656037UL;
-            foreach (byte b in il)
+            foreach (MethodBase method in methods)
             {
-                hash ^= b;
-                hash *= 1099511628211UL;
+                byte[] il = method?.GetMethodBody()?.GetILAsByteArray();
+                if (il == null)
+                {
+                    return "none";
+                }
+                foreach (byte b in il)
+                {
+                    hash ^= b;
+                    hash *= 1099511628211UL;
+                }
             }
             return hash.ToString("x16");
         }
@@ -228,6 +342,25 @@ namespace LateGamePerformance
         internal static void ForgetVerdictsForTests()
         {
             Verdicts.Clear();
+        }
+
+        // Off, with nothing counted, judged or noted.
+        internal static void ResetForTests()
+        {
+            _active = false;
+            _saves = _onWorkers = _onMain = _mainStopwatchTicks = _workerStopwatchTicks = _verifyMismatches = _leftToGame = 0;
+            _collectStopwatchTicks = _mainShareStopwatchTicks = _waitStopwatchTicks = _assembleStopwatchTicks = _singletonsStopwatchTicks = 0;
+            _takenByMain = 0;
+            SingletonStopwatchTicks.Clear();
+            ThisSnapshotsSingletons.Clear();
+            Verdicts.Clear();
+            Unlisted.Clear();
+            _unlistedLogged = false;
+            _parkedLogged = false;
+            _judgeAheadPending = false;
+            _singletonLoopJudged = false;
+            _singletonLoopRefusal = null;
+            _singletonSaving = null;
         }
 
         public static Feature CreateFeature(Config config)
@@ -245,11 +378,48 @@ namespace LateGamePerformance
                     _registry = Reflect.FieldGetter<EntityRegistry>(factory, "_entityRegistry");
                     _saveSingletons = Reflect.InstanceCall<Action<object, SerializedWorld>>(Reflect.Overload(FactoryType, "SaveSingletons", 1));
                     _saveEntities = Reflect.InstanceCall<Action<object, SerializedWorld>>(Reflect.Overload(FactoryType, "SaveEntities", 1));
+                    BindSingletonLoop(factory);
                     return Reflect.Overload(FactoryType, "Create", 0);
                 },
                 Prefix = Reflect.Own(typeof(SaveSnapshot), nameof(CreatePrefix))
             });
+            feature.Patches.Add(new PatchSpec
+            {
+                // The first tick of a game scene judges every listed type ahead of the first save (JudgeAhead).
+                // Without it the first save judges them, as before 0.4.28.
+                Name = "TickableSingletonService.TickAll",
+                Required = false,
+                Target = () => Reflect.Method("Timberborn.TickSystem.TickableSingletonService", "TickAll"),
+                Prefix = Reflect.Own(typeof(SaveSnapshot), nameof(TickAllPrefix))
+            });
             return feature;
+        }
+
+        // What SaveSingletons needs to be written out here (SaveSingletons below). Anything missing leaves the
+        // singletons to the game's own method, timed as a whole.
+        private static void BindSingletonLoop(Type factory)
+        {
+            try
+            {
+                _singletonRepository = Reflect.FieldGetter<ISingletonRepository>(factory, "_singletonRepository");
+                Type saverType = Reflect.GameType("Timberborn.WorldPersistence.SingletonSaver");
+                ConstructorInfo constructor = saverType?.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null, new[] { typeof(SerializedWorld) }, null);
+                if (constructor == null || !typeof(ISingletonSaver).IsAssignableFrom(saverType))
+                {
+                    throw new MissingMethodException("SingletonSaver(SerializedWorld)");
+                }
+                ParameterExpression world = Expression.Parameter(typeof(SerializedWorld), "world");
+                _newSingletonSaver = Expression.Lambda<Func<SerializedWorld, ISingletonSaver>>(
+                    Expression.Convert(Expression.New(constructor, world), typeof(ISingletonSaver)), world).Compile();
+                _singletonLoopBindFailure = null;
+            }
+            catch (Exception exception)
+            {
+                _singletonRepository = null;
+                _newSingletonSaver = null;
+                _singletonLoopBindFailure = exception.Message;
+            }
         }
 
         public static void Activate()
@@ -265,25 +435,180 @@ namespace LateGamePerformance
             set => _verify = value;
         }
 
+        // A new game scene: its first tick judges every listed type (JudgeAhead).
+        internal static void SceneCreated()
+        {
+            _judgeAheadPending = true;
+        }
+
         public static string TakeStatsLine()
         {
             if (!_active || _saves == 0)
             {
                 return null;
             }
-            double mainMs = _mainStopwatchTicks * 1000.0 / Stopwatch.Frequency;
-            double workerMs = _workerStopwatchTicks * 1000.0 / Stopwatch.Frequency;
-            string line = $"SaveSnapshot: {_saves} snapshot(s); per snapshot {_onWorkers / _saves} entities on worker threads and " +
-                          $"{_onMain / _saves} on the main thread; the main thread spent {mainMs / _saves:0} ms per snapshot " +
-                          $"(workers {workerMs / _saves:0} ms alongside)" +
-                          (_leftToGame > 0 ? $"; {_leftToGame} save(s) left entirely to the game because of another mod's patch or a changed helper (see the log)" : "") +
-                          (_verify ? $"; verify mismatches {_verifyMismatches}" : "");
+            CultureInfo c = CultureInfo.InvariantCulture;
+            double ms = 1000.0 / Stopwatch.Frequency / _saves;
+            string line = string.Format(c,
+                "SaveSnapshot: {0} snapshot(s); per snapshot {1} entities on worker threads and {2} on the main thread; the main " +
+                "thread spent {3:0} ms per snapshot: collecting {4:0}, its share of the entities {5:0} (it took {6} of the " +
+                "workers' as well), waiting for the workers {7:0}, assembling {8:0}, singletons {9:0} ms (workers {10:0} ms alongside)",
+                _saves, _onWorkers / _saves, _onMain / _saves, _mainStopwatchTicks * ms, _collectStopwatchTicks * ms,
+                _mainShareStopwatchTicks * ms, _takenByMain / _saves, _waitStopwatchTicks * ms, _assembleStopwatchTicks * ms,
+                _singletonsStopwatchTicks * ms, _workerStopwatchTicks * ms);
+            if (SingletonStopwatchTicks.Count > 0)
+            {
+                List<KeyValuePair<string, long>> slowest = new List<KeyValuePair<string, long>>(SingletonStopwatchTicks);
+                slowest.Sort((x, y) => y.Value.CompareTo(x.Value));
+                List<string> parts = new List<string>();
+                for (int i = 0; i < Math.Min(5, slowest.Count); i++)
+                {
+                    parts.Add(string.Format(c, "{0} {1:0.0}", slowest[i].Key, slowest[i].Value * ms));
+                }
+                line += "; slowest singletons per snapshot: " + string.Join(", ", parts) + " ms";
+            }
+            line += (_leftToGame > 0 ? $"; {_leftToGame} save(s) left entirely to the game because of another mod's patch or a changed helper (see the log)" : "") +
+                    (_verify ? $"; verify mismatches {_verifyMismatches}" : "");
             _saves = _onWorkers = _onMain = _mainStopwatchTicks = _workerStopwatchTicks = _verifyMismatches = _leftToGame = 0;
+            _collectStopwatchTicks = _mainShareStopwatchTicks = _waitStopwatchTicks = _assembleStopwatchTicks = _singletonsStopwatchTicks = 0;
+            _takenByMain = 0;
+            SingletonStopwatchTicks.Clear();
             return line;
         }
 
+        // Other mods' patches are read again whenever their number changed (SaveGuard); every verdict is then
+        // taken again, and so is whether SaveSingletons may be written out here.
+        private static void CheckRegistry()
+        {
+            if (SaveGuard.RegistryChanged())
+            {
+                Verdicts.Clear();
+                _parkedLogged = false;
+                _singletonLoopJudged = false;
+            }
+        }
+
+        // SaveGuard's judging of every listed type (each Save's IL and what it reaches, Harmony's registry for all of
+        // them, the helpers' IL) took an estimated 0.2 to 0.5 s at the first save of a session, on top of that save's
+        // own freeze. It is pure reflection and reads no game state, so any moment on the main thread will do; the
+        // first tick of a game scene comes after every mod has patched what it patches while the scene loads, so the
+        // first save normally finds the same number of patches and judges nothing. If the number changed after all,
+        // that save judges again, as it always has. Which types are allowed does not depend on when they are judged.
+        internal static void JudgeAhead()
+        {
+            if (!_active)
+            {
+                return;
+            }
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                CheckRegistry();
+                if (SaveGuard.ParkedReason != null)
+                {
+                    // Every save is left to the game until the patches change; the save says so.
+                    return;
+                }
+                int judged = 0;
+                Dictionary<string, Assembly> loaded = LoadedAssemblies();
+                foreach (string name in Allowed.Keys)
+                {
+                    Type type = FindListedType(name, loaded);
+                    if (type != null && !Verdicts.ContainsKey(type))
+                    {
+                        VerdictOf(type);
+                        judged++;
+                    }
+                }
+                JudgeSingletonLoop();
+                if (judged > 0)
+                {
+                    Log.Info(string.Format(CultureInfo.InvariantCulture,
+                        "SaveSnapshot: {0} listed components judged ahead of the first save in {1:0} ms.", judged,
+                        (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency));
+                }
+            }
+            catch (Exception exception)
+            {
+                // The same judging would throw inside the first save's snapshot and turn the feature off there.
+                Fail(exception);
+            }
+        }
+
+        // A listed type by its full name among the loaded assemblies: first the one named like its namespace (the
+        // game's rule), then all of them. Nothing is loaded that is not loaded already.
+        internal static Type FindListedType(string fullName, Dictionary<string, Assembly> loaded = null)
+        {
+            loaded = loaded ?? LoadedAssemblies();
+            int dot = fullName.LastIndexOf('.');
+            if (dot > 0 && loaded.TryGetValue(fullName.Substring(0, dot), out Assembly named))
+            {
+                Type type = TypeIn(named, fullName);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = TypeIn(assembly, fullName);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+            return null;
+        }
+
+        // The loaded assemblies by their simple name (the first of two with the same name; FindListedType looks
+        // through all of them when that one does not hold the type).
+        private static Dictionary<string, Assembly> LoadedAssemblies()
+        {
+            Dictionary<string, Assembly> loaded = new Dictionary<string, Assembly>(StringComparer.Ordinal);
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string name;
+                try
+                {
+                    name = assembly.GetName().Name;
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+                if (name != null && !loaded.ContainsKey(name))
+                {
+                    loaded[name] = assembly;
+                }
+            }
+            return loaded;
+        }
+
+        private static Type TypeIn(Assembly assembly, string fullName)
+        {
+            try
+            {
+                return assembly.GetType(fullName, false);
+            }
+            catch (Exception)
+            {
+                // An assembly whose references cannot be resolved; nothing on the list lives there.
+                return null;
+            }
+        }
+
         // ReSharper disable InconsistentNaming
-        // Last, so that measuring prefixes on Create (SaveTiming's stage timer) still run before it.
+        private static void TickAllPrefix()
+        {
+            if (_judgeAheadPending)
+            {
+                _judgeAheadPending = false;
+                JudgeAhead();
+            }
+        }
+
+        // Last, so that measuring prefixes on Create (SaveTiming's stage timer) still run before it, and so does
+        // ParallelTickWait's wait for the game's parallel tick (first).
         [HarmonyPriority(Priority.Last)]
         internal static bool CreatePrefix(object __instance, ref SerializedWorld __result)
         {
@@ -293,11 +618,7 @@ namespace LateGamePerformance
             }
             // Other mods' patches are read again whenever their number changed (SaveGuard); a patch on one of the
             // helpers every entity goes through leaves this save to the game.
-            if (SaveGuard.RegistryChanged())
-            {
-                Verdicts.Clear();
-                _parkedLogged = false;
-            }
+            CheckRegistry();
             string parked = SaveGuard.ParkedReason;
             if (parked != null)
             {
@@ -323,25 +644,51 @@ namespace LateGamePerformance
                 Fail(exception);
                 return true;
             }
-            SerializedEntity[] entities = Build(items, Workers(), out Exception failure, out long workerTicks);
+            long collected = Stopwatch.GetTimestamp();
+            SerializedEntity[] entities = Build(items, Workers(), out Exception failure, out BuildTimes times);
             if (failure != null)
             {
                 Fail(failure);
                 return true;
             }
+            long built = Stopwatch.GetTimestamp();
             SerializedWorld world;
+            long assembled;
             try
             {
                 world = Assemble(items, entities);
-                _saveSingletons(__instance, world);
+                assembled = Stopwatch.GetTimestamp();
+                SaveSingletons(__instance, world);
             }
             catch (Exception exception)
             {
-                Fail(exception);
+                // The game's own Create runs next and saves every singleton once more from the start, so those saved
+                // before one threw here have saved twice (the first world is thrown away). Read for 0.4.28: every
+                // singleton Save in the game (51) and in the installed mods (BeaverBuddies MultiColony's 8, Optimized
+                // Local Housing's 1) only reads its own state and writes into the world being built. The one exception,
+                // DateSalter, draws two random numbers for the save's salt: BeaverBuddies keeps that draw off the game's
+                // random sequence in co-op (its DateSalterPatcher marks it as not part of the game), and in a game
+                // alone it only picks another salt. A singleton whose Save throws here throws in the game's Create as
+                // well, and the save fails as it would have; if the failure was this mod's, the game's Create saves.
+                string singleton = _singletonSaving;
+                _singletonSaving = null;
+                Fail(exception, singleton);
                 return true;
             }
-            _mainStopwatchTicks += Stopwatch.GetTimestamp() - stamp;
-            _workerStopwatchTicks += workerTicks;
+            long finished = Stopwatch.GetTimestamp();
+            _mainStopwatchTicks += finished - stamp;
+            _collectStopwatchTicks += collected - stamp;
+            _mainShareStopwatchTicks += times.MainShare;
+            _waitStopwatchTicks += times.Waiting;
+            _assembleStopwatchTicks += assembled - built;
+            _singletonsStopwatchTicks += finished - assembled;
+            _takenByMain += times.TakenByMain;
+            _workerStopwatchTicks += times.Workers;
+            foreach (KeyValuePair<string, long> singleton in ThisSnapshotsSingletons)
+            {
+                SingletonStopwatchTicks.TryGetValue(singleton.Key, out long sum);
+                SingletonStopwatchTicks[singleton.Key] = sum + singleton.Value;
+            }
             _saves++;
             foreach (Item item in items)
             {
@@ -356,8 +703,100 @@ namespace LateGamePerformance
         }
         // ReSharper restore InconsistentNaming
 
+        // SerializedWorldFactory.SaveSingletons, the game's two overloads written out, so that each singleton's Save
+        // can be timed:
+        //     SaveSingletons(world) => SaveSingletons(world, _singletonRepository.GetSingletons<ISaveableSingleton>());
+        //     SaveSingletons(world, singletons) { var saver = new SingletonSaver(world); foreach (s in singletons) s.Save(saver); }
+        // The same calls in the same order, with a clock read around each Save. Used only while both overloads still
+        // hash to what was read (SingletonLoopHash) and nothing patches either of them (this copy would pass such a
+        // patch by); otherwise the game's own method runs and the singletons are timed as a whole. Nothing is moved
+        // to another thread.
+        internal static void SaveSingletons(object factory, SerializedWorld world)
+        {
+            ThisSnapshotsSingletons.Clear();
+            if (!_singletonLoopJudged)
+            {
+                JudgeSingletonLoop();
+            }
+            if (_singletonLoopRefusal != null)
+            {
+                _saveSingletons(factory, world);
+                return;
+            }
+            IEnumerable<ISaveableSingleton> singletons = _singletonRepository(factory).GetSingletons<ISaveableSingleton>();
+            ISingletonSaver singletonSaver = _newSingletonSaver(world);
+            foreach (ISaveableSingleton singleton in singletons)
+            {
+                string name = singleton.GetType().Name;
+                _singletonSaving = name;
+                long started = Stopwatch.GetTimestamp();
+                singleton.Save(singletonSaver);
+                ThisSnapshotsSingletons.Add(new KeyValuePair<string, long>(name, Stopwatch.GetTimestamp() - started));
+            }
+            _singletonSaving = null;
+        }
+
+        // Once per judging pass: whether SaveSingletons may be written out here, with one log line when not.
+        private static void JudgeSingletonLoop()
+        {
+            string refusal;
+            try
+            {
+                refusal = SingletonLoopRefusal();
+            }
+            catch (Exception exception)
+            {
+                refusal = "it could not be checked (" + exception.Message + ")";
+            }
+            if (refusal != null && refusal != _singletonLoopRefusal)
+            {
+                Log.Info("SaveSnapshot: the singletons are saved by the game's own SaveSingletons and timed as a whole: " + refusal + ".");
+            }
+            _singletonLoopRefusal = refusal;
+            _singletonLoopJudged = true;
+        }
+
+        private static string SingletonLoopRefusal()
+        {
+            if (_singletonLoopBindFailure != null || _singletonRepository == null || _newSingletonSaver == null)
+            {
+                return "what it uses was not found (" + (_singletonLoopBindFailure ?? "not bound") + ")";
+            }
+            MethodInfo one = Reflect.Overload(FactoryType, "SaveSingletons", 1);
+            MethodInfo two = Reflect.Overload(FactoryType, "SaveSingletons", 2);
+            string actual = IlHash(one, two);
+            if (actual != SingletonLoopHash)
+            {
+                return $"it is not the one that was read (it hashes to {actual}, the one read to {SingletonLoopHash})";
+            }
+            foreach (MethodInfo method in new[] { one, two })
+            {
+                IEnumerable<(string Owner, string Patch)> patches = SaveGuard.PatchesOn(method);
+                if (patches == null)
+                {
+                    continue;
+                }
+                foreach ((string owner, string patch) in patches)
+                {
+                    return $"it is patched ({owner}, {patch})";
+                }
+            }
+            return null;
+        }
+
+        // The IL of SerializedWorldFactory.SaveSingletons(SerializedWorld) and then (SerializedWorld,
+        // IEnumerable<ISaveableSingleton>), as read in 1.1.2.4; `dotnet run --project tests -c Release -- --hashes`
+        // prints the current one.
+        internal const string SingletonLoopHash = "b7a5849f791be966";
+
+        internal static string SingletonLoopHashNow()
+        {
+            return IlHash(Reflect.Overload(FactoryType, "SaveSingletons", 1), Reflect.Overload(FactoryType, "SaveSingletons", 2));
+        }
+
         // The main-thread pass the game makes anyway, minus the writing: template names (a Unity name lookup,
-        // main thread only), the persistent components, and whether every one of them is on the list.
+        // main thread only), the persistent components, and whether every one of them is on the list; for a
+        // conditional one (Conditional), whether this entity's is in the state its Save may run on a worker in.
         private static List<Item> Collect(TemplateNameRetriever retriever, EntityRegistry registry)
         {
             List<Item> items = new List<Item>(registry.Entities.Count);
@@ -381,10 +820,9 @@ namespace LateGamePerformance
                     {
                         parts.Add(persistent);
                         // Every part that is not on the list is noted, so the once-per-session line names all of them.
-                        if (!IsAllowed(component.GetType()))
+                        if (!MayGoToWorker(component))
                         {
                             onWorkers = false;
-                            Note(component.GetType().FullName);
                         }
                     }
                 }
@@ -397,12 +835,44 @@ namespace LateGamePerformance
             return items;
         }
 
+        // Where the time of Build went, in stopwatch ticks.
+        internal struct BuildTimes
+        {
+            // The workers' thread time, summed over them.
+            public long Workers;
+            // The main thread starting the workers, snapshotting the entities kept on it, then taking eligible ones.
+            public long MainShare;
+            // The main thread waiting for the last worker to finish.
+            public long Waiting;
+            // Eligible entities the main thread snapshotted itself.
+            public int TakenByMain;
+        }
+
+        // Whether this persistent part lets its entity go to a worker: its type is allowed and, for a conditional
+        // type, this instance is not in the state that keeps it on the main thread. A part that does not is noted.
+        internal static bool MayGoToWorker(object component)
+        {
+            Verdict verdict = VerdictOf(component.GetType());
+            if (!verdict.Allowed)
+            {
+                Note(component.GetType().FullName);
+                return false;
+            }
+            if (verdict.MainOnlyWhen != null && verdict.MainOnlyWhen(component))
+            {
+                Note(component.GetType().FullName + " (" + verdict.State + ")");
+                return false;
+            }
+            return true;
+        }
+
         // Every item's SerializedEntity (null where nothing was written). Dedicated threads (the thread pool may
         // be busy with this mod's route maps) take eligible items from a shared counter while the main thread
         // snapshots the rest, then takes eligible items too until none are left, then joins. Which thread did an
         // item does not matter: every result goes to its own slot. Never throws: a failure comes back instead.
-        internal static SerializedEntity[] Build(List<Item> items, int workers, out Exception failure, out long workerTicks)
+        internal static SerializedEntity[] Build(List<Item> items, int workers, out Exception failure, out BuildTimes times)
         {
+            long begun = Stopwatch.GetTimestamp();
             SerializedEntity[] results = new SerializedEntity[items.Count];
             List<int> eligible = new List<int>();
             for (int i = 0; i < items.Count; i++)
@@ -415,19 +885,22 @@ namespace LateGamePerformance
             Exception firstFailure = null;
             long ticks = 0;
             int next = -1;
-            void TakeEligible()
+            int TakeEligible()
             {
+                int taken = 0;
                 while (true)
                 {
                     int k = Interlocked.Increment(ref next);
                     if (k >= eligible.Count)
                     {
-                        return;
+                        return taken;
                     }
                     int index = eligible[k];
                     results[index] = Snapshot(items[index]);
+                    taken++;
                 }
             }
+            int takenByMain = 0;
             int count = Math.Min(Math.Max(1, workers), eligible.Count);
             Thread[] threads = new Thread[count];
             for (int w = 0; w < count; w++)
@@ -456,12 +929,13 @@ namespace LateGamePerformance
                         results[i] = Snapshot(items[i]);
                     }
                 }
-                TakeEligible();
+                takenByMain = TakeEligible();
             }
             catch (Exception exception)
             {
                 Interlocked.CompareExchange(ref firstFailure, exception, null);
             }
+            long shareDone = Stopwatch.GetTimestamp();
             for (int w = 0; w < count; w++)
             {
                 try
@@ -474,7 +948,11 @@ namespace LateGamePerformance
                 }
             }
             failure = firstFailure;
-            workerTicks = ticks;
+            times = new BuildTimes
+            {
+                Workers = Interlocked.Read(ref ticks), MainShare = shareDone - begun, Waiting = Stopwatch.GetTimestamp() - shareDone,
+                TakenByMain = takenByMain
+            };
             return failure == null ? results : null;
         }
 
@@ -503,9 +981,9 @@ namespace LateGamePerformance
             return world;
         }
 
-        // The game's own entity snapshot as well, compared entity by entity. The singletons are saved once, by the
-        // game's code, in the snapshot that is used (a singleton's Save may have side effects); the entities are
-        // pure reads, so taking them twice is safe.
+        // The game's own entity snapshot as well, compared entity by entity. The singletons are saved once, in the
+        // snapshot that is used (DateSalter's Save draws random numbers); the entities are pure reads, so taking them
+        // twice is safe.
         private static void Verify(object factory, SerializedWorld ours)
         {
             try
@@ -563,7 +1041,7 @@ namespace LateGamePerformance
             return true;
         }
 
-        private static bool DeepEquals(SerializedObject a, SerializedObject b)
+        internal static bool DeepEquals(SerializedObject a, SerializedObject b)
         {
             List<string> names = new List<string>(a.Properties());
             List<string> otherNames = new List<string>(b.Properties());
@@ -631,10 +1109,11 @@ namespace LateGamePerformance
                    string.Join(", ", parts);
         }
 
-        private static void Fail(Exception exception)
+        private static void Fail(Exception exception, string singleton = null)
         {
             _active = false;
-            Log.Warning("SaveSnapshot failed and is off for this session; the game takes its own snapshot: " + exception);
+            Log.Warning("SaveSnapshot failed" + (singleton != null ? " while the singleton " + singleton + " saved its state" : "") +
+                        " and is off for this session; the game takes its own snapshot: " + exception);
         }
     }
 }

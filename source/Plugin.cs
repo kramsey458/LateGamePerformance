@@ -182,6 +182,11 @@ namespace LateGamePerformance
             {
                 SaveSnapshot.Activate();
             }
+            // Not a setting: a save's snapshot waits for the game's parallel tick, which BeaverBuddies' saves skip.
+            if (ParallelTickWait.CreateFeature().Apply(HarmonyId))
+            {
+                ParallelTickWait.Activate();
+            }
             if (config.SoundListener && SoundListenerSkip.CreateFeature().Apply(HarmonyId))
             {
                 SoundListenerSkip.Activate();
@@ -379,7 +384,8 @@ namespace LateGamePerformance
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
                              TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), HomeSearch.TakeStatsLine(),
                              TerrainReach.TakeStatsLine(), BehaviorLog.TakeStatsLine(), WalkerMove.TakeStatsLine(),
-                             TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine()
+                             TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine(),
+                             ParallelTickWait.TakeStatsLine()
                          })
                 {
                     if (line != null)
@@ -422,6 +428,7 @@ namespace LateGamePerformance
             PlantWater.SceneCreated();
             SoilScans.SceneCreated();
             HomeSearch.SceneCreated();
+            SaveSnapshot.SceneCreated();
             _ticksSinceReport = 0;
             string turnedOffLine = TurnedOffLine();
             if (turnedOffLine != null)

@@ -21,6 +21,15 @@ namespace LateGamePerformance
     // keeps that type on the main thread, or, on a helper, leaves the whole save to the game, with one log line
     // each. The registry is read again whenever the number of patches changes, so a mod that patches late is
     // seen at the next save. Main thread only.
+    //
+    // Since 0.4.28 the list of every patched method is taken from Harmony once per judging pass (a pass starts
+    // with RegistryChanged: at every save, and at the first tick of a game scene, when SaveSnapshot judges every
+    // listed type ahead of the first save) and indexed by name. Before, it was asked for again for every interface
+    // or virtual method a Save reached: a few hundred copies of the list of every patched method in the game (262
+    // over the listed types with the harness's stand-in registry), each walked in full, at the first save of a
+    // session. Only methods with the reached method's name can implement or override it, and the index
+    // keeps Harmony's order within a name, so the first match, and with it every verdict and its message, is the
+    // same as walking the whole list.
     internal static class SaveGuard
     {
         // The helpers, with the assembly each lives in.
@@ -74,10 +83,19 @@ namespace LateGamePerformance
         private static int _lastPatchedCount = -1;
         private static bool _helpersJudged;
         private static string _parkedReason;
+        // Every patched method by name, for this judging pass; null until a pass needs it.
+        private static Dictionary<string, List<MethodBase>> _patchedByName;
 
-        // Called at every save: when the number of patches changed, every verdict is taken again.
+        // For the tests: ask Harmony for the whole list at every reached virtual method, as before 0.4.28, so the
+        // verdicts of both ways can be compared.
+        internal static bool FetchPatchedMethodsEveryTimeForTests;
+
+        // Called at every save (and before judging ahead of the first one): when the number of patches changed,
+        // every verdict is taken again. Either way a new judging pass starts, with a fresh list of patched methods
+        // when one is needed.
         internal static bool RegistryChanged()
         {
+            _patchedByName = null;
             int count;
             try
             {
@@ -237,7 +255,7 @@ namespace LateGamePerformance
                 return null;
             }
             ParameterInfo[] parameters = method.GetParameters();
-            foreach (MethodBase patched in PatchedMethods() ?? Enumerable.Empty<MethodBase>())
+            foreach (MethodBase patched in PatchedNamed(method.Name))
             {
                 Type owner = patched.DeclaringType;
                 if (owner == null || owner == declaring || patched.Name != method.Name || !declaring.IsAssignableFrom(owner))
@@ -269,6 +287,30 @@ namespace LateGamePerformance
             return null;
         }
 
+        // The patched methods with this name, in Harmony's order: from this pass's index, built on first use.
+        private static IEnumerable<MethodBase> PatchedNamed(string name)
+        {
+            if (FetchPatchedMethodsEveryTimeForTests)
+            {
+                return PatchedMethods() ?? Enumerable.Empty<MethodBase>();
+            }
+            if (_patchedByName == null)
+            {
+                Dictionary<string, List<MethodBase>> index = new Dictionary<string, List<MethodBase>>(StringComparer.Ordinal);
+                foreach (MethodBase patched in PatchedMethods() ?? Enumerable.Empty<MethodBase>())
+                {
+                    if (!index.TryGetValue(patched.Name, out List<MethodBase> named))
+                    {
+                        named = new List<MethodBase>();
+                        index[patched.Name] = named;
+                    }
+                    named.Add(patched);
+                }
+                _patchedByName = index;
+            }
+            return _patchedByName.TryGetValue(name, out List<MethodBase> found) ? found : (IEnumerable<MethodBase>)Array.Empty<MethodBase>();
+        }
+
         internal static MethodInfo SaveMethod(Type type)
         {
             return type.GetMethod("Save", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
@@ -286,6 +328,7 @@ namespace LateGamePerformance
             _lastPatchedCount = -1;
             _helpersJudged = false;
             _parkedReason = null;
+            _patchedByName = null;
         }
 
         // For the tests: what a Save calls and which serializers it loads.

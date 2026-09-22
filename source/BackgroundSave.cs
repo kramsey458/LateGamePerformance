@@ -131,9 +131,13 @@ namespace LateGamePerformance
             }
         }
 
-        // After a failure on the worker thread: the same save once more, on the calling thread, written straight
-        // into the target the way the game does it. The entries are still here, so nothing about the game's state
-        // is needed. Throws if this fails as well.
+        // After a failure on the worker thread: the same save once more, on the calling thread. The entries are still
+        // here, so nothing about the game's state is needed, and the archive is the same bytes whichever way it is
+        // written. Since 0.4.28 it first goes the worker's way again, into the .saving file and one rename over the
+        // target, so a save that is overwritten stays intact until its replacement is complete. If any step of that
+        // fails, it is written straight into the target the way the game writes it (truncating it first), as before:
+        // that also works where a rename cannot (something that lets the file be written but not replaced) and where
+        // the disk only has room for the new save once the old one's space is freed. Throws if that fails as well.
         public void CompleteOnCallingThread()
         {
             try
@@ -142,7 +146,7 @@ namespace LateGamePerformance
             }
             catch (Exception)
             {
-                // The temp file is given up on either way.
+                // The worker's temp stream is given up on either way.
             }
             TempStream = null;
             long started = Stopwatch.GetTimestamp();
@@ -154,17 +158,56 @@ namespace LateGamePerformance
             }
             long built = Stopwatch.GetTimestamp();
             BuildStopwatchTicks = built - started;
-            using (FileStream target = File.Create(TargetPath))
+            WrittenInPlace = !TryThroughTempFile();
+            if (WrittenInPlace)
             {
-                _archive.Position = 0;
-                _archive.CopyTo(target);
-                target.Flush(true);
+                // The temp file's space back first, in case that is what the disk is short of.
+                DeleteQuietly(TempPath);
+                using (FileStream target = File.Create(TargetPath))
+                {
+                    _archive.Position = 0;
+                    _archive.CopyTo(target);
+                    target.Flush(true);
+                }
             }
             Bytes = _archive.Length;
             FileStopwatchTicks = Stopwatch.GetTimestamp() - built;
             _archive = null;
             Failure = null;
             DeleteQuietly(TempPath);
+        }
+
+        // Whether the last CompleteOnCallingThread had to write straight into the target.
+        public bool WrittenInPlace { get; private set; }
+
+        // The archive into the .saving file, flushed and checked on the disk, then renamed over the target once.
+        // False, with the target as it was (or, if the rename itself failed halfway, gone), if any step fails.
+        private bool TryThroughTempFile()
+        {
+            if (TempPath == null)
+            {
+                return false;
+            }
+            try
+            {
+                using (FileStream temp = new FileStream(TempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    _archive.Position = 0;
+                    _archive.CopyTo(temp);
+                    temp.Flush(true);
+                }
+                if (new FileInfo(TempPath).Length != _archive.Length)
+                {
+                    return false;
+                }
+                CommitFile(TempPath, TargetPath);
+                return true;
+            }
+            catch (Exception)
+            {
+                // The game's way follows.
+                return false;
+            }
         }
 
         // Writes the archive straight into a stream the game opened (a save this mod prepared but does not own).
@@ -332,11 +375,14 @@ namespace LateGamePerformance
     //     asks the save repository about files (listing, opening, deleting, exists), and quitting the game.
     //   - If the ".saving" file cannot be opened, the game's own code opens the real file and the save completes
     //     the game's way, there and then, errors included.
-    //   - If the worker fails, the save is done again on the game thread from the same snapshot. If that fails
-    //     too, the game's callback does not run (so no old autosave is deleted) and the game gets the same
+    //   - If the worker fails, the save is done again on the game thread from the same snapshot: through the
+    //     ".saving" file and a rename once more, and if that fails, straight into the file the game's way. If that
+    //     fails too, the game's callback does not run (so no old autosave is deleted) and the game gets the same
     //     GameSaverException it would have had.
     //   - If preparing fails, nothing has been written: the feature turns itself off and the game's own code
-    //     performs that save in full.
+    //     performs that save in full. If the snapshot was already taken, the game's snapshot runs again, so every
+    //     singleton saves its state twice; SaveSnapshot's fallback does the same, and why that is harmless is
+    //     written there (CreatePrefix).
     //
     // This changes nothing in the simulation, so it does not matter in multiplayer whether every player has it.
     internal static class BackgroundSave
@@ -849,8 +895,9 @@ namespace LateGamePerformance
                     }
                     // The worker failed once; do not rely on it again this session.
                     _active = false;
-                    Log.Warning("BackgroundSave: the save was written on the game thread. Background saving is off " +
-                                "for the rest of this session.");
+                    Log.Warning("BackgroundSave: the save was written on the game thread" +
+                                (job.WrittenInPlace ? ", straight into the file" : ", through its .saving file and a rename") +
+                                ". Background saving is off for the rest of this session.");
                 }
                 Log.Info(Summary(token));
                 if (!token.Abandoned)

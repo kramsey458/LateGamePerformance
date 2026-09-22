@@ -186,10 +186,11 @@ internal static class SaveAndCountsTests
         check(job.Failure is UnauthorizedAccessException && WorldOf(overwritten) == "third world",
             "save job: a failed job reports it and leaves the old save as it was");
         job.CompleteOnCallingThread();
-        check(job.Failure == null && WorldOf(overwritten) == "fourth world" && !File.Exists(job.TempPath),
-            "save job: the second attempt writes the save and removes the .saving file");
+        check(job.Failure == null && WorldOf(overwritten) == "fourth world" && !File.Exists(job.TempPath) && job.WrittenInPlace,
+            "save job: the second attempt, whose rename is refused too, writes the save straight into the file and removes the .saving file");
 
-        // The world writer throws on the worker: nothing is committed; on the calling thread it works.
+        // The world writer throws on the worker: nothing is committed; on the calling thread it works, through the
+        // .saving file and a rename, so the old save is intact until the new one is complete (0.4.28).
         int calls = 0;
         job = Job(overwritten, Entries("fifth world", () =>
         {
@@ -201,13 +202,36 @@ internal static class SaveAndCountsTests
         job.Run();
         check(job.Failure is InvalidOperationException && WorldOf(overwritten) == "fourth world",
             "save job: a writer that throws leaves the old save as it was");
+        bool oldIntactAtRename = false, completeAtRename = false;
+        Action<string, string> realCommit = job.CommitFile;
+        job.CommitFile = (temp, final) =>
+        {
+            oldIntactAtRename = WorldOf(final) == "fourth world";
+            completeAtRename = WorldOf(temp) == "fifth world";
+            realCommit(temp, final);
+        };
         job.CompleteOnCallingThread();
-        check(WorldOf(overwritten) == "fifth world", "save job: and the second attempt runs the writer again");
+        check(WorldOf(overwritten) == "fifth world" && oldIntactAtRename && completeAtRename && !job.WrittenInPlace &&
+              !File.Exists(job.TempPath),
+            "save job: and the second attempt runs the writer again, keeping the old save intact until the new one is complete on the disk");
+
+        // The .saving file cannot be written on the second attempt (its name is taken by a directory now): the save
+        // goes straight into the file, the game's way.
+        job = Job(overwritten, Entries("sixth world"));
+        job.CommitFile = (temp, final) => throw new IOException("in use");
+        job.Run();
+        job.TempStream?.Dispose();
+        File.Delete(job.TempPath);
+        Directory.CreateDirectory(job.TempPath);
+        job.CompleteOnCallingThread();
+        check(job.Failure == null && WorldOf(overwritten) == "sixth world" && job.WrittenInPlace,
+            "save job: when the .saving file cannot be written again, the second attempt writes straight into the file");
+        Directory.Delete(job.TempPath);
 
         // A world entry that comes out empty is refused before anything is renamed.
         job = Job(overwritten, Entries(""));
         job.Run();
-        check(job.Failure is InvalidDataException && WorldOf(overwritten) == "fifth world",
+        check(job.Failure is InvalidDataException && WorldOf(overwritten) == "sixth world",
             "save job: an empty world entry is refused and the old save stays");
         bool threw = false;
         try
@@ -218,7 +242,7 @@ internal static class SaveAndCountsTests
         {
             threw = true;
         }
-        check(threw && WorldOf(overwritten) == "fifth world", "save job: the second attempt refuses it too, before touching the file");
+        check(threw && WorldOf(overwritten) == "sixth world", "save job: the second attempt refuses it too, before touching the file");
         SaveJob.DeleteQuietly(job.TempPath);
 
         // The check itself.

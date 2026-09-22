@@ -72,6 +72,7 @@ internal static class Program
         try
         {
             Console.WriteLine($"        internal const string HelpersHash = \"{SaveGuard.HelpersHashNow()}\";");
+            Console.WriteLine($"        internal const string SingletonLoopHash = \"{SaveSnapshot.SingletonLoopHashNow()}\";");
         }
         catch (Exception exception)
         {
@@ -173,7 +174,7 @@ internal static class Program
             Diagnostics.CreateFeature(), CatchUp.CreateFeature(),
             SoundListenerSkip.CreateFeature(), UiThrottle.CreateFeature(), AnimatorCulling.CreateFeature(),
             TerrainReach.CreateFeature(), MapChanges.CreateFeature(), BehaviorLog.CreateFeature(), WalkerMove.CreateFeature(),
-            Plugin.CreateTickFeature()
+            Plugin.CreateTickFeature(), ParallelTickWait.CreateFeature()
         };
         int patchCount = 0;
         foreach (Feature feature in features)
@@ -188,7 +189,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 121, $"121 patches declared (found {patchCount})");
+        Check(patchCount == 124, $"124 patches declared (found {patchCount})");
         TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
         TestHaulCacheFlush();
@@ -213,6 +214,8 @@ internal static class Program
             "DistrictCounts verify: output capacity of Good0: the mod counted", "DistrictCounts failed",
             "WaterMapCopy verify: the copy made on a worker differs from the game's.",
             "PlantWater verify: object 3 read", "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
+            "SaveSnapshot failed while the singleton SlowSingleton saved its state",
+            "ParallelTickWait: one of the game's parallel tasks has failed", "ParallelTickWait: the game's parallel tick was still running after",
             "HomeSearch verify: the mod moves in", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
