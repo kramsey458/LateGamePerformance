@@ -118,6 +118,15 @@ namespace LateGamePerformance
                 Target = () => Reflect.Method(DistrictHaulCandidatesType, "OnFinishedBuildingUnregistered"),
                 Postfix = Reflect.Own(self, nameof(CandidateSetChangedPostfix))
             });
+            // The periodic flush, at the start of every tick. Required: it is what bounds an input this mod does not
+            // hook to one tick, so the cache does not run without it.
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "TickableSingletonService.TickAll",
+                Required = true,
+                Target = () => Reflect.Method("Timberborn.TickSystem.TickableSingletonService", "TickAll"),
+                Prefix = Reflect.Own(self, nameof(OnTickStarted))
+            });
 
             // Building-local flags read by the vanilla haul behavior providers. Optional: the periodic flush
             // bounds the damage if one of these cannot be hooked.
@@ -147,7 +156,8 @@ namespace LateGamePerformance
             _ticks = 0;
         }
 
-        public static void OnTickStarted()
+        // Prefix on TickableSingletonService.TickAll.
+        private static void OnTickStarted()
         {
             if (!_active)
             {

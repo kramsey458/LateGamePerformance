@@ -187,8 +187,9 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 119, $"119 patches declared (found {patchCount})");
+        Check(patchCount == 120, $"120 patches declared (found {patchCount})");
         TestSettingsPage();
+        TestHaulCacheFlush();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
         TerrainAndWaterTests.Run(_managed, Check);
@@ -213,6 +214,45 @@ internal static class Program
 
         Console.WriteLine(_failures == 0 ? "ALL PASSED" : _failures + " FAILED");
         return _failures == 0 ? 0 : 1;
+    }
+
+    // Everything the haul cache holds is dropped at the start of every tick. That hook must come with the cache: the
+    // TickHooks feature (stats lines, metrics) is optional and can fail on its own. Each tick runs every prefix the
+    // given features put on TickableSingletonService.TickAll, as Harmony would.
+    private static void TestHaulCacheFlush()
+    {
+        MethodBase tickAll = Reflect.Method("Timberborn.TickSystem.TickableSingletonService", "TickAll");
+        Feature haulCache = HaulCache.CreateFeature(new Config());
+        Feature tickHooks = Plugin.CreateTickFeature();
+        PatchSpec own = haulCache.Patches.Find(patch => patch.Prefix != null && Equals(patch.Target(), tickAll));
+        Check(own != null && own.Required, "haul cache: its per-tick flush is its own required prefix on TickableSingletonService.TickAll");
+        FieldInfo epoch = typeof(HaulCache).GetField("_epoch", BindingFlags.Static | BindingFlags.NonPublic);
+        FieldInfo active = typeof(HaulCache).GetField("_active", BindingFlags.Static | BindingFlags.NonPublic);
+        HaulCache.Activate();
+        int Flushes(params Feature[] installed)
+        {
+            int before = (int)epoch.GetValue(null);
+            for (int tick = 0; tick < 3; tick++)
+            {
+                foreach (Feature feature in installed)
+                {
+                    foreach (PatchSpec patch in feature.Patches)
+                    {
+                        if (patch.Prefix != null && Equals(patch.Target(), tickAll))
+                        {
+                            patch.Prefix.Invoke(null, null);
+                        }
+                    }
+                }
+            }
+            return (int)epoch.GetValue(null) - before;
+        }
+        int alone = Flushes(haulCache);
+        int both = Flushes(haulCache, tickHooks);
+        Check(alone == 3, $"haul cache: dropped on each of 3 ticks with the TickHooks feature missing (dropped {alone} times)");
+        Check(both == 3, $"haul cache: dropped once per tick with TickHooks installed too ({both} times in 3 ticks)");
+        HaulCache.Reset();
+        active.SetValue(null, false);
     }
 
     private static void TestCatchUp()
