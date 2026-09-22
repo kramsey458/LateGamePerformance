@@ -62,7 +62,7 @@
   <ol class="steps">
     <li><div><strong>Back up your save</strong><p>Copy the save you want to use from <code>Documents\Timberborn\Saves</code>.</p></div></li>
     <li><div><strong>Get Harmony and Mod Settings</strong><p>Subscribe to both on the Steam Workshop if you have not already. This mod will not start without them.</p></div></li>
-    <li><div><strong>Download the mod</strong><p>Get <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><code><span data-release="asset-name">LateGamePerformance-0.4.27.zip</span></code></a> from the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">release page</a>. On the release page choose that file under <strong>Assets</strong>, not <strong>Source code</strong>. A preview marked <strong>Pre-release</strong> on the same page, when there is one, installs the same way.</p></div></li>
+    <li><div><strong>Download the mod</strong><p>Get <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><code><span data-release="asset-name">LateGamePerformance-0.4.27.zip</span></code></a> from the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">release page</a>. On the release page choose that file under <strong>Assets</strong>, not <strong>Source code</strong>. A preview, when there is one, is on the same Releases page marked <strong>Pre-release</strong>. It installs the same way but has not been played yet.</p></div></li>
     <li><div><strong>Close Timberborn</strong><p>Make sure the game is fully closed before you copy files into its Mods folder.</p></div></li>
     <li><div><strong>Extract into your Mods folder</strong><p>Delete any older <code>LateGamePerformance</code> folder first. Then extract the ZIP into <code>Documents\Timberborn\Mods</code>. It contains one folder, <code>LateGamePerformance</code>, and you should end up with the layout <a href="#layout">shown below</a>. If you extracted into a new folder you may have a doubled <code>LateGamePerformance\LateGamePerformance</code>. Move the inner one up.</p></div></li>
     <li><div><strong>Enable it and restart</strong><p>Start Timberborn, open <strong>Mods</strong> from the main menu, tick <strong>Harmony</strong>, <strong>Mod Settings</strong> and <strong>Late Game Performance</strong>, and restart the game when it asks. Menu wording can differ a little between game versions.</p></div></li>
@@ -89,12 +89,12 @@
 <pre><code class="log-line">[LateGamePerformance] <span data-release="version">0.4.27</span> loading.</code><code class="log-line">[LateGamePerformance] Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on. These are the same for every player on this version.</code></pre></li>
     <li>Another startup line reports the garbage collector. <code>GC: incremental=False</code> means memory clean-ups stop the whole game while they run. <a href="#gc">You can change that</a>.</li>
     <li>While you play, a stats line appears every 1,000 ticks (10 minutes at normal speed). The numbers in this example are an illustration of the format, and yours will differ:
-<pre><code class="log-line">[LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests, 251 served from cache, 161 rebuilt in 96.3 ms (0.598 ms each); buildings recomputed 40211/61843</code></pre></li>
+<pre><code class="log-line">[LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests built in 96.3 ms (0.234 ms each); buildings reused 21632/61843, recomputed 40211</code></pre></li>
   </ol>
   <p>No lines, or a line that says <code>OFF</code>? Head to <a href="troubleshooting.html">Troubleshooting</a>.</p>
 
   <h2 id="gc">Turn on incremental garbage collection</h2>
-  <p>This is optional, and it is the one feature that is a setting. The game cleans up memory with every thread stopped, and in a late-game colony that can freeze it for most of a second, about once a minute. Incremental collection does the same work a few milliseconds at a time.</p>
+  <p>This is optional. It is the one decision on the settings page that is yours to make, because it edits a file in the game's folder. The game cleans up memory with every thread stopped, and in a late-game colony that can freeze it for most of a second, about once a minute. Incremental collection does the same work a few milliseconds at a time.</p>
   <ol>
     <li>Open the mod's settings page: <strong>Mods &gt; Late Game Performance</strong>, from the main menu or in-game.</li>
     <li>Tick <strong>Incremental garbage collection</strong>.</li>
@@ -108,7 +108,7 @@
   </ul>
 
   <h2 id="multiplayer">Multiplayer</h2>
-  <p>Every player installs the <strong>same version</strong> of the mod. That is all: nothing that affects the simulation is a setting, so the same version behaves the same for everyone. The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on</code> should read the same in every player's <code>Player.log</code>. If one player's line says <code>OFF</code>, see <a href="troubleshooting.html#off">Troubleshooting</a>. Incremental garbage collection, thread counts and timing logs may differ between players. The mod has been played in multiplayer on two computers; if you try it, please <a href="https://github.com/timbermods/LateGamePerformance/issues/new">tell us how it went</a>.</p>
+  <p>Every player installs the <strong>same version</strong> of the mod and runs the same game version. Nothing else has to match: nothing that affects the simulation is a setting, so the same version behaves the same for everyone. The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on</code> should read the same in every player's <code>Player.log</code>. If one player's line says <code>OFF</code>, see <a href="troubleshooting.html#off">Troubleshooting</a>. Incremental garbage collection, thread counts, timing logs and (since 0.4.27) the verify settings may differ between players. The mod has been played in multiplayer on two computers; if you try it, please <a href="https://github.com/timbermods/LateGamePerformance/issues/new">tell us how it went</a>.</p>
 
   <h2 id="update">Updating</h2>
   <ol>
@@ -131,9 +131,9 @@
 
 <footer class="site-footer">
   <div class="wrap foot">
-    <div><strong>Late Game Performance</strong><br>A free, open-source Timberborn mod, MIT licensed. Not affiliated with Mechanistry.</div>
+    <div><strong>Late Game Performance</strong><br>Free and open source, MIT licensed, maintained by <a href="https://github.com/timbermods">Timbermods</a>. An unofficial community mod for Timberborn. Not affiliated with or endorsed by Mechanistry.</div>
     <div><h2>Guides</h2><ul><li><a href="install.html">Install guide</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="faq.html">FAQ</a></li></ul></div>
-    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="notes">Release <span data-release="tag">v0.4.27</span></a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li></ul></div>
+    <div><h2>Project</h2><ul><li><a href="https://github.com/timbermods/LateGamePerformance">Source on GitHub</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/releases/latest">Latest release</a></li><li><a href="https://github.com/timbermods/LateGamePerformance/issues">Issues</a></li><li><a href="https://timbermods.github.io/">More mods from Timbermods</a></li></ul></div>
   </div>
 </footer>
 <script src="site.js" defer></script>

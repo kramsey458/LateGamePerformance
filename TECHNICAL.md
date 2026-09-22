@@ -5,7 +5,7 @@ The detailed description of each feature, the settings file, the log lines and t
 
 ## What it does
 
-### Hauling job list cache (on by default)
+### Hauling job list cache (always on)
 
 Every time a hauler looks for work, the game asks every building with an inventory in the district for its
 hauling jobs and their weights (which scans that building's inventories), sorts the whole list, and then tries
@@ -73,7 +73,7 @@ Expected in the logged colony: 70-90% of buildings reused, about 0.2 ms per tick
 If anything throws inside the cache, it switches itself off for the session and the game's own code runs.
 If a required game method is missing (for example after a game update), the feature does not enable at all.
 
-### Tree and plant search (on by default, new in 0.4.8)
+### Tree and plant search (always on, new in 0.4.8)
 
 Every time a lumberjack looks for a tree (and a gatherer or a farmer for a plant), the game goes through every
 candidate, and for each one first looks up the path distance from the building, and only then asks whether the
@@ -286,7 +286,7 @@ changes in a real colony, and so how much this saves, has not been measured; the
   `TerrainFlowFieldCache`: everything cached gets built, a map whose start is off the graph is left alone, a
   second tick builds nothing, and after a ground change exactly the cleared maps are rebuilt.
 
-The same behaviour difference as the road maps: maps are built before the first request instead of on it, so the
+The same behavior difference as the road maps: maps are built before the first request instead of on it, so the
 few code paths that use a terrain map only "if it is already filled" find it filled. Every player on the same
 version gets the same.
 
@@ -315,7 +315,7 @@ Most of the cost is the room question. The game asks it per inventory per allowe
 for each inventory the mod asks the game once, in the list's order, for each allowed good's id, what `GetAmount`
 returns for it (the first entry with that id, also for a good listed twice) and whether the inventory `Gives` it,
 and keeps the answers until the inventory holds a different registry or its registry a different number of goods
-(initialised again), or the inventory is a different object. Each count then does what `GetCapacity` and the game's
+(initialized again), or the inventory is a different object. Each count then does what `GetCapacity` and the game's
 capacity counter do, in their order: skip an inventory whose capacity is ignorable (read every time; emptying
 switches it), then for every allowed good call the real `AllowedAmount` of the inventory's current capacity rule
 (another mod's patch on it runs, as it would for the game), take the smaller with the kept amount, and add it when
@@ -333,7 +333,7 @@ game's, down to which keys they hold and the order they were added in.
 - The tests fill one counter with the game's `UpdateCounters` and one with the mod over 700 real `Inventory`
   objects with the game's own capacity rules (one stand-in mod rule; some inventories list a good twice), and compare
   every good through the game's public `GetResourceCount` and the four tables entry by entry, for six rounds with
-  stock moving in between; then with an inventory initialised again, a replaced registry of the same size, a replaced
+  stock moving in between; then with an inventory initialized again, a replaced registry of the same size, a replaced
   inventory, ignorable capacity switched and a capacity rule swapped; then with each of the stood-in methods patched.
 - They also time it at the logged colony's size (236 inventories, 38 warehouses of 25 goods, .NET 8, several runs):
   the game's loop 95-160 us, the walk on the main thread 40-65 us. The same walk dealt out to 7 worker threads takes
@@ -423,13 +423,13 @@ have read flags that are not set, so the same cells are updated in the same orde
 - `SoilScansVerify = true` walks every cell the game's way as well and compares the list of cells updated.
 
 Looked at in 0.4.28 and not built: a fast path for a changed contamination cell (about 5,360 per tick at ~47 ns in
-the 0.4.23 session) that stays on the same side of zero and whose soil colour value is bit for bit unchanged,
+the 0.4.23 session) that stays on the same side of zero and whose soil color value is bit for bit unchanged,
 writing only the level. The game's `SetContaminationLevel` does three things: the contaminated object's enter or
 exit call when the cell crosses zero, `TerrainMaterialMap.SetSoilContamination`, and the level write. The second
-compares the new colour value with the pixel the texture map holds at those coordinates, not with what the old
+compares the new color value with the pixel the texture map holds at those coordinates, not with what the old
 level maps to, and the two can differ: a terrain height change resets the pixels of the cells it moved to 0
-through the map's own queue while the level stays, and a colour change queued earlier is not in the pixel until
-the map's tick applies it. Skipping the call would leave such a pixel uncoloured where the game recolours it, a
+through the map's own queue while the level stays, and a color change queued earlier is not in the pixel until
+the map's tick applies it. Skipping the call would leave such a pixel uncolored where the game recolors it, a
 lasting difference on screen. An exact form would read that pixel and compare as the game does; it keeps the
 coordinates and the pixel read and saves only the calls, a few of the ~47 ns. Instead, every 8th contamination pass
 counts the cells the fast path would take (last part of the stats line), so the saving can be judged from a real
@@ -533,10 +533,10 @@ Tested in the harness: the file writer against every failure above with real fil
 `WorldSerializer` writing the same bytes on a worker thread as on the main thread, and the game's reader loading
 the result; and the whole chain of hooks in the order `GameSaver.Save` calls them, with a real `SaveWriter` and
 the real `WorldEntryWriter` type. **Not tested: inside the game.** In particular, whether BeaverBuddies' detour
-leaves `GameSaver.Save` recognisable as the caller can only be seen there; if it does not, saves simply stay the
+leaves `GameSaver.Save` recognizable as the caller can only be seen there; if it does not, saves simply stay the
 game's own and one log line (`the writer was called by ...`) says what was seen.
 
-### Parallel route map rebuild (on by default, new in 0.2.0)
+### Parallel route map rebuild (always on, new in 0.2.0)
 
 Every building with an entrance keeps a route map: the road distance from its entrance to every road tile it
 can reach. When any road changes, the game throws away every map containing a changed tile, which in a connected
@@ -566,7 +566,7 @@ worker threads (up to 7).
   filled. Building everything that is cached removes the dependence on what anyone looked at. It does more work
   (never-used maps are built too), but on worker threads in the background.
 
-One behaviour difference from the unmodded game: maps are now filled before the first request instead of on it.
+One behavior difference from the unmodded game: maps are now filled before the first request instead of on it.
 A few code paths use a map only "if it is already filled", so they can take the cached route where the unmodded
 game would have searched again. That is why route maps are not a setting: every player on the same version runs them alike.
 
@@ -602,7 +602,7 @@ turns the feature off.
 ones cost 0.27 ms per tick in the logged colony, on ticks where nothing had changed. `MapChanges` hooks the events
 after which a map can be unbuilt or newly buildable: a new cache entry (`FlowFieldCache.StartCachingAtNode`, a
 building finished), a nav-mesh update on the road or terrain cache (which clears the maps it touches), and a
-district centre added or removed, an obstacle changed or the district map's own nav-mesh update (which decide
+district center added or removed, an obstacle changed or the district map's own nav-mesh update (which decide
 whether a road map has a district map to be limited by). Each hook sets a flag; the walk itself is unchanged and
 runs on the next navigation tick after a flag. Every 200th tick a full walk counts any unbuilt map the hooks
 missed and logs it once (`... 0 unbuilt maps were found by the periodic check alone (left to the game)` on the
@@ -703,9 +703,9 @@ report (no multiplayer mod uses it; BeaverBuddies sends its players the save fil
 started in a way the mod does not know, so only the writing part is covered. The numbers are there to decide
 whether part of a save is worth moving off the main thread.
 
-### Per-component timings (menu setting, new in 0.4.x)
+### Per-component timings (settings file, off by default, new in 0.4.1)
 
-The game can time every tickable component, every once-per-tick system and every root behaviour, but only when
+The game can time every tickable component, every once-per-tick system and every root behavior, but only when
 launched with a `-metrics` option, and it only writes the result at the end of a benchmark run.
 
 Set `RecordTimings = true` in `LateGamePerformance.cfg` and restart the game (up to 0.4.9 this was a box on the
@@ -747,8 +747,8 @@ for you:
 - It takes effect the **next time the game starts**; the startup line then says `GC: incremental=True`.
   `Player.log` says whether the file could be written. If it could not (a read-only install folder), add the
   line by hand with the game closed.
-- Steam's "verify integrity of game files" and game updates restore the original file, so tick it again
-  afterwards.
+- Steam's "verify integrity of game files" and game updates restore the original file. From 0.4.7 the mod puts
+  the line back at the next start while the box is ticked (see below).
 - It does not affect the simulation, so multiplayer peers may differ. Every player benefits separately.
 
 New in 0.4.7:
@@ -1151,11 +1151,11 @@ the `Timing:` line reports. Lesson: never force a full collection on a heap this
 
 ### Audio listener placed only when needed (on by default, new in 0.4.17)
 
-Every frame `SoundListener.LateUpdateSingleton` casts a ray from the screen centre against the terrain and every
+Every frame `SoundListener.LateUpdateSingleton` casts a ray from the screen center against the terrain and every
 block object to find what is under it, then moves the listener a tenth of the way there: about 0.3 ms per frame and
 50 KB/s of garbage in a large colony. `SoundListener = true` (the default) runs it when the camera moved (position,
 rotation or screen size), while the listener is still gliding towards its target (the last placement moved it more
-than a hundredth of a unit), and otherwise once every ten frames so that something built under the screen centre is
+than a hundredth of a unit), and otherwise once every ten frames so that something built under the screen center is
 picked up within a fraction of a second. The `SoundListener:` stats line says in how many frames it ran. Sound only.
 
 ### User interface work every few frames (on by default, new in 0.4.17)
@@ -1249,7 +1249,7 @@ for the animators due and on screen, and the final pose of an animation finishin
 Not done: keeping the vertex animators' material. `VertexAnimationUpdater` asks `renderer.material` on every update,
 which makes the renderer's own copy on first use and returns it afterwards, but only while nobody swaps the
 renderer's materials, and the game does: `MaterialColorer.SetCachedMaterialProperties` sets new shared materials on
-every mesh renderer under an object without an `EntityMaterials` component whenever it is highlighted or coloured
+every mesh renderer under an object without an `EntityMaterials` component whenever it is highlighted or colored
 (hover and selection highlighting, construction mode, lighting), after which `renderer.material` makes a new copy.
 Which models carry vertex animations is decided by the models, not the code, so a kept reference cannot be shown to
 stay the one drawn; if it did not, the animation would freeze on screen.
@@ -1324,9 +1324,9 @@ See *Scanned only after a change* under the parallel route map rebuild: `MapChan
 a cached road or terrain map can be unbuilt or newly buildable and sets a flag; the two features walk their caches
 on the next navigation tick after a flag and on every 200th tick regardless.
 
-### Behaviour log lines written only when read (always on, new in 0.4.25)
+### Behavior log lines written only when read (always on, new in 0.4.25)
 
-Every time a beaver changes behaviour, `BehaviorManager.SetRunningBehavior` formats the behaviour's name and the
+Every time a beaver changes behavior, `BehaviorManager.SetRunningBehavior` formats the behavior's name and the
 day into a string and keeps it in a ring of the last ten. The ring is read in two places only: it is saved with
 the beaver, and the debug fragment of the entity panel shows it. At a few thousand changes a second in a large
 colony those strings are a steady stream of garbage nothing reads until the next save (the `BehaviorManager` tick
@@ -1388,7 +1388,7 @@ BeaverBuddies' pointer frames in multiplayer, about one in six at 60 frames per 
 throws, the colliders are synced, the simulation mode is put back and the game syncs every frame again.
 
 One caller of the same raycast is not a selection: the audio listener. `SoundListener.LateUpdateSingleton` casts a
-ray from the screen centre through `BlockObjectRaycaster` on every frame the camera moves (every frame with
+ray from the screen center through `BlockObjectRaycaster` on every frame the camera moves (every frame with
 `SoundListener = false`), which would bring the sync back on all those frames. Its answer is the first block object
 along the ray: `BlockObjectRaycaster` steps through anything else it hits (a beaver, an icon) by casting again with
 that object on the ignore layer, and block objects do not move once placed, so a ray inside the listener's update is
@@ -1622,7 +1622,7 @@ took 600.0 ms (0.600 ms each)
 ```
 
 "ms each" is the stock and room count, the part the mod does instead of the game. "allowed goods read anew" counts
-inventories whose kept allowed goods were read from the game (new, rebuilt or initialised again); after the first
+inventories whose kept allowed goods were read from the game (new, rebuilt or initialized again); after the first
 count it stays near 0. The verify part is only there with `DistrictCountsVerify`: the game's own count
 (`StockCounter.UpdateStock` + `CapacityCounter.UpdateCapacity`) of the same district, timed, to compare with "ms each".
 
@@ -1749,7 +1749,7 @@ own versions of these only read.
 Seven settings are on the in-game settings page (**Mods > Late Game Performance**): **Incremental garbage
 collection**, described above, which is there because it is the one decision that is the player's to make (it
 edits a file in the game's folder); since 0.4.19, **Diagnostics timers** and **Verify terrain path searches**,
-plus **Verify save snapshots** since 0.4.22 and **Verify every feature** since 0.4.25, the measurements a tester is
+plus **Verify save snapshots** since 0.4.22 and **Verify every feature (one test session)** since 0.4.25, the measurements a tester is
 asked to switch on for a session; and since 0.4.25 the two memory measurements, **Measure live memory now** and
 **Write a memory snapshot file**, which act once when ticked and untick themselves. The boxes mirror the
 `Diagnostics`, `TerrainSearchVerify`, `SaveSnapshotVerify` and `VerifyAll` keys in this file: a box starts from the
@@ -1834,7 +1834,8 @@ comment in the file lists them. The HTML keeps the values of the last release as
 cached in the browser for 30 minutes.
 
 **What is not automatic:** text that describes one specific build, such as the tested and not-yet-verified lists
-and "played as 0.4.8". Those elements carry `data-release-pinned="0.4.9"`. When the newest release is a different
-version, the script adds a note saying the text was written for 0.4.9. Rewrite the text for the new release and
+and "played as 0.4.8". Those elements carry `data-release-pinned` with the version they were written for (0.4.27
+at the time of writing). When the newest release is a different version, the script adds a note saying which
+version the text was written for. Rewrite the text for the new release and
 change the attribute. The fallback values in the HTML can be refreshed then too, but they only show without the
 script.
