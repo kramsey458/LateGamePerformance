@@ -42,7 +42,7 @@ namespace LateGamePerformance
         public ModSetting<bool> VerifySaveSnapshots { get; } = new ModSetting<bool>(Plugin.Current.SaveSnapshotVerify,
             ModSettingDescriptor.Create("Verify save snapshots")
                 .SetTooltip("At every save, take the game's own snapshot as well as this mod's worker-thread one, " +
-                            "compare every entity, and use the game's. Counted in the SaveSnapshot: line. Never " +
+                            "compare every entity; this mod's snapshot is the one saved. Counted in the SaveSnapshot: line. Never " +
                             "changes what is saved; makes saves slower. For one test session. Does not affect the " +
                             "simulation, so multiplayer peers may differ."));
 

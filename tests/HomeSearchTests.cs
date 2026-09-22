@@ -103,6 +103,44 @@ internal static class HomeSearchTests
         check(HomeSearch.AssignPrefix(dwelling, new List<Beaver>(adults), childList, ref other) && !other,
             "home search: a list of another kind is left to the game's own walk");
 
+        // A verify key is each player's own, so it must not change who moves in. Forced difference: after the mod's
+        // table was built, one beaver's component is replaced behind it by one that is looking and may move in; the
+        // mod still asks the old one (not looking) and moves in the next beaver that may, the game's walk looks up the
+        // new one. The same beaver must move in with the key off and on.
+        Beaver swapped = adults[10];
+        Dweller original = world.Components[swapped];
+        Dweller impostor = (Dweller)RuntimeHelpers.GetUninitializedObject(typeof(Dweller));
+        Dweller later = world.Components[adults[20]];
+        Dweller MovedIn(bool verify)
+        {
+            Bind(world, verify);
+            world.Components[swapped] = original;
+            world.Looking.Clear();
+            world.MayMoveIn.Clear();
+            bool none = false;
+            HomeSearch.AssignPrefix(dwelling, adultList, childList, ref none);   // builds the mod's table; nobody looks
+            world.Components[swapped] = impostor;
+            world.Looking.Add(impostor);
+            world.MayMoveIn.Add(impostor);
+            world.Looking.Add(later);
+            world.MayMoveIn.Add(later);
+            world.Assigned.Clear();
+            bool moved = false;
+            bool ranGame = HomeSearch.AssignPrefix(dwelling, adultList, childList, ref moved);
+            world.Components[swapped] = original;
+            world.Looking.Clear();
+            world.MayMoveIn.Clear();
+            return !ranGame && moved && world.Assigned.Count == 1 ? world.Assigned[0] : null;
+        }
+        Dweller withoutVerify = MovedIn(false);
+        Dweller withVerify = MovedIn(true);
+        string verifyStats = HomeSearch.TakeStatsLine();
+        Console.WriteLine("     " + verifyStats);
+        check(withoutVerify == later && withVerify == later && verifyStats.Contains("verify mismatches 1"),
+            "home search verify: the game's walk picked another beaver and that was logged, and the same beaver moves in as " +
+            $"with verify off ({(withVerify == later ? "the mod's pick" : withVerify == impostor ? "the game's pick" : "nobody")})");
+        Bind(world, verify: false);
+
         // A lookup that throws hands the search to the game and switches the feature off.
         world.Looking.Add(world.Components[adults[5]]);
         HomeSearch.CanAssign = (_, _) => throw new InvalidOperationException("boom");

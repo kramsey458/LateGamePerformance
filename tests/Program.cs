@@ -154,6 +154,7 @@ internal static class Program
         TestTimingMemory();
         TestBootConfig();
         TestYielderSearch();
+        TestVerifyOnlyMeasures();
         TestGarbageCollection();
         TestCatchUp();
         TestSoundAndUi();
@@ -185,23 +186,10 @@ internal static class Program
                 Console.WriteLine("     " + problem);
             }
         }
-        // Every prefix that can replace a game method (returns bool) runs last, so other mods' prefixes see the call first.
-        List<string> unordered = new List<string>();
-        foreach (Feature feature in features)
-        {
-            foreach (PatchSpec patch in feature.Patches)
-            {
-                if (patch.Prefix != null && patch.Prefix.ReturnType == typeof(bool) &&
-                    patch.Prefix.GetCustomAttribute<HarmonyLib.HarmonyPriority>()?.info.priority != HarmonyLib.Priority.Last)
-                {
-                    unordered.Add(feature.Name + "/" + patch.Name);
-                }
-            }
-        }
-        Check(unordered.Count == 0, "every replacing prefix carries Priority.Last" + (unordered.Count > 0 ? ": missing on " + string.Join(", ", unordered) : ""));
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
         Check(patchCount == 120, $"120 patches declared (found {patchCount})");
+        TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -214,9 +202,14 @@ internal static class Program
         HomeSearchTests.Run(Check);
         string[] expectedWarnings =
         {
+            "YielderSearch: result differs from the game's own search. Mod: nothing to take. Game: nothing in range.",
+            "HaulCache verify: cached list differs from vanilla (cached 2, vanilla 2).",
             "CatchUp failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
-            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed",
-            "SaveSnapshot: the saving code of", "HomeSearch failed"
+            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing",
+            "DistrictCounts verify: output capacity of Good0: the mod counted", "DistrictCounts failed",
+            "WaterMapCopy verify: the copy made on a worker differs from the game's.",
+            "PlantWater verify: object 3 read", "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
+            "HomeSearch verify: the mod moves in", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
         for (int i = 0; asExpected && i < expectedWarnings.Length; i++)
@@ -381,6 +374,72 @@ internal static class Program
         {
             Check(!System.Text.RegularExpressions.Regex.IsMatch(shipped, @"(?m)^\s*" + key + @"\s*="), $"config: the shipped file does not offer {key}");
         }
+    }
+
+    // A prefix that returns bool can skip the game's method, and Harmony then skips every prefix after it that could
+    // change the call (a ref argument, a bool result). Equal priorities run in the order the mods were loaded, which is
+    // each computer's own mod manager setting. So a skipping prefix of this mod that ran first would, on one computer,
+    // answer before another mod's prefix narrowed the arguments (MultiColony's colony filter on
+    // YielderFinder.FindLivingYielderWithoutAccessible), and on another after it: two players, two answers. Every
+    // skipping prefix therefore carries [HarmonyPriority(Priority.Last)]. Found from the declared patches, not a list,
+    // and checked the way Harmony will use it: the attribute as Feature.Apply's HarmonyMethod reads it, then Harmony's
+    // own sort with another mod's ordinary prefix registered after this one (this mod loaded first).
+    private static void TestReplacingPrefixesRunLast(Feature[] features)
+    {
+        List<string> early = PrefixesRunningFirst(features, out int replacing);
+        Check(replacing > 0 && early.Count == 0,
+            $"patches: all {replacing} prefixes that can skip the game's method run after other mods' prefixes, whatever the load order" +
+            (early.Count > 0 ? "; these run first: " + string.Join(", ", early) : ""));
+
+        // The walk itself: a void prefix that skips through `ref bool __runOriginal`, with no priority, is caught.
+        Feature probe = new Feature { Name = "Probe" };
+        probe.Patches.Add(new PatchSpec
+        {
+            Name = "probe", Target = features[0].Patches[0].Target,
+            Prefix = typeof(Program).GetMethod(nameof(RunOriginalPrefix), BindingFlags.Static | BindingFlags.NonPublic)
+        });
+        Check(PrefixesRunningFirst(new[] { probe }, out int probed).Count == 1 && probed == 1,
+            "patches: a prefix that skips the game's method through ref bool __runOriginal is found and held to the same rule");
+    }
+
+    private static void RunOriginalPrefix(ref bool __runOriginal)
+    {
+        __runOriginal = false;
+    }
+
+    private static List<string> PrefixesRunningFirst(IEnumerable<Feature> features, out int replacing)
+    {
+        List<string> early = new List<string>();
+        replacing = 0;
+        MethodInfo another = typeof(Program).GetMethod(nameof(AnotherModsPrefix), BindingFlags.Static | BindingFlags.NonPublic);
+        foreach (Feature feature in features)
+        {
+            foreach (PatchSpec patch in feature.Patches)
+            {
+                // A bool result or a `ref bool __runOriginal` argument can skip the original.
+                if (patch.Prefix == null || (patch.Prefix.ReturnType != typeof(bool) &&
+                                             !patch.Prefix.GetParameters().Any(p => p.Name == "__runOriginal")))
+                {
+                    continue;
+                }
+                replacing++;
+                HarmonyLib.HarmonyMethod ours = new HarmonyLib.HarmonyMethod(patch.Prefix);
+                List<MethodInfo> order = HarmonyLib.PatchProcessor.GetSortedPatchMethods(patch.Target(), new[]
+                {
+                    new HarmonyLib.Patch(ours, 0, Plugin.HarmonyId + "." + feature.Name),
+                    new HarmonyLib.Patch(new HarmonyLib.HarmonyMethod(another), 1, "another.mod")
+                });
+                if (ours.priority != HarmonyLib.Priority.Last || order.Count != 2 || order[1] != patch.Prefix)
+                {
+                    early.Add($"{feature.Name}/{patch.Name} ({patch.Prefix.DeclaringType?.Name}.{patch.Prefix.Name})");
+                }
+            }
+        }
+        return early;
+    }
+
+    private static void AnotherModsPrefix()
+    {
     }
 
     // The settings page cannot be shown outside the game, but what Mod Settings needs from it can be checked:
@@ -787,6 +846,54 @@ internal static class Program
         GamesAnswer(YielderSearch.LazyCandidates(forest, plant => plant.Exists, plant => plant.Yielding, plant => plant.Alive,
             plant => plant.Reachable ? plant : null, reached => reached != null, blocked));
         Check(blocked.Lookups == 2000, "yielder search: with nothing reachable nothing can be left out");
+    }
+
+    // A verify key is each player's own (the .cfg, the settings page), so it must not change what the game is handed:
+    // in co-op a player with a key on would otherwise take the game's answer where the others take the mod's, the
+    // first time the two differ, and the colonies drift apart. Every verify mode is made to see a difference here or
+    // in its feature's tests, and must hand the game what it is handed with the key off. The tree search and the
+    // hauling list cannot run outside the game (their candidates are live buildings and plants), so these two drive
+    // the step each prefix takes once the game's own answer is in: the comparison.
+    private static void TestVerifyOnlyMeasures()
+    {
+        // The tree search: the mod found nothing to take, the game's own search says nothing is in range.
+        bool wasVerifying = YielderSearch.VerifyEnabled;
+        YielderSearch.VerifyEnabled = true;
+        Timberborn.YielderFinding.YielderSearchResult mods = Timberborn.YielderFinding.YielderSearchResult.CreateEmpty();
+        Timberborn.YielderFinding.YielderSearchResult handed =
+            YielderSearch.Compared(mods, Timberborn.YielderFinding.YielderSearchResult.CreateNoYielderInRange());
+        YielderSearch.VerifyEnabled = wasVerifying;
+        Check(ReferenceEquals(handed.Yielder, null) && handed.NoYielderInRange == mods.NoYielderInRange,
+            "verify only measures: the tree search hands the game the mod's result, as with verify off, when the game's own " +
+            $"search differs (handed: {(handed.NoYielderInRange ? "nothing in range, the game's" : "nothing to take, the mod's")})");
+
+        // The hauling list: the cache holds [a, b], the game's own build says [b, a].
+        Type haulBehavior = typeof(Timberborn.Hauling.WeightedBehavior).Assembly.GetType("Timberborn.Hauling.HaulWorkplaceBehavior", true);
+        var a = (Timberborn.WorkSystem.WorkplaceBehavior)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(haulBehavior);
+        var b = (Timberborn.WorkSystem.WorkplaceBehavior)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(haulBehavior);
+        List<Timberborn.WorkSystem.WorkplaceBehavior> list = new List<Timberborn.WorkSystem.WorkplaceBehavior> { a, b };
+        HaulCache.Compare(list, new List<Timberborn.Hauling.WeightedBehavior>
+        {
+            new Timberborn.Hauling.WeightedBehavior(2f, b), new Timberborn.Hauling.WeightedBehavior(1f, a)
+        });
+        Check(list.Count == 2 && ReferenceEquals(list[0], a) && ReferenceEquals(list[1], b),
+            "verify only measures: the hauling list handed to the game stays the cached one, as with verify off, when the game's " +
+            $"own build differs (handed: {(ReferenceEquals(list[0], a) ? "the cached order" : "the game's order")})");
+
+        // The water map's verify pass swaps the worker's copy in from a postfix (WaterAndSoilTests drives it), so that
+        // postfix must run before any other mod's postfix on the same method, as the swap does with verify off:
+        // BeaverBuddies' desync trace hashes the map there. Sorted by Harmony with another mod's ordinary postfix
+        // registered first (that mod loaded first).
+        PatchSpec update = WaterMapCopy.CreateFeature(new Config()).Patches[0];
+        MethodInfo another = typeof(Program).GetMethod(nameof(AnotherModsPrefix), BindingFlags.Static | BindingFlags.NonPublic);
+        List<MethodInfo> order = HarmonyLib.PatchProcessor.GetSortedPatchMethods(update.Target(), new[]
+        {
+            new HarmonyLib.Patch(new HarmonyLib.HarmonyMethod(another), 0, "another.mod"),
+            new HarmonyLib.Patch(new HarmonyLib.HarmonyMethod(update.Postfix), 1, Plugin.HarmonyId + ".WaterMapCopy")
+        });
+        Check(order.Count == 2 && order[0] == update.Postfix,
+            "verify only measures: the water map's verify postfix, which swaps the worker's copy in, runs before other mods' " +
+            "postfixes on ThreadSafeWaterMap.Update whatever the load order");
     }
 
     private static void TestGarbageCollection()

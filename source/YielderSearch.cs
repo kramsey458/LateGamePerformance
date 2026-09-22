@@ -43,11 +43,11 @@ namespace LateGamePerformance
     // up exactly as before, in the same order.
     //
     // One side effect is kept on purpose: the first lookup of a search fills the building's terrain route map if
-    // it was thrown away. The first candidate is always looked up ("found something" starts false), so that
-    // still happens on the same tick as in the unmodded game.
+    // it was thrown away. The first candidate is always looked up, dead or out of reach, so that still happens on
+    // the same tick as in the unmodded game (the game reads whether a map is filled when a walker asks for a path).
     //
-    // YielderSearchVerify runs the game's own search as well, compares, logs any difference and uses the game's.
-    // If anything throws, the feature switches itself off and the game's own code runs.
+    // YielderSearchVerify runs the game's own search as well, compares and logs any difference; the game is handed
+    // the mod's result either way. If anything throws, the feature switches itself off and the game's own code runs.
     internal static class YielderSearch
     {
         internal sealed class Counters
@@ -256,6 +256,9 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        // Last, so that another mod's prefix on the same method runs first whatever the load order: BeaverBuddies
+        // MultiColony narrows `yielders` to the worker's own colony there, and Harmony skips such a prefix once this
+        // one has answered.
         [HarmonyPriority(Priority.Last)]
         private static bool FindPrefix(object __instance, Inventory receivingInventory, Accessible start,
             int liftingCapacity, IEnumerable<Yielder> yielders, ref YielderSearchResult __result)
@@ -285,13 +288,9 @@ namespace LateGamePerformance
                 {
                     YielderSearchResult games = finder.FindLivingYielder(receivingInventory, liftingCapacity,
                         yielders.Select(plant => LookUp(start, plant)));
-                    if (!Same(result, games))
-                    {
-                        _verifyMismatches++;
-                        Log.Warning("YielderSearch: result differs from the game's own search; using the game's. " +
-                                    $"Mod: {Describe(result)}. Game: {Describe(games)}.");
-                        result = games;
-                    }
+                    // Compared returns the mod's result: that, not `games`, is what the game is handed (the tests
+                    // drive Compared, not this prefix, so keep any substitution out of here too).
+                    result = Compared(result, games);
                 }
                 __result = result;
                 return false;
@@ -349,6 +348,23 @@ namespace LateGamePerformance
         private static bool WasReached(ReachableYielder reached)
         {
             return reached.Yielder;
+        }
+
+        // Verify mode: the game's own search beside the mod's. Returns the result the game is handed, which is the
+        // mod's whatever the comparison says: the setting is each player's own, so in co-op the one player who has it
+        // on must get the same answer as the others (up to 0.4.26 a difference handed over the game's).
+        internal static YielderSearchResult Compared(YielderSearchResult result, YielderSearchResult games)
+        {
+            if (!Same(result, games))
+            {
+                _verifyMismatches++;
+                if (_verifyMismatches <= 10)
+                {
+                    Log.Warning("YielderSearch: result differs from the game's own search. " +
+                                $"Mod: {Describe(result)}. Game: {Describe(games)}.");
+                }
+            }
+            return result;
         }
 
         private static bool Same(YielderSearchResult a, YielderSearchResult b)

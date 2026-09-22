@@ -82,8 +82,13 @@ answers maybe. The stats line now says how many were left out for each reason (`
   later could route a beaver differently. Dead plants are left out only once the search has looked something
   up (a review of 0.4.26 caught a draft that dropped the first lookup); the reach box never suppresses a fill,
   because it only answers for a map that is already filled.
-- `YielderSearchVerify = true` runs the game's own search as well, compares, logs any difference and uses the
-  game's result. It is slower than no mod and only for testing.
+- `YielderSearchVerify = true` runs the game's own search as well, compares, and logs and counts any difference;
+  the game is handed the mod's result either way (up to 0.4.26 it was handed the game's, see Settings for why that
+  changed). It is slower than no mod and only for testing.
+- The prefix runs at Harmony's last priority. BeaverBuddies MultiColony has a prefix on the same method that narrows
+  the candidates to the worker's own colony, and Harmony skips such a prefix once one before it has answered; with
+  equal priorities the order is the mod load order, which each computer sets for itself. Up to 0.4.25 the filter ran
+  first only because BeaverBuddies happened to load first.
 - If anything throws, the feature switches itself off for the session and the game's own code runs.
 - It is always on. Up to 0.4.8 it could be switched off in the settings file; see Settings for why not any more.
 
@@ -139,7 +144,8 @@ did. The result does not depend on the number of threads, so it is the same on e
   three run in verify mode; levels and events identical throughout, verify mismatches 0.
 - Below 512 objects the game's own loop runs; starting workers would cost more than it saves.
 - `PlantWaterVerify = true` reads everything again on the main thread with the game's own method and compares,
-  which also checks the worker's lookup against the game's map. For testing.
+  which also checks the worker's lookup against the game's map. A difference is logged and counted, and the levels
+  read ahead are stored all the same (up to 0.4.26 the main thread's were). For testing.
 - If anything throws (a handler included), the feature switches itself off and hands that tick to the game's
   own loop. Objects already updated compare equal there and are passed over, so nothing is applied twice.
 
@@ -213,8 +219,9 @@ adds the workers' tables into the game's tables. The two steps that go through i
   objects with the game's own capacity rules (and one stand-in mod rule, which must only ever be asked on the
   main thread), and compare every good through the game's public `GetResourceCount`, for six rounds with stock
   moving in between. In the harness one count takes the game 1.9 ms and the mod 0.5 ms.
-- `DistrictCountsVerify = true` lets the game count as well and compares. If anything throws, the feature
-  switches itself off; the game's count starts by clearing every table, so nothing of the failed one is left.
+- `DistrictCountsVerify = true` lets the game count as well, compares, and puts the mod's numbers back in the
+  game's tables (up to 0.4.26 the game's stayed there). If anything throws, the feature switches itself off; the
+  game's count starts by clearing every table, so nothing of the failed one is left.
 
 **0.4.25.** The count runs on this mod's own worker threads (see Worker threads) instead of `Parallel.For`. In the
 0.4.23 session a count of 233 inventories took 0.67 ms, nearly all of it waking and joining thread-pool threads that
@@ -250,8 +257,10 @@ Debug setting on) hashes the map there; under 0.4.14 it missed every swapped tic
 - The tests drive two real `ThreadSafeWaterMap`s over one real `WaterSimulator`, one ticking the game's way and one
   through the mod, for 16 ticks with water, flows and column counts moving, a layout change, a reset, a new layer
   and a missing copy, and require the same bytes in both after every tick.
-- `WaterMapCopyVerify = true` lets the game copy every tick as well and compares byte for byte (nothing is swapped
-  in that mode). If anything throws, the feature switches itself off and the game copies.
+- `WaterMapCopyVerify = true` lets the game copy every tick as well, compares byte for byte, and then swaps the
+  worker's copy in as without the setting, in a postfix that runs before other mods' postfixes (up to 0.4.26
+  nothing was swapped in that mode, so the map kept the game's copy). If anything throws, the feature switches
+  itself off and the game copies.
 
 ### Soil moisture and contamination scans (always on, new in 0.4.14; lists from the workers since 0.4.23)
 
@@ -703,7 +712,7 @@ is left to the game's own walk. The result cannot differ, so it is the same on e
   back, a throwing lookup switches the feature off and hands the search to the game; and after a beaver leaves a
   list and two are born, the next searches see the new lists, each rebuilt once.
 - `HomeSearchVerify = true` runs the game's walk as well, with fresh lookups, and compares the beaver picked;
-  a mismatch is logged and the game's pick is used.
+  a mismatch is logged and counted, and the mod's pick moves in all the same (up to 0.4.26 the game's did).
 - The stalest-dwelling walk that precedes the search (`StaleAssignableDwellingService.GetStalest`, a linked list
   rotated until a dwelling with a free slot) is left alone: its order is simulation state and its cost is per
   dwelling, not per beaver.
@@ -946,6 +955,12 @@ SetPass call counts, `GC.Collect` and the rest of the default list) with `Profil
 per frame and the longest frame or as a count; the first session with the timers on writes `unity-markers.txt`
 beside the metrics reports with every counter this build of the engine offers, so the list can be changed.
 
+The one-destination terrain A* search is also what `TerrainSearch` replaces. Up to 0.4.25 its prefix ran first
+and Harmony then skipped the timer's, so the terrain A* numbers left out every search `TerrainSearch` answered.
+Since `TerrainSearch` runs at Harmony's last priority (see Build and test) the timer's prefix runs first, and the
+terrain A* numbers include those searches, timed as the mod answers them (resumed or from its previous search).
+Numbers from before and after that change are not comparable; the `TerrainSearch:` stats line is unchanged.
+
 ### Stats
 
 Every `StatsEveryTicks` ticks (default 1000) one line is logged, for example:
@@ -1046,13 +1061,28 @@ multiplayer mod can compare mod versions, but it cannot see inside another mod's
 that still has those keys is fine: they are ignored, and `Player.log` says so. To run without one of those
 features, disable the mod.
 
+**The verify keys only measure.** Each runs the game's own code beside the mod's, and logs and counts
+every difference in the stats lines, but the game is handed the mod's result either way: the hauling list, the tree
+search, the plant water levels, the district counts (put back after the game's count), the water map (the worker's
+copy swapped in after the comparison), the soil cells, the terrain path searches, the home search and the save
+snapshot. So one player may switch them on alone, from this file or from the settings page, even in the middle of a
+game. Up to 0.4.26 the hauling list, tree search, plant water, district count, water map and home search checks
+handed over the game's result when they found a difference: harmless alone, but in multiplayer the one player with
+a key on then took a different answer from the others the moment the mod had a bug, and the colonies drifted apart.
+The tests make every one of those checks see a difference and require the game to be handed the same as with the
+key off. What a key on still changes is how much of the game's code runs, and with it any other mod's code hooked
+into it: the tree search check looks up every candidate, which fills terrain route maps that a player with the key
+off may fill a tick later (a fill's timing cannot change a result, see Tree and plant search); the district count
+check asks every good disallower twice; the hauling list check asks every haul provider on every request; the home
+search check asks the game's own dwelling predicates. The game's own versions of these only read.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `HaulCacheVerify` | `false` | Recompute the game's list on every request and compare; logs mismatches and uses the game's list. Slower than no mod. For testing. |
+| `HaulCacheVerify` | `false` | Recompute the game's list on every request and compare; logs and counts mismatches, the game still gets the cached list. Slower than no mod. For testing. |
 | `RouteMapsBackground` | `true` | Rebuild in the background; `false` = main thread waits for the whole batch. May differ between peers. |
 | `RouteMapsMinFields` | `4` | Fewer unbuilt maps than this are built directly on the main thread instead of on workers. May differ between peers. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
-| `YielderSearchVerify` | `false` | Run the game's own search as well and compare; logs mismatches and uses the game's result. Slower than no mod. For testing. |
+| `YielderSearchVerify` | `false` | Run the game's own search as well and compare; logs and counts mismatches, the game still gets the mod's result. Slower than no mod. For testing. |
 | `Timing` | `true` | The timing stats line. |
 | `SaveTiming` | `true` | One line per save with the time of each stage; also lets the timing line report saves separately. Measurement only. |
 | `RecordTimings` | `false` | A profiling tool: switch on the game's per-component tick timers and write their report. Slows the game a little. |
@@ -1060,15 +1090,15 @@ features, disable the mod.
 | `GcReport` | `true` | Startup garbage collector report. |
 | `LimitCatchUp` | `true` | After a long frame, run at most twice an ordinary frame's simulation time in the next one instead of everything the long frame missed. Pacing only; may differ between peers. |
 | `Diagnostics` | `false` | Timers for route map rebuilds, need selection, walker path finding and the game's A* searches. |
-| `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result. For testing. |
-| `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare. For testing. |
-| `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy. For testing. |
+| `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result; the worker's levels are stored. For testing. |
+| `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare; the mod's numbers are put back. For testing. |
+| `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy, which is then swapped in. For testing. |
 | `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
-| `HomeSearchVerify` | `false` | Run the game's own walk for a beaver to move in as well and compare the pick; logs mismatches and uses the game's. For testing. |
+| `HomeSearchVerify` | `false` | Run the game's own walk for a beaver to move in as well and compare the pick; logs and counts mismatches, the mod's pick moves in. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `SaveSnapshot` | `true` | Snapshot trees, crops, paths, levees and platforms on worker threads at every save. Saving only; may differ between peers. |
-| `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well, compare every entity and use the game's. Measurement only. For testing. |
+| `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well and compare every entity; the mod's is saved. Measurement only. For testing. |
 | `SoundListener` | `true` | Place the audio listener when the camera moved, while it glides, and every tenth frame otherwise. Sound only; may differ between peers. |
 | `AnimatorCulling` | `true` | Leave out the pose update of animated objects with no renderer on screen; their time keeps running. Rendering only; may differ between peers. |
 | `UiThrottle` | `true` | Status alert lists every fourth frame, the selected entity's panel every second frame. Interface only; may differ between peers. |
@@ -1124,8 +1154,13 @@ dotnet run --project tests -c Release
 The tests load the installed game's assemblies and check that every patch target, private field and property
 the mod relies on still exists with a compatible signature, plus settings parsing. A patch target containing
 an exception filter (`catch ... when`) is refused: Harmony cannot patch those under the game's Mono runtime, and
-the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). Every prefix that can replace
-a game method must carry `Priority.Last`, so that other mods' prefixes see the call first (checked since 0.4.26). They also build a road
+the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). Every prefix that can skip the
+game's method (one that returns `bool` or takes `ref bool __runOriginal`) must carry
+`[HarmonyPriority(Priority.Last)]`, because once one has skipped it Harmony skips every later prefix that could
+change the call (one returning `bool`, or with a `ref`, `out` or reference-type argument): the tests find them all in
+the declared patches, sort each with Harmony's own sorter against another mod's ordinary prefix registered after it,
+and require it to come last, so that other mods' prefixes on the same methods (BeaverBuddies', MultiColony's colony
+filter) run first on every computer whatever the mod load order. They also build a road
 network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
 contained. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers
