@@ -9,6 +9,7 @@ using Timberborn.MapIndexSystem;
 using Timberborn.MapStateSystem;
 using Timberborn.TerrainSystemRendering;
 using Timberborn.TickSystem;
+using Timberborn.WaterObjects;
 using Timberborn.WaterSystem;
 using UnityEngine;
 using Random = System.Random;
@@ -50,6 +51,7 @@ internal static class WaterAndSoilTests
         RunWaterMap(check, verify: true);
         RunWaterTiming(check);
         RunSoil(check);
+        RunPlantWaterOnWorker(check);
     }
 
     private static MapIndexService CreateMapIndex(int width, int height, int depth)
@@ -95,8 +97,8 @@ internal static class WaterAndSoilTests
     private static void RunScanModel(Action<bool, string> check)
     {
         Random random = new Random(31);
-        bool same = true;
-        long skipped = 0, blocks = 0;
+        bool same = true, listSame = true;
+        long skipped = 0, blocks = 0, listed = 0;
         foreach ((int width, int height) in new[] { (1, 1), (7, 3), (8, 8), (9, 5), (64, 64), (123, 77) })
         {
             int stride = width + 2, verticalStride = stride * (height + 2);
@@ -123,10 +125,24 @@ internal static class WaterAndSoilTests
                     }
                     same &= expected.Count == cells.Seen.Count;
                     for (int i = 0; same && i < expected.Count; i++) same &= expected[i] == cells.Seen[i];
+
+                    // The worker's list over the same flags: every set flag, in the game's order over all tiles.
+                    SoilScans.Job job = new SoilScans.Job { Flags = flags, VerticalStride = verticalStride, Stride = stride, Width = width, Height = height, Rows = height };
+                    SoilScans.ListChangedCells(job);
+                    List<int> all = new List<int>();
+                    for (int tile = 0; tile < verticalStride; tile++)
+                    for (int layer = 0; layer < layers; layer++)
+                    {
+                        if (flags[tile + layer * verticalStride]) all.Add(tile + layer * verticalStride);
+                    }
+                    listSame &= all.Count == job.Count;
+                    for (int i = 0; listSame && i < all.Count; i++) listSame &= all[i] == job.Cells[i];
+                    listed += job.Count;
                 }
             }
         }
         check(same, "soil scan: the same cells in the same order as the game's loop, on 90 random maps");
+        check(listSame && listed > 1000, $"soil lists: the worker's list holds every set flag in the game's order, on the same 90 maps ({listed} cells)");
         check(skipped > 0 && skipped < blocks, $"soil scan: groups with nothing set are passed over ({skipped} of {blocks})");
 
         // Timing on a 256 x 256 map with 3 soil layers and 1 cell in 500 changed, against the game's loop over the
@@ -138,7 +154,7 @@ internal static class WaterAndSoilTests
             for (int i = 0; i < flags.Length; i++) flags[i] = random.Next(500) == 0;
             RecordingCells cells = new RecordingCells { Counts = new int[verticalStride] };
             for (int i = 0; i < verticalStride; i++) cells.Counts[i] = 1 + random.Next(layers);
-            long game = 0, mod = 0;
+            long game = 0, mod = 0, list = 0;
             for (int round = 0; round < 40; round++)
             {
                 cells.Seen.Clear();
@@ -158,16 +174,20 @@ internal static class WaterAndSoilTests
                 cells.Seen.Clear();
                 SoilScans.Scan(flags, verticalStride, stride, width, height, cells, out _, out _);
                 long t2 = System.Diagnostics.Stopwatch.GetTimestamp();
+                SoilScans.Job job = new SoilScans.Job { Flags = flags, VerticalStride = verticalStride, Stride = stride, Width = width, Height = height, Rows = height };
+                SoilScans.ListChangedCells(job);
+                long t3 = System.Diagnostics.Stopwatch.GetTimestamp();
                 same &= seen == cells.Seen.Count;
                 if (round >= 10)
                 {
                     game += t1 - t0;
                     mod += t2 - t1;
+                    list += t3 - t2;
                 }
             }
             double ms = 1000.0 / System.Diagnostics.Stopwatch.Frequency / 30;
             Console.WriteLine($"     timing: soil scan of a 256 x 256 map, 3 layers, 1 cell in 500 changed: the game's loop {game * ms:0.000} ms, " +
-                              $"the mod {mod * ms:0.000} ms");
+                              $"the mod's scan {mod * ms:0.000} ms, the worker's list {list * ms:0.000} ms");
             check(same, "soil scan: the full-size map gives the same cells");
         }
     }
@@ -186,7 +206,7 @@ internal static class WaterAndSoilTests
         public int Layers;
     }
 
-    private static WaterWorld CreateWaterWorld(int width = 48, int height = 40)
+    private static WaterWorld CreateWaterWorld(int width = 48, int height = 40, object terrain = null)
     {
         Assembly water = typeof(ReadOnlyWaterColumn).Assembly;
         WaterWorld world = new WaterWorld { MapIndex = CreateMapIndex(width, height, 12), Arrays = CreateArrayService(), Layers = 3 };
@@ -211,7 +231,7 @@ internal static class WaterAndSoilTests
         for (int i = 0; i < 2; i++)
         {
             maps[i] = Activator.CreateInstance(mapType, Any, null,
-                new object[] { world.MapIndex, null, new WaterColumnRetriever(), calculator, sim }, null);
+                new object[] { world.MapIndex, terrain, new WaterColumnRetriever(), calculator, sim }, null);
             RouteMapsTests.Call(maps[i], "Load");
             RouteMapsTests.Call(maps[i], "PostLoad");
         }
@@ -544,9 +564,254 @@ internal static class WaterAndSoilTests
         string stats = SoilScans.TakeStatsLine();
         Console.WriteLine("     " + stats);
         check(changes > 1000, $"soil: the test soil actually changes ({changes} cells over 12 passes)");
+        RunSoilLists(check, mSim, cSim, moisture, contamination, mapIndex, arrays, random, columnCounts, ceiling, calls);
         check(handled, "soil: every pass over the real services went through the mod");
         check(same, "soil: the game's per-cell method is called for the same cells, with the same coordinates and levels, " +
                     "in the same order as the game's own loop");
         check(stats.Contains("verify mismatches 0") && SoilScans.IsActive, "soil: verify mode agrees and the feature is still active");
+    }
+
+    private static void RunSoilLists(Action<bool, string> check, object mSim, object cSim, object moisture, object contamination,
+        MapIndexService mapIndex, TickOnlyArrayService arrays, Random random, int[] columnCounts, Func<int, int> ceiling, List<string> calls)
+    {
+        int verticalStride = mapIndex.VerticalStride;
+
+        // The lists made on the workers: the simulator publishes a job before its tasks, the worker that finishes
+        // the last row lists the changed cells, the service goes through the list. Same calls as the game's loop;
+        // and no list is used after a main-thread edit, when it is not finished, or when the flag array changed.
+        SoilScans.CreateListsFeature().Patches[0].Target();
+        SoilScans.ActivateLists();
+        foreach (object sim in new[] { mSim, cSim })
+        {
+            RouteMapsTests.SetField(sim, "_mapIndexService", mapIndex);
+            foreach (string field in new[] { "_actions", "_terrainHeightChanges" })
+            {
+                RouteMapsTests.SetField(sim, field, Activator.CreateInstance(sim.GetType().GetField(field, Any).FieldType));
+            }
+            RouteMapsTests.SetField(sim, "_simulationController", new Timberborn.SimulationSystem.SimulationController());
+        }
+        bool listSame = true, listHandled = true;
+        int listChanges = 0;
+        SoilScans.TakeStatsLine();
+        string[] listRounds = { "list", "list", "edit", "list", "unfinished", "list", "replaced", "list", "reset", "list", "list" };
+        foreach (string round in listRounds)
+        {
+            foreach ((string kind, object sim, SoilScans.Kind soilKind, object service) in new[]
+                     {
+                         ("m", mSim, SoilScans.MoistureKind, moisture), ("c", cSim, SoilScans.ContaminationKind, contamination)
+                     })
+            {
+                string flagField = kind == "m" ? "_moistureLevelsChangedLastTick" : "_contaminationsChangedLastTick";
+                string levelField = kind == "m" ? "_moistureLevels" : "_contaminationLevels";
+                bool[] flags = (bool[])ArrayOf(RouteMapsTests.GetField(sim, flagField));
+                float[] levels = (float[])ArrayOf(RouteMapsTests.GetField(sim, levelField));
+                int density = round == "list" ? 1 + random.Next(40) : 25;
+                for (int i = 0; i < flags.Length; i++)
+                {
+                    flags[i] = random.Next(1000) < density;
+                    levels[i] = (float)random.NextDouble() * 8;
+                }
+                // The game's StartParallelTick, the soil task's rows on the workers.
+                if (kind == "m") SoilScans.MoistureStartPrefix(sim);
+                else SoilScans.ContaminationStartPrefix(sim);
+                if (round != "unfinished") listHandled &= SoilScans.FinishJobForTests(soilKind);
+                switch (round)
+                {
+                    case "edit":
+                    {
+                        // The simulator's own tick has a terrain height change to apply: a main-thread edit.
+                        object changes = RouteMapsTests.GetField(sim, "_terrainHeightChanges");
+                        changes.GetType().GetMethod("Add").Invoke(changes, new[] { Activator.CreateInstance(changes.GetType().GetGenericArguments()[0]) });
+                        if (kind == "m") SoilScans.MoistureTickPrefix(sim);
+                        else SoilScans.ContaminationTickPrefix(sim);
+                        changes.GetType().GetMethod("Clear").Invoke(changes, null);
+                        break;
+                    }
+                    case "replaced":
+                    {
+                        object fresh = CreateArray(arrays, typeof(bool), flags.Length);
+                        Array.Copy(flags, (bool[])ArrayOf(fresh), flags.Length);
+                        RouteMapsTests.SetField(sim, flagField, fresh);
+                        flags = (bool[])ArrayOf(fresh);
+                        break;
+                    }
+                    case "reset":
+                    {
+                        Timberborn.SimulationSystem.SimulationController controller =
+                            (Timberborn.SimulationSystem.SimulationController)RouteMapsTests.GetField(sim, "_simulationController");
+                        controller.ResetSimulation();
+                        if (kind == "m") SoilScans.MoistureTickPrefix(sim);
+                        else SoilScans.ContaminationTickPrefix(sim);
+                        controller.Tick();
+                        controller.Tick();
+                        break;
+                    }
+                }
+                List<string> expected = new List<string>();
+                Index2DEnumerator enumerator = mapIndex.Indices2D.GetEnumerator();
+                while (enumerator.MoveNext())
+                {
+                    int current = enumerator.Current;
+                    for (int i = 0; i < columnCounts[current]; i++)
+                    {
+                        int index = current + i * verticalStride;
+                        if (flags[index])
+                        {
+                            expected.Add(kind + " " + mapIndex.IndexToCoordinates(current, ceiling(index)) + " " + index + " " + levels[index]);
+                        }
+                    }
+                }
+                calls.Clear();
+                listHandled &= kind == "m" ? !SoilScans.MoisturePrefix(service) : !SoilScans.ContaminationPrefix(service);
+                listSame &= expected.Count == calls.Count;
+                for (int i = 0; listSame && i < expected.Count; i++) listSame &= expected[i] == calls[i];
+                listChanges += expected.Count;
+            }
+        }
+        string listStats = SoilScans.TakeStatsLine();
+        Console.WriteLine("     " + listStats);
+        check(listChanges > 1000 && listHandled, $"soil lists: every pass went through the mod and the soil changed ({listChanges} cells)");
+        check(listSame, "soil lists: the game's per-cell method is called for the same cells, in the same order, whether from a worker's list or the scan");
+        check(listStats.Contains("22 moisture and contamination passes") && listStats.Contains("; 14 went through a list of changed cells made on a worker") &&
+              listStats.Contains(", 8 scanned the map on the main thread") && listStats.Contains("lists not usable: 2 not finished, 4 after a main-thread edit, 2 after the flag array was replaced") &&
+              listStats.Contains("verify mismatches 0") && SoilScans.ListsActive,
+            "soil lists: fourteen passes used a worker's list, eight fell back for the right reasons, verify agreed, lists still active");
+        SoilScans.SceneCreated();
+    }
+
+    // ---- Plant water levels computed on the water worker ----
+
+    // Two sets of the game's real WaterObjects over the two real maps of a water world: one set is ticked by the
+    // game's own WaterObjectService over the map that only ever runs the game's Tick, the other by the mod over
+    // the map that goes through the copy and the swap. The levels stored and the events raised must be the same,
+    // through ordinary ticks (levels from the worker), a tick where an object left the list after the snapshot,
+    // a tick where the water layout changed (no copy to use), a tick where the mirror was wrong (rebuilt from the
+    // game's list) and ticks in verify mode, where the worker's levels are compared with the real map's method.
+    private static void RunPlantWaterOnWorker(Action<bool, string> check)
+    {
+        const int width = 64, height = 56, count = 3000;
+        object terrain = Proxy<Timberborn.TerrainSystem.ITerrainService>((method, args) =>
+            method.Name == "Contains" && args[0] is Vector2Int xy
+                ? (object)(xy.x >= 0 && xy.x < width && xy.y >= 0 && xy.y < height)
+                : throw new NotSupportedException(method.Name));
+        WaterMapCopy.CreateFeature(new Config()).Patches[0].Target();
+        WaterMapCopy.SceneCreated();
+        WaterMapCopy.Activate();
+        PlantWater.CreateFeature(new Config()).Patches[0].Target();
+        PlantWater.Activate();
+        PlantWater.UseWaterMapCopy();
+        WaterWorld world = CreateWaterWorld(width, height, terrain);
+        Random random = new Random(21);
+        // Column counts: the game copies them into its map when the simulation says a column changed.
+        SimulateWaterTasks(world, random, true);
+        PropertyInfo anyChanged = world.Simulator.GetType().GetProperty("AnyColumnChanged");
+        anyChanged.SetValue(world.Simulator, true);
+        RouteMapsTests.Call(world.Game, "Tick");
+        if (WaterMapCopy.MapUpdatePrefix(world.Mod)) RouteMapsTests.Call(world.Mod, "Tick");
+        anyChanged.SetValue(world.Simulator, false);
+
+        Type objectType = typeof(WaterObject);
+        FieldInfo mapField = objectType.GetField("_threadSafeWaterMap", Any), tileField = objectType.GetField("_baseCoordinates", Any);
+        PropertyInfo level = objectType.GetProperty("WaterAboveBase");
+        EventInfo changed = objectType.GetEvent("WaterAboveBaseChanged");
+        WaterObjectService[] services = { new WaterObjectService(), new WaterObjectService() };
+        List<WaterObject>[] objects = { new List<WaterObject>(), new List<WaterObject>() };
+        List<string>[] events = { new List<string>(), new List<string>() };
+        Random tiles = new Random(22);
+        for (int i = 0; i < count; i++)
+        {
+            // Mostly on the map, a few beyond its edge, at heights around the water.
+            Vector3Int tile = new Vector3Int(tiles.Next(-1, width + 2), tiles.Next(-1, height + 2), tiles.Next(0, 7));
+            for (int w = 0; w < 2; w++)
+            {
+                WaterObject waterObject = (WaterObject)RuntimeHelpers.GetUninitializedObject(objectType);
+                mapField.SetValue(waterObject, w == 0 ? world.Game : world.Mod);
+                tileField.SetValue(waterObject, tile);
+                int index = i, which = w;
+                changed.AddEventHandler(waterObject, new EventHandler((sender, _) => events[which].Add(index + "=" + level.GetValue(sender))));
+                services[w].RegisterWaterObject(waterObject);
+                if (w == 1) PlantWater.RegisterPostfix(waterObject);
+                objects[w].Add(waterObject);
+            }
+        }
+        PlantWater.TakeStatsLine();
+        WaterMapCopy.TakeStatsLine();
+
+        string[] rounds =
+        {
+            "normal", "normal", "normal", "left", "normal", "layout", "normal", "wrong mirror", "normal", "verify", "verify", "verify"
+        };
+        bool same = true, handled = true;
+        int totalEvents = 0;
+        foreach (string round in rounds)
+        {
+            PlantWater.SetVerifyForTests(round == "verify");
+            // The game's StartParallelTick: the copy is set up (and the snapshot taken), the water tasks run, the
+            // last one followed by the copy and the levels on its worker.
+            WaterMapCopy.StartParallelTickPrefix(world.Simulator);
+            SimulateWaterTasks(world, random, false);
+            same &= WaterMapCopy.FillForTests();
+            switch (round)
+            {
+                case "left":
+                {
+                    // An object leaves both worlds after the snapshot was taken.
+                    int victim = random.Next(objects[0].Count);
+                    services[0].UnregisterWaterObject(objects[0][victim]);
+                    services[1].UnregisterWaterObject(objects[1][victim]);
+                    PlantWater.UnregisterPostfix(objects[1][victim]);
+                    objects[0].RemoveAt(victim);
+                    objects[1].RemoveAt(victim);
+                    break;
+                }
+                case "layout":
+                {
+                    object queue = RouteMapsTests.GetField(world.Simulator, "_modifications");
+                    Type simType = world.Simulator.GetType();
+                    object change = Activator.CreateInstance(simType.GetNestedType("Modification", Any), Any, null,
+                        new[] { true, new Vector3Int(3, 3, 1), Enum.ToObject(simType.GetNestedType("ChangeType", Any), 0) }, null);
+                    queue.GetType().GetMethod("Enqueue").Invoke(queue, new[] { change });
+                    WaterMapCopy.ProcessModificationsPrefix(world.Simulator);
+                    SimulateWaterTasks(world, random, false);
+                    queue.GetType().GetMethod("Clear").Invoke(queue, null);
+                    break;
+                }
+                case "wrong mirror":
+                {
+                    // An object leaves without the mod's hook seeing it: the mirror is now wrong and says nothing
+                    // changed. The tick must notice, rebuild it and read the levels itself.
+                    int victim = random.Next(objects[0].Count);
+                    services[0].UnregisterWaterObject(objects[0][victim]);
+                    services[1].UnregisterWaterObject(objects[1][victim]);
+                    objects[0].RemoveAt(victim);
+                    objects[1].RemoveAt(victim);
+                    break;
+                }
+            }
+            events[0].Clear();
+            events[1].Clear();
+            RouteMapsTests.Call(world.Game, "Tick");
+            services[0].Tick();                                          // the game's own loop over the game's map
+            if (WaterMapCopy.MapUpdatePrefix(world.Mod)) RouteMapsTests.Call(world.Mod, "Tick");
+            handled &= !PlantWater.TickPrefix(services[1]);              // the mod over the swapped-in copy
+            same &= events[0].Count == events[1].Count;
+            for (int i = 0; same && i < events[0].Count; i++) same &= events[0][i] == events[1][i];
+            for (int i = 0; i < objects[0].Count; i++) same &= (int)level.GetValue(objects[0][i]) == (int)level.GetValue(objects[1][i]);
+            totalEvents += events[0].Count;
+        }
+        string stats = PlantWater.TakeStatsLine();
+        Console.WriteLine("     " + stats);
+        Console.WriteLine("     " + WaterMapCopy.TakeStatsLine());
+        check(totalEvents > 300, $"plant water on the worker: the test water actually moves ({totalEvents} level changes over 12 ticks)");
+        check(same && handled, "plant water on the worker: the same levels and events as the game's own loop over the real water map, " +
+                               "through ordinary ticks, an object leaving, a layout change, a wrong mirror and verify mode");
+        check(stats.StartsWith("PlantWater: 12 passes over") && stats.Contains("; 9 used levels computed on the water worker") &&
+              stats.Contains(", 3 read them inside the tick") && stats.Contains("1 had no copy to use") &&
+              stats.Contains("the list changed in 2 ticks, the mirror was rebuilt 1 times") && stats.Contains("verify mismatches 0") &&
+              PlantWater.IsActive,
+            "plant water on the worker: nine ticks used the worker's levels, three fell back for the right reasons, verify agreed");
+        PlantWater.SetVerifyForTests(false);
+        WaterMapCopy.SceneCreated();
+        PlantWater.SceneCreated();
     }
 }

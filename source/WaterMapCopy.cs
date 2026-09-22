@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using HarmonyLib;
 using Timberborn.MapIndexSystem;
+using Timberborn.TerrainSystem;
 using Timberborn.TickSystem;
 using Timberborn.WaterSystem;
 using UnityEngine;
@@ -50,7 +51,7 @@ namespace LateGamePerformance
 
         // One tick's copy. Written by the main thread before the water tasks are scheduled, filled by the worker
         // that ran the last of them, read by the main thread after the game has waited for all tasks.
-        private sealed class Job
+        internal sealed class Job
         {
             public object Map;
             public object Simulator;
@@ -67,6 +68,16 @@ namespace LateGamePerformance
             public volatile bool Done;
             public Exception Failure;
             public long WorkerStopwatchTicks;
+            // The map's column counts (unchanged while no column changed, the only case a copy is used), the
+            // terrain and the game's column retriever: what reading a level from the copy needs.
+            public byte[] Counts;
+            public ITerrainService Terrain;
+            public WaterColumnRetriever Retriever;
+            // What another feature attaches to this tick's copy and computes from it on the same worker, right
+            // after the copy (the plant water levels). Its failure is its own, not this feature's.
+            public object Extra;
+            public Exception ExtraFailure;
+            public long ExtraStopwatchTicks;
         }
 
         private static Func<object, object> _mapSimulator;
@@ -76,6 +87,9 @@ namespace LateGamePerformance
         private static Action<object, ReadOnlyWaterColumn[]> _setMapColumns;
         private static Func<object, Vector2[]> _mapFlows;
         private static Action<object, Vector2[]> _setMapFlows;
+        private static Func<object, byte[]> _mapCounts;
+        private static Func<object, ITerrainService> _mapTerrain;
+        private static Func<object, WaterColumnRetriever> _mapRetriever;
         private static Func<object, int> _mapMaxCount;
         private static Action<object, bool> _setMapAnyChanged;
         private static Func<object, int> _simMaxCount;
@@ -96,6 +110,7 @@ namespace LateGamePerformance
         private static bool _verify;
         private static Job _job;
         private static Job _verifyJob;
+        private static Job _swappedJob;
         private static bool _layoutChanged;
         private static object _map;
         private static object _spareOwner;
@@ -109,6 +124,15 @@ namespace LateGamePerformance
         private static long _workerStopwatchTicks;
         private static long _verified;
         private static long _verifyMismatches;
+
+        // Main thread, once a tick's job exists and before it is published to the worker.
+        internal static Action<Job> JobCreated;
+        // The worker, right after the copy was filled, before the job is marked done.
+        internal static Action<Job> AfterCopy;
+
+        // The job whose copy is the map's current arrays: set by a swap, cleared by every other outcome of the
+        // map's tick, so it is null whenever the game copied for itself. Main thread only.
+        internal static Job SwappedJob => _swappedJob;
 
         public static Feature CreateFeature(Config config)
         {
@@ -171,6 +195,7 @@ namespace LateGamePerformance
         {
             _job = null;
             _verifyJob = null;
+            _swappedJob = null;
             _map = null;
             _spareOwner = null;
             _spareColumns = null;
@@ -197,6 +222,9 @@ namespace LateGamePerformance
             _setMapColumns = Reflect.FieldSetter<ReadOnlyWaterColumn[]>(map, "_threadSafeWaterColumns");
             _mapFlows = Reflect.FieldGetter<Vector2[]>(map, "_waterFlowDirections");
             _setMapFlows = Reflect.FieldSetter<Vector2[]>(map, "_waterFlowDirections");
+            _mapCounts = Reflect.FieldGetter<byte[]>(map, "_threadSafeColumnCounts");
+            _mapTerrain = Reflect.FieldGetter<ITerrainService>(map, "_terrainService");
+            _mapRetriever = Reflect.FieldGetter<WaterColumnRetriever>(map, "_waterColumnRetriever");
             _mapMaxCount = Reflect.PropertyGetter<int>(map, "MaxColumnCount");
             _setMapAnyChanged = Reflect.InstanceCall<Action<object, bool>>(Reflect.Setter(map, "AnyColumnChanged"));
             _simMaxCount = Reflect.PropertyGetter<int>(sim, "MaxColumnCount");
@@ -296,8 +324,23 @@ namespace LateGamePerformance
                     SpareColumns = _spareColumns,
                     SpareFlows = _spareFlows,
                     FlowAtTop = _ownerFlowAtTop,
-                    MapIndex = _mapIndex(map)
+                    MapIndex = _mapIndex(map),
+                    Counts = _mapCounts(map),
+                    Terrain = _mapTerrain(map),
+                    Retriever = _mapRetriever(map)
                 };
+                Action<Job> created = JobCreated;
+                if (created != null)
+                {
+                    try
+                    {
+                        created(job);
+                    }
+                    catch (Exception exception)
+                    {
+                        job.ExtraFailure = exception;
+                    }
+                }
                 // Published before the tasks exist; the game's task queue orders it before the worker's read.
                 Volatile.Write(ref _job, job);
             }
@@ -325,6 +368,20 @@ namespace LateGamePerformance
             {
                 job.Failure = exception;
             }
+            Action<Job> afterCopy = AfterCopy;
+            if (job.Failure == null && job.ExtraFailure == null && afterCopy != null)
+            {
+                try
+                {
+                    long started = Stopwatch.GetTimestamp();
+                    afterCopy(job);
+                    job.ExtraStopwatchTicks = Stopwatch.GetTimestamp() - started;
+                }
+                catch (Exception exception)
+                {
+                    job.ExtraFailure = exception;
+                }
+            }
             job.Done = true;
         }
 
@@ -350,6 +407,7 @@ namespace LateGamePerformance
                 return true;
             }
             _verifyJob = null;
+            _swappedJob = null;
             try
             {
                 _map = __instance;
@@ -387,6 +445,7 @@ namespace LateGamePerformance
                 _setMapFlows(__instance, job.SpareFlows);
                 _spareColumns = job.LiveColumns;
                 _spareFlows = job.LiveFlows;
+                _swappedJob = job;
                 _swapped++;
                 return false;
             }
@@ -427,6 +486,7 @@ namespace LateGamePerformance
             _active = false;
             _job = null;
             _verifyJob = null;
+            _swappedJob = null;
             Log.Warning("WaterMapCopy failed and turned itself off for this session; the game copies the water map " +
                         "itself: " + exception);
         }

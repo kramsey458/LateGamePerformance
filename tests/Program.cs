@@ -47,7 +47,8 @@ internal static class Program
                      "Timberborn.CoreSound", "Timberborn.CameraSystem", "Timberborn.SoundSystem", "Timberborn.StatusSystem",
                      "Timberborn.EntityPanelSystem", "Timberborn.TimbermeshAnimations", "Timberborn.BaseComponentSystem",
                      "Timberborn.EntitySystem", "Timberborn.TemplateSystem", "Timberborn.Versioning", "Timberborn.TopBarSystem",
-                     "Timberborn.BuildingsReachability" })
+                     "Timberborn.BuildingsReachability", "Timberborn.DwellingSystem", "Timberborn.Beavers", "Timberborn.GameDistricts",
+                     "Timberborn.SimulationSystem", "Timberborn.Common", "Timberborn.Multithreading" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -80,6 +81,7 @@ internal static class Program
             RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), YielderSearch.CreateFeature(new Config()), TerrainMaps.CreateFeature(new Config()),
             PlantWater.CreateFeature(new Config()), DistrictCounts.CreateFeature(new Config()), BackgroundSave.CreateFeature(),
             WaterMapCopy.CreateFeature(new Config()), SoilScans.CreateFeature(new Config()), TerrainSearch.CreateFeature(new Config()), IdleEntities.CreateFeature(new Config()), SaveSnapshot.CreateFeature(new Config()),
+            HomeSearch.CreateFeature(new Config()), SoilScans.CreateListsFeature(),
             WaterRendering.CreateTilesFeature(), WaterRendering.CreateUploadsFeature(),
             MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), CatchUp.CreateFeature(), SaveCollect.CreateFeature(),
@@ -99,7 +101,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 96, $"96 patches declared (found {patchCount})");
+        Check(patchCount == 106, $"106 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -109,10 +111,11 @@ internal static class Program
         TerrainSearchTests.Run(Check);
         IdleEntitiesTests.Run(Check);
         SaveSnapshotTests.Run(Check);
+        HomeSearchTests.Run(Check);
         string[] expectedWarnings =
         {
             "CatchUp failed", "SaveCollect failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
-            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed"
+            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
         for (int i = 0; asExpected && i < expectedWarnings.Length; i++)
@@ -249,25 +252,26 @@ internal static class Program
         Check(!config.UiThrottle && config.SoundListener && config.CollectAfterSave && config.AnimatorCulling,
             "config: CollectAfterSave, SoundListener, UiThrottle and AnimatorCulling are ways out, on by default");
         Check(!config.LimitCatchUp && new Config().LimitCatchUp, "config: LimitCatchUp is a setting, on by default");
-        Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch && config.TerrainSearch && config.IdleEntities,
+        Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch && config.TerrainSearch && config.IdleEntities && config.HomeSearch,
             "config: what decides which simulation code runs cannot be changed from the file");
         Check(config.Diagnostics, "config: bool case-insensitive");
         Check(config.StatsEveryTicks == 0, "config: negative clamped to 0");
         Check(config.GcReport, "config: unparsable value keeps default");
         Check(config.RouteMapsMinFields == 1, "config: int parsed and clamped");
-        Check(Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, true, true, true) ==
+        Check(Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, true, true, true, true) ==
               "Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, " +
-              "WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on. " +
+              "WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on. " +
               "These are the same for every player on this version.",
             "startup: one line says which simulation features are running");
-        Check(Plugin.SimulationFeaturesLine(true, false, true, true, true, true, true, true, true, true).Contains("RouteMaps OFF") &&
-              Plugin.SimulationFeaturesLine(true, true, true, false, true, true, true, true, true, true).Contains("TerrainMaps OFF") &&
-              Plugin.SimulationFeaturesLine(true, true, true, true, true, false, true, true, true, true).Contains("DistrictCounts OFF") &&
-              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, false, true, true, true).Contains("WaterMapCopy OFF") &&
-              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, false, true, true).Contains("SoilScans OFF") &&
-              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, true, false, true).Contains("TerrainSearch OFF") &&
-              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, true, true, false).Contains("IdleEntities OFF") &&
-              Plugin.SimulationFeaturesLine(true, false, true, true, true, true, true, true, true, true).Contains("other players' logs"),
+        Check(Plugin.SimulationFeaturesLine(true, false, true, true, true, true, true, true, true, true, true).Contains("RouteMaps OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, false, true, true, true, true, true, true, true).Contains("TerrainMaps OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, true, true, false, true, true, true, true, true).Contains("DistrictCounts OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, false, true, true, true, true).Contains("WaterMapCopy OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, false, true, true, true).Contains("SoilScans OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, true, false, true, true).Contains("TerrainSearch OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, true, true, false, true).Contains("IdleEntities OFF") &&
+              Plugin.SimulationFeaturesLine(true, true, true, true, true, true, true, true, true, true, false).Contains("HomeSearch OFF") &&
+              Plugin.SimulationFeaturesLine(true, false, true, true, true, true, true, true, true, true, true).Contains("other players' logs"),
             "startup: a feature that could not start is called out");
         Check(!config.RecordTimings, "config: per-component timings are off unless asked for");
         config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true", "RecordTimings = true" }));

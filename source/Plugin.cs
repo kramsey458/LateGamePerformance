@@ -110,8 +110,23 @@ namespace LateGamePerformance
             {
                 IdleEntities.Activate();
             }
+            bool homeSearch = config.HomeSearch && HomeSearch.CreateFeature(config).Apply(HarmonyId);
+            if (homeSearch)
+            {
+                HomeSearch.Activate();
+            }
+            // The soil lists ride on the scans; the plant water levels on the water map copy. Each falls back to the
+            // feature it rides on, so neither is a simulation feature of its own.
+            if (soilScans && SoilScans.CreateListsFeature().Apply(HarmonyId))
+            {
+                SoilScans.ActivateLists();
+            }
+            if (plantWater && waterMapCopy)
+            {
+                PlantWater.UseWaterMapCopy();
+            }
             Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts,
-                waterMapCopy, soilScans, terrainSearch, idleEntities));
+                waterMapCopy, soilScans, terrainSearch, idleEntities, homeSearch));
             if (config.WaterRendering)
             {
                 if (WaterRendering.CreateTilesFeature().Apply(HarmonyId))
@@ -180,16 +195,17 @@ namespace LateGamePerformance
         // players' logs can be compared at a glance.
         internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch,
             bool terrainMaps, bool plantWater, bool districtCounts, bool waterMapCopy, bool soilScans, bool terrainSearch,
-            bool idleEntities)
+            bool idleEntities, bool homeSearch)
         {
             string line = "Simulation features: HaulCache " + (haulCache ? "on" : "OFF") + ", RouteMaps " +
                           (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") +
                           ", TerrainMaps " + (terrainMaps ? "on" : "OFF") + ", PlantWater " + (plantWater ? "on" : "OFF") +
                           ", DistrictCounts " + (districtCounts ? "on" : "OFF") + ", WaterMapCopy " +
                           (waterMapCopy ? "on" : "OFF") + ", SoilScans " + (soilScans ? "on" : "OFF") + ", TerrainSearch " +
-                          (terrainSearch ? "on" : "OFF") + ", IdleEntities " + (idleEntities ? "on" : "OFF") + ".";
+                          (terrainSearch ? "on" : "OFF") + ", IdleEntities " + (idleEntities ? "on" : "OFF") +
+                          ", HomeSearch " + (homeSearch ? "on" : "OFF") + ".";
             return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater && districtCounts && waterMapCopy &&
-                   soilScans && terrainSearch && idleEntities
+                   soilScans && terrainSearch && idleEntities && homeSearch
                 ? line + " These are the same for every player on this version."
                 : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
                   "own code for it. In multiplayer, check that the other players' logs show the same line.";
@@ -259,8 +275,8 @@ namespace LateGamePerformance
                          {
                              WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine(),
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
-                             TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), SaveSnapshot.TakeStatsLine(),
-                             SaveSnapshot.TakeUnlistedLine()
+                             TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), HomeSearch.TakeStatsLine(),
+                             SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine()
                          })
                 {
                     if (line != null)
@@ -295,6 +311,9 @@ namespace LateGamePerformance
             TerrainSearch.SceneCreated();
             SoundListenerSkip.SceneCreated();
             IdleEntities.SceneCreated();
+            PlantWater.SceneCreated();
+            SoilScans.SceneCreated();
+            HomeSearch.SceneCreated();
             _ticksSinceReport = 0;
         }
     }

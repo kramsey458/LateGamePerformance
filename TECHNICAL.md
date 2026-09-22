@@ -66,7 +66,7 @@ in range`.
 - If anything throws, the feature switches itself off for the session and the game's own code runs.
 - It is always on. Up to 0.4.8 it could be switched off in the settings file; see Settings for why not any more.
 
-### Plant water check on worker threads (always on, new in 0.4.12)
+### Plant water check on worker threads (always on, new in 0.4.12; on the water worker since 0.4.23)
 
 Every tick the game asks, for every plant and every other object that cares about flooding (about 8000 in the
 colony this is measured in), how high the water stands at its tile, one after another on the main thread
@@ -74,21 +74,42 @@ colony this is measured in), how high the water stands at its tile, one after an
 the next.
 
 The question is a pure read: the object's fixed tile, looked up in the water map the game keeps for readers on
-other threads, which is only rewritten in its own tick and never during this one. So the reads are spread over
-worker threads, and then the main thread goes through the results in the game's own order and, for each object
-whose level changed, does exactly what the game does: stores the new level and raises the change event. Those
-handlers (a plant starting to drown, a building flooding) run on the main thread, in the same order, with the
-same values as without the mod.
+other threads, which is only rewritten in its own tick and never during this one. Since 0.4.23 the answers are
+computed where that map is made: the water map copy (below) fills the next tick's map on the water worker
+thread right after the last water task, and this feature reads every object's level from that copy on the same
+thread, before the game swaps it in, with the game's own lookup (`WaterColumnRetriever.GetColumn`, the ceiling
+of the water surface, the part above the tile). When the tick then asks, the levels are already there, and the
+main thread only goes through them in the game's own order and, for each object whose level changed, does
+exactly what the game does: stores the new level and raises the change event. Those handlers (a plant starting
+to drown, a building flooding) run on the main thread, in the same order, with the same values as without the
+mod.
+
+The levels from the worker are used only when three things hold, all checked in the tick: the map's current
+arrays are exactly the copy they were computed from (the water map copy swapped it in and nothing has rewritten
+it since; whenever the game copied for itself, they are not), the worker finished, and the game's list of
+objects is the one they were computed for. For the last, the mod keeps a mirror of the list through the game's
+register and unregister methods and takes a numbered snapshot of it whenever it changed; in the tick the
+snapshot is compared with the game's list object for object (a few microseconds), so a change the hooks missed
+is noticed, the mirror rebuilt from the game's list and that tick read the old way. From 0.4.12 to 0.4.22 the
+reads were spread over worker threads started inside the tick, 0.4 ms per tick of starting and joining in the
+logged colony; that is now the fallback for a tick with no usable copy.
 
 Reading first gives the same values because a handler cannot change the water map or an object's tile, and it
 cannot add or remove an object from the list: the game walks that list with `foreach` and would throw if one
 did. The result does not depend on the number of threads, so it is the same on every computer.
 
 - The tests build two identical sets of 6000 of the game's real `WaterObject`s over a stand-in water map that
-  moves between ticks, run one through the game's own loop and one through the mod, and require the same stored
-  levels and the same events in the same order with the same values, for six ticks (4316 level changes).
+  moves between ticks, run one through the game's own loop and one through the mod's fallback, and require the
+  same stored levels and the same events in the same order with the same values, for six ticks (4316 level
+  changes). A second test puts 3000 real `WaterObject`s over the two real `ThreadSafeWaterMap`s of the water map
+  copy's test world, one set ticked by the game's own `WaterObjectService` over the map that only runs the game's
+  code, the other by the mod over the map that goes through the copy and the swap: twelve ticks, nine of which
+  use the worker's levels, one falls back because the water layout changed, one because an object left the list
+  after the snapshot, one because an object left without the hook seeing it (the mirror is rebuilt), and three
+  in verify mode; levels and events identical throughout, verify mismatches 0.
 - Below 512 objects the game's own loop runs; starting workers would cost more than it saves.
-- `PlantWaterVerify = true` reads everything again on the main thread and compares. For testing.
+- `PlantWaterVerify = true` reads everything again on the main thread with the game's own method and compares,
+  which also checks the worker's lookup against the game's map. For testing.
 - If anything throws (a handler included), the feature switches itself off and hands that tick to the game's
   own loop. Objects already updated compare equal there and are passed over, so nothing is applied twice.
 
@@ -192,21 +213,36 @@ Debug setting on) hashes the map there; under 0.4.14 it missed every swapped tic
 - `WaterMapCopyVerify = true` lets the game copy every tick as well and compares byte for byte (nothing is swapped
   in that mode). If anything throws, the feature switches itself off and the game copies.
 
-### Soil moisture and contamination scans (always on, new in 0.4.14)
+### Soil moisture and contamination scans (always on, new in 0.4.14; lists from the workers since 0.4.23)
 
 Every tick the game walks every tile of the map, every soil layer of it, to find the few cells whose moisture or
 contamination changed (`SoilMoistureService.UpdateMoistureLevels`,
 `SoilContaminationService.UpdateContaminationLevels`); for each one it finds it updates the soil's look and tells
 plants that dry out, recover or get contaminated. The simulation marks what changed in a flag array.
 
-The mod walks the same tiles in the same order, but first reads eight tiles' flags at once, in every layer, and
-passes over the eight when none is set. For the others it runs the game's loop, calling the game's own
-`SetMoistureLevel` / `SetContaminationLevel` for each changed cell. A group passed over is one where the game's
-loop would only have read flags that are not set, so the same cells are updated in the same order with the same
-values.
+Since 0.4.23 the list of changed cells is made where the flags are written. The soil simulation runs on the
+game's worker threads during the tick, one row of the map per call; the worker that finishes the last row reads
+the whole flag array (eight flags at a time) and writes the changed cells down in the game's loop order (tile by
+tile as the game walks them, then layer by layer). In the next tick the service only goes through that list,
+calling the game's own `SetMoistureLevel` / `SetContaminationLevel` for each cell, with the game's own filter (a
+cell above a tile's column count is passed over, as the game's loop never reaches it). Nothing else may touch the
+flags between the last row and the service's tick except the simulator's own tick on the main thread (a column
+moved, terrain raised or lowered, a reset), which is counted; a list is not used after such an edit, when the
+flag array was replaced, or when it was not finished, and the scan below runs instead. The six hooks this needs
+are a feature of their own (`SoilLists`), so that if one of them cannot be installed the scan still runs.
 
-- In the harness, a 256 x 256 map with three layers and one cell in 500 changed: the game's loop 0.59 ms, the mod
-  0.10 ms, and there are two of these scans per tick.
+The scan (0.4.14) walks the same tiles in the same order as the game, but first reads eight tiles' flags at once,
+in every layer, and passes over the eight when none is set. For the others it runs the game's loop, calling the
+game's own per-cell method for each changed cell. A group passed over is one where the game's loop would only
+have read flags that are not set, so the same cells are updated in the same order with the same values.
+
+- In the harness, a 256 x 256 map with three layers and one cell in 500 changed: the game's loop 0.39 ms on the
+  main thread, the mod's scan 0.065 ms on the main thread, the worker's list 0.042 ms on the worker and only the
+  changed cells on the main thread; there are two of these per tick.
+- The tests drive the real simulators and services through eleven rounds per kind: seven use a worker's list,
+  and one each falls back for a terrain height change waiting on the main thread, an unfinished list, a replaced
+  flag array and a simulation reset; the game's per-cell method is called for the same cells in the same order in
+  every round, and the pure list is checked against every set flag in the game's order on 90 random maps.
 - The tests compare the order of cells with the game's loop on 90 random maps, and drive the real services: the
   game's per-cell method is called for the same cells, coordinates and levels, in the same order. (The game's
   per-cell method itself cannot run in the harness because the soil texture map it updates calls into Unity.)
@@ -584,6 +620,32 @@ What is the same and what is not:
   reported no distance or reachability difference.
 - If anything throws, the feature switches itself off for the session and the game's own search runs.
 
+### Home search without the per-beaver overhead (always on, new in 0.4.23)
+
+Every tick the game picks the dwelling that has waited longest for a dweller and looks for a beaver to move in
+(`DwellerHomeAssigner.AssignDweller`): it walks every adult, then every child, of the district, asking each
+whether it is looking for a better home (`Dweller.IsLookingForBetterHome`) and, if so, whether it may move in
+(`AutoAssignableDwelling.CanAssignDweller`); the first that may, does. In a settled colony nobody is looking, so
+all 350 beavers are asked on every tick, each first found from its `Beaver` component with a component lookup,
+through a LINQ concatenation of the two lists: 0.3 ms per tick in the logged colony, growing with the population.
+
+The mod asks exactly the same questions of exactly the same beavers in exactly the same order, with the game's
+own methods, and stops at the same first hit. What it leaves out is the LINQ enumerators and the per-beaver
+component lookup, which it does once per beaver and keeps, because the components of an entity are fixed for its
+life (a deleted beaver leaves the table). The two lists are the game's own `ReadOnlyList<Beaver>`s, read by
+index; a list of any other kind (another mod's) is left to the game's own walk. The result cannot differ, so it
+is the same on every computer.
+
+- The tests script the two predicates per beaver (the game's own need a live entity) and compare the pick with
+  the game's walk as decompiled over 560 searches of 300 adults and 60 children in both orders: the same beaver
+  moves in or nobody does, 360 component lookups in total, verify mode agrees, a list of another kind is handed
+  back, a throwing lookup switches the feature off and hands the search to the game.
+- `HomeSearchVerify = true` runs the game's walk as well, with fresh lookups, and compares the beaver picked;
+  a mismatch is logged and the game's pick is used.
+- The stalest-dwelling walk that precedes the search (`StaleAssignableDwellingService.GetStalest`, a linked list
+  rotated until a dwelling with a free slot) is left alone: its order is simulation state and its cost is per
+  dwelling, not per beaver.
+
 ### Save snapshot on worker threads (on by default, new in 0.4.22)
 
 Every save begins with `SerializedWorldFactory.Create`: for each entity every persistent component writes its
@@ -734,8 +796,10 @@ buildings reused 42010/129250, recomputed 87240
 Two lines for the features added in 0.4.12:
 
 ```
-[LateGamePerformance] Last 1000 ticks. PlantWater: 1000 passes over 8100 objects on 7 workers; reading 240.0 ms
-(0.240 ms per pass), 310 level changes applied in 1.2 ms
+[LateGamePerformance] Last 1000 ticks. PlantWater: 1000 passes over 8100 objects; 990 used levels computed on the
+water worker (0.240 ms there per pass), 10 read them inside the tick on 7 workers (0.400 ms per pass), 4 had no
+copy to use; the list changed in 6 ticks, the mirror was rebuilt 0 times; 310 level changes applied; main thread
+0.030 ms per pass
 [LateGamePerformance] Last 1000 ticks. TerrainMaps: 3 rebuilds of 96 terrain route maps on 7 workers; the main
 thread waited 9.5 ms in total, longest 4.1 ms; 5 more built directly in batches of fewer than 4
 ```
@@ -764,11 +828,21 @@ Three for the features added in 0.4.14:
 [LateGamePerformance] Last 1000 ticks. WaterMapCopy: 996 ticks swapped in the copy made on a worker thread
 (0.540 ms there per tick); the game copied on the main thread in 3 ticks where the water layout changed and 1 where
 no copy was ready
-[LateGamePerformance] Last 1000 ticks. SoilScans: 2000 moisture and contamination passes in 200.0 ms (0.100 ms
-each); 97.0% of 8-tile groups had nothing changed and were passed over; 5400 changed cells updated
+[LateGamePerformance] Last 1000 ticks. SoilScans: 2000 moisture and contamination passes in 40.0 ms (0.020 ms
+each); 1990 went through a list of changed cells made on a worker (0.040 ms there per list), 10 scanned the map
+on the main thread (97.0% of 8-tile groups had nothing changed and were passed over); lists not usable: 0 not
+finished, 10 after a main-thread edit, 0 after the flag array was replaced; 5400 changed cells updated
 [LateGamePerformance] Last 1000 ticks. WaterRendering: 1000 updates switched water tiles 800 times where the game
 switches them 900000 times; 3000 of 6000 flow direction and flow limit uploads left out because the graphics card
 already had them
+```
+
+One for the home search (0.4.23):
+
+```
+[LateGamePerformance] Last 1000 ticks. HomeSearch: 1000 searches for a beaver to move into a home asked 354000
+beavers in 12.0 ms (0.012 ms each); 3 moved in; 354 beavers in the table; 0 searches over lists of another kind
+were left to the game
 ```
 
 A third reports the tree and plant search:
@@ -816,6 +890,7 @@ features, disable the mod.
 | `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy. For testing. |
 | `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
+| `HomeSearchVerify` | `false` | Run the game's own walk for a beaver to move in as well and compare the pick; logs mismatches and uses the game's. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `SaveSnapshot` | `true` | Snapshot trees, crops, paths, levees and platforms on worker threads at every save. Saving only; may differ between peers. |
 | `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well, compare every entity and use the game's. Measurement only. For testing. |
