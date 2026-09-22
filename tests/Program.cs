@@ -54,7 +54,8 @@ internal static class Program
                      "Timberborn.EntitySystem", "Timberborn.TemplateSystem", "Timberborn.Versioning", "Timberborn.TopBarSystem",
                      "Timberborn.BuildingsReachability", "Timberborn.DwellingSystem", "Timberborn.Beavers", "Timberborn.GameDistricts",
                      "Timberborn.SimulationSystem", "Timberborn.Common", "Timberborn.Multithreading", "Timberborn.BehaviorSystem",
-                     "Timberborn.TimeSystem", "Timberborn.EnterableSystem", "Timberborn.CharacterMovementSystem", "Timberborn.BehaviorSystemUI" })
+                     "Timberborn.TimeSystem", "Timberborn.EnterableSystem", "Timberborn.CharacterMovementSystem", "Timberborn.BehaviorSystemUI",
+                     "Timberborn.Physics", "Timberborn.SelectionSystem", "Timberborn.ModularShafts", "Timberborn.MechanicalSystem" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -174,6 +175,7 @@ internal static class Program
             Diagnostics.CreateFeature(), CatchUp.CreateFeature(),
             SoundListenerSkip.CreateFeature(), UiThrottle.CreateFeature(), AnimatorCulling.CreateFeature(),
             TerrainReach.CreateFeature(), MapChanges.CreateFeature(), BehaviorLog.CreateFeature(), WalkerMove.CreateFeature(),
+            PhysicsSync.CreateFeature(), ShaftAnimators.CreateFeature(),
             Plugin.CreateTickFeature(), ParallelTickWait.CreateFeature()
         };
         int patchCount = 0;
@@ -189,7 +191,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 127, $"127 patches declared (found {patchCount})");
+        Check(patchCount == 133, $"133 patches declared (found {patchCount})");
         TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
         TestHaulCacheFlush();
@@ -202,6 +204,7 @@ internal static class Program
         IdleEntitiesTests.Run(Check);
         SaveSnapshotTests.Run(Check);
         HomeSearchTests.Run(Check);
+        RenderingTests.Run(Check);
         TestTurnedOff();
         string[] expectedWarnings =
         {
@@ -217,7 +220,8 @@ internal static class Program
             "PlantWater verify: object 3 read", "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
             "SaveSnapshot failed while the singleton SlowSingleton saved its state",
             "ParallelTickWait: one of the game's parallel tasks has failed", "ParallelTickWait: the game's parallel tick was still running after",
-            "HomeSearch verify: the mod moves in", "HomeSearch verify: the kept answer for", "HomeSearch failed"
+            "HomeSearch verify: the mod moves in", "HomeSearch verify: the kept answer for", "HomeSearch failed",
+            "PhysicsSync failed", "AnimatorCulling failed", "ShaftAnimators failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
         for (int i = 0; asExpected && i < expectedWarnings.Length; i++)
@@ -461,14 +465,19 @@ internal static class Program
         Check(ran == 10, $"sound listener: a still camera with a settled listener runs one frame in ten (ran {ran} of 100)");
         Check(policy.ShouldRun(true), "sound listener: a camera move runs at once");
 
-        // UI throttle: the alert lists every fourth frame, the panel every second frame and when the entity changes.
-        int statusRuns = 0, panelRuns = 0;
+        // UI throttle: the alert lists every sixteenth frame, the alerts with a value every fourth (never on the same
+        // frame), the panel every second frame and when the entity changes.
+        int statusRuns = 0, dynamicStatusRuns = 0, panelRuns = 0;
+        bool apart = true;
         for (int frame = 0; frame < 100; frame++)
         {
             statusRuns += UiThrottle.StatusDue(frame) ? 1 : 0;
+            dynamicStatusRuns += UiThrottle.DynamicStatusDue(frame) ? 1 : 0;
             panelRuns += UiThrottle.PanelDue(frame, false) ? 1 : 0;
+            apart &= !(UiThrottle.StatusDue(frame) && UiThrottle.DynamicStatusDue(frame));
         }
-        Check(statusRuns == 25 && panelRuns == 50, $"ui throttle: 25 status and 50 panel updates in 100 frames (got {statusRuns}, {panelRuns})");
+        Check(statusRuns == 7 && dynamicStatusRuns == 25 && panelRuns == 50 && apart,
+            $"ui throttle: 7 status, 25 valued-alert and 50 panel updates in 100 frames, the two alert kinds never in the same frame (got {statusRuns}, {dynamicStatusRuns}, {panelRuns})");
         Check(UiThrottle.PanelDue(1, true), "ui throttle: a newly shown entity is refreshed on its first frame");
         int topBar = 0, reach = 0;
         for (int i = 0; i < 80; i++)

@@ -18,6 +18,7 @@
     <Reference Include="$(Managed)\Timberborn.*.dll" Private="false" />
     <Reference Include="$(Managed)\UnityEngine.dll" Private="false" />
     <Reference Include="$(Managed)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="$(Managed)\UnityEngine.PhysicsModule.dll" Private="false" />
     <Reference Include="$(Managed)\Bindito.Core.dll" Private="false" />
     <Reference Include="$(HarmonyPath)" Private="false" />
     <Reference Include="$(ModSettingsPath)" Private="false" />
