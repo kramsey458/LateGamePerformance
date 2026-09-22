@@ -355,7 +355,7 @@ save in that folder.
 What keeps a save safe:
 
 - **Only queued saves.** The save on exit, BeaverBuddies' rehost save (both "instant": the caller expects the
-  file on return) and saves to a stream (BeaverBuddies sends those to joining players) run as the game's own
+  file on return) and saves to a stream (the game's save benchmark and crash-report save) run as the game's own
   code, untouched. The writer is only replaced when its caller is `GameSaver.Save` itself (or a detour's copy
   of it), a queued save is pending, and the repository is then asked for that same save; any other caller gets
   the game's writer.
@@ -558,7 +558,8 @@ These hooks are measurement only: they read a clock around the game's own method
 (From 0.4.13 a separate feature, "Background save" above, moves the JSON stage of queued saves to a worker
 thread; this line then shows what the main thread still spends and says so.) The game's own `Saved game in 0.80s` line starts its clock after the tick
 is finished, so it can be a little lower than the total here. A line starting `Save to a stream` is a save that
-is not written to a file, which a multiplayer mod uses for a joining player; `Save (writing only...)` is one
+is not written to a file: the game's save benchmark (`-benchmarkSaveCount`) or the save it attaches to a crash
+report (no multiplayer mod uses it; BeaverBuddies sends its players the save file); `Save (writing only...)` is one
 started in a way the mod does not know, so only the writing part is covered. The numbers are there to decide
 whether part of a save is worth moving off the main thread.
 
@@ -722,9 +723,13 @@ What is the same and what is not:
   is never resumed from, and a resumed search that meets one starts over the game's way (counted as "started
   over" in the stats line), so the distance stays the game's there too.
 - Every player on this version gets the same answer: the search state depends only on the simulation's own
-  sequence of questions. The only other caller of this search is the game's debug-mode cursor tool. When the host
-  writes the save a joining player loads (`GameSaver.SaveWithoutFinishingTick`), the host empties the field and
-  forgets its history, so the next question is a fresh search on both computers (0.4.20).
+  sequence of questions. The only other caller of this search is the game's debug-mode cursor tool. In a
+  multiplayer game BeaverBuddies has every player, the host included, load the same save file into a new scene,
+  and a new scene starts with no history, so the first question is a fresh search on every computer. (From
+  0.4.20 the mod also empties the field and forgets its history after `GameSaver.SaveWithoutFinishingTick`,
+  which earlier notes took for the save a joining player loads. It is not: the game calls it only for its save
+  benchmark, `GameSaver.BenchmarkSavingToMemory`, and for the save it attaches to a crash report once the first
+  uncaught exception has stopped the scene, and no BeaverBuddies build calls it. The hook is harmless there.)
 - `TerrainSearchVerify = true`, or the **Verify terrain path searches** box on the settings page (0.4.19), runs the
   unmodified algorithm alongside on a shadow field and heap, compares what
   the game is told after every search and counts: identical, same distance within rounding, equally short but
@@ -1262,7 +1267,11 @@ paste into `SaveSnapshot.Allowed` and `SaveGuard.HelpersHash` after an update; t
 listed hash against what is installed.
 
 `tools/benchmark-timberborn.ps1` runs the game's built-in benchmark on a save with per-component tick timings
-(`-metrics`), for before/after comparisons.
+(`-metrics`), for before/after comparisons of the game itself: `-benchmarkLength` makes the game start with every mod
+switched off, so that benchmark never measures this mod. With `-SaveCount N` it runs the game's save benchmark instead
+(`-benchmarkSaveCount`, plus `-skipModManager` so the enabled mods load without waiting on the mod manager screen):
+after the warm-up the game saves N times into memory, writes the average, median, 90th percentile, minimum and maximum
+to `Player.log` and quits; the Save timing line splits each of those saves.
 
 ## Uninstall
 

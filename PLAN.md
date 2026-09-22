@@ -63,8 +63,8 @@ Per tick, 21.1 ms of main-thread time at 9.5 to 11.7 ticks per second:
 | Where | ms per tick | Notes |
 |---|---|---|
 | Entity ticks | 18.5 | 766 entities ticked, 10,642 passed over (0.4.21). Components, sampled: `BehaviorManager` 5.7, `WalkerMover` 1.5, `NeedManager` 0.6, `DistrictResourceCounter` 0.5 (this mod's DistrictCounts), `RangedEffectSubject` 0.45, `ContaminationApplier` 0.34, `Walker` 0.34, `Worker` 0.2, `LifeProgressor` 0.2, `CriticalNeedActionStatusRegistrar` 0.15, `WorkplaceIlluminator` 0.12, `SleepSoundEmitter` 0.11. About 7 ms of the 18.5 is not attributed to any component (sampling, the bucket loop, Performance Log's own overhead): treat as unknown. |
-| Tick singletons | 2.1 | `WaterRenderer` 0.38, `WaterObjectService` 0.31 (PlantWater's main-thread part), `DistrictCitizenAssigner` 0.28, `NavigationSynchronizer` 0.27 (mostly this mod's two postfixes scanning the map caches), `SoilContaminationService` 0.22 (2,645 changed cells per tick, 83 ns each), `DwellerHomeAssigner` 0.19 (HomeSearch 0.17 per search), `OptimizedLocalHousing.HousingService` 0.06, `TimeTriggerService` 0.06 (one 30 ms call). |
-| This mod's own lines | | `YielderSearch` 5.4 searches per tick at 0.23 ms = **1.2 ms per tick** (88% end with "nothing the building has room for"; 153 distance lookups per search before the first reachable candidate). `HaulCache` 0.6 requests per tick at 0.7 ms = 0.4 ms per tick with no evidence it beats the game's own build. `DistrictCounts` 1 count per tick, 233 inventories on 7 workers, 0.67 ms (probably slower than the game's own loop at this size). `TerrainSearch` 5.3 searches per tick, 0.05 ms in total: solved. `PlantWater` fell back to reading inside the tick in 35 to 49% of ticks because the object list changed after the snapshot. |
+| Tick singletons | 2.1 | `WaterRenderer` 0.38, `WaterObjectService` 0.31 (PlantWater's main-thread part), `DistrictCitizenAssigner` 0.28, `NavigationSynchronizer` 0.27 (mostly this mod's two postfixes, which scan the map caches and rebuild the maps they find; see G), `SoilContaminationService` 0.22 (2,645 changed cells per tick, 83 ns each), `DwellerHomeAssigner` 0.19 (HomeSearch 0.17 per search), `OptimizedLocalHousing.HousingService` 0.06, `TimeTriggerService` 0.06 (one 30 ms call). |
+| This mod's own lines | | `YielderSearch` 5.4 searches per tick at 0.23 ms = **1.2 ms per tick** (88% end with "nothing the building has room for"; 153 distance lookups per search before the first reachable candidate). `HaulCache` 0.6 requests per tick at 0.7 ms = 0.4 ms per tick with no evidence it beats the game's own build. `DistrictCounts` 1 count per tick, 233 inventories on 7 workers, 0.67 ms (whether the game's own loop is faster at this size was never measured; see the correction in E). `TerrainSearch` 5.3 searches per tick, 0.05 ms in total: solved. `PlantWater` fell back to reading inside the tick in 35 to 49% of ticks because the object list changed after the snapshot. |
 
 Per frame, the systems: `AnimatorRegistry` 1.29 ms (72% of all per-frame system time; AnimatorCulling found nothing to cull
 in two of three intervals because the camera saw everything), `InputService` 0.13, `StatusAggregator` 0.10 (already every
@@ -115,6 +115,16 @@ Transform, `MovementAnimator` reads `Time.time`); a part-level split (workers sn
 temporary entity, the main thread does the unsafe parts and merges in `AllComponents` order so the file is byte-identical) is
 the follow-up if the main thread is still the long pole afterwards.
 
+Correction (2026-09-22) to design (1): a hash of `Save`'s own IL bytes does not see a change in anything `Save` calls. A
+`Save` that hands its work to a helper (a private method, a base class, a serializer) can change behaviour while its own bytes
+stay the same, so the guard has to hash the IL of every method `Save` calls in its own assembly too (resolve the call
+operands with `Module.ResolveMethod`, as `SaveGuard.Read` already does to look for other mods' patches). IL bytes also carry
+metadata tokens, which any rebuild of the assembly may renumber: a game or fork update can change a hash without changing
+the code. That is a false alarm on the safe side (the type stays on the main thread, with a log line, until it is read
+again), so expect it after every game update. As shipped in 0.4.25 and 0.4.26, `SaveSnapshot.SaveHash` still hashes
+`Save`'s own body only; `SaveGuard` checks what `Save` calls for Harmony patches and hashes the shared saving helpers, but
+not the IL of the other methods `Save` calls.
+
 Verify: the existing `Verify save snapshots` box compares every entity with the game's own snapshot. Test: extend
 `tests/SaveSnapshotTests.cs` with a type whose hash is wrong and check it is dropped. Decision: the `Save:` line's snapshot
 stage from one session; target under 120 ms.
@@ -134,14 +144,14 @@ Design, in order of certainty:
    "found something" nor compete), so its lookup can always be skipped, not only after "found something". Read
    `ClosestYielderFinder.FindClosestYielders` again (in `%TEMP%\tb-src\Timberborn.YielderFinding`) before trusting this:
    `flag = flag || isYielding || (isLiving && yielder.IsAlive())` and only yielding ones are added.
-3. Exact cheaper reachability: `Accessible.FindTerrainPath(Vector3, out float)` goes through `NavigationService.
-   FindTerrainPath` to the building's cached terrain flow field (a dictionary lookup after a world-to-node conversion,
-   about 1 us). If the flag's access node and the tree's node lie in different nav-mesh groups (`NavMeshGroupService`,
-   connected components of the terrain graph), the answer is "unreachable" without the lookup. Read `TerrainFlowFieldGenerator`
-   and `NavMeshGroupService` to confirm that a flow field never crosses groups, that group ids are stable between nav-mesh
-   updates, and where the tree's node id comes from (`NodeIdService` from `CenterPosition`); then pre-filter by group and let
-   the lookup decide the rest. Keep the "first candidate is always looked up" rule so the building's terrain map is filled on the
-   same tick as in the unmodded game, or show that TerrainMaps makes that moot.
+3. Dropped (corrected 2026-09-22): the pre-filter by nav-mesh group. `NavMeshGroupService` is not the connected components of
+   the terrain graph. It is a table of named group ids (`GetOrAddGroupId(string)`, default id 0), and
+   `TerrainFlowFieldGenerator` reads a node's `GroupId` only to choose the step cost, so two nodes in different groups can be
+   connected. The game's real connectivity structure, `GlobalReachabilityService`, is a lazy breadth-first "area" map over
+   the instant terrain graph, not the synchronized one the flow fields read. It is cleared on every instant nav-mesh update,
+   and asking it fills it in, which is a side effect. Terrain route maps are also limited in range, so a shared area does not
+   mean reachable either. No pre-filter by group or area is exact as designed; item 2 is the exact and cheaper route. (0.4.25
+   shipped item 2 and a reach box measured from each filled map, `TerrainReach`; see TECHNICAL.md.)
 4. Not exact, do not do: caching a negative answer across ticks.
 
 Verify: `YielderSearchVerify` (runs the game's search alongside). Test: extend the 4,000-forest model test with dead and
@@ -187,6 +197,15 @@ Evidence: `DistrictCounts: 1002 counts of 233 inventories on 7 workers in 690.0 
 own per-inventory cost (about 4 us) is about 1 ms sequential, so 7 workers should take 0.15 ms; the other 0.5 ms is
 `Parallel.For` waking thread-pool threads. The same overhead sits in PlantWater's fallback (0.36 ms for 6,800 trivial reads).
 
+Correction (2026-09-22): these numbers contradicted section 2, which called the same 0.67 ms count "probably slower than
+the game's own loop at this size" (corrected there too), while the paragraph above puts the game's loop at about 1 ms,
+slower than the mod. Neither was measured in the game: the 4 us per inventory has no source (in the harness the game's
+code counts 700 inventories in about 2 ms on .NET 8, under 3 us each, and Mono is slower). To settle it, time the game's
+own count inside `DistrictCountsVerify`, as `HaulCacheVerify` does for the hauler lists. The pool itself is no longer
+open: 0.4.25 shipped worker threads of the mod's own (`TickWorkers`) for DistrictCounts, the PlantWater fallback and the
+terrain and road map batches. What is left of E is that measurement and, if the game's loop still wins at 233 inventories,
+raising `MinInventories`.
+
 Design: a small persistent pool (`TickWorkers`): N threads that spin briefly then block on a `ManualResetEventSlim`, fed a
 work-item struct (delegate + range), joined with a countdown; dedicated threads like `SaveSnapshot.Build` uses, but kept alive
 between ticks. Measure wake latency in the harness (target under 20 us). Then move DistrictCounts, the PlantWater fallback and
@@ -213,6 +232,17 @@ road or district changed. This mod's `RouteMaps.NavigationTickedPostfix` and `Te
 it and scan every cached road and terrain map through reflection-compiled delegates on every tick to find unbuilt ones. The
 entries are classes (no boxing), so the 563 KB/s may be Performance Log's coarse attribution landing on the first singleton
 after the entity ticks; confirm before believing it.
+
+Correction (2026-09-22): measured offline, the scans are not the 563 KB/s. In the harness (.NET 8, `tests/RouteMapsTests.cs`
+with the game's real road cache, 418 cached maps and nothing to build) one `RouteMaps.NavigationTickedPostfix` scan takes
+34.5 us (32 us again at 0.4.26) and allocates 80 B, which is about 1 KB/s at ten ticks per second: the allocation figure
+belongs to something else. The time cannot be ruled out the same way, because tens of microseconds on .NET 8 can be more
+under Mono and the terrain scan comes on top. The postfixes also do rebuild work, not only scans: `TerrainMaps` builds its
+whole batch inside the postfix (on the main thread below four maps, otherwise waiting for its workers), and `RouteMaps`
+builds a batch smaller than `RouteMapsMinFields` on the main thread. So read step (1)'s Watch against the stats lines'
+`TerrainMaps: ... the main thread waited` and `RouteMaps: ... main thread spent` figures: a dirty flag saves only the scan
+part. (0.4.25 shipped step (2): `MapChanges` sets the flag, and each cache is still walked every 200th tick as a check;
+since 0.4.26 that check only counts the maps the hooks missed and leaves them to the game.)
 
 Design: (1) `Watch = LateGamePerformance.RouteMaps.NavigationTickedPostfix; LateGamePerformance.TerrainMaps.
 NavigationTickedPostfix` in `PerformanceLog.cfg` for one session: ms and KB per call. (2) If they are the cost, scan only when
@@ -333,6 +363,19 @@ has a different remedy, and nothing above should be tuned for the host alone.
    `RecordTimings = true`, the `Diagnostics` box on, no verify keys. Collect: both Performance Log folders, both `Player.log`s.
 3. After each release: the same measurement session, and compare with `python tools/perflog.py compare <before> <after>` from
    the Performance Log repository. Report per-tick and per-frame deltas, not impressions.
+4. **Save benchmark** (added 2026-09-22; repeatable save timing without playing, single player): the game's own
+   `SavingBenchmarker` (`Timberborn.Benchmarking.dll`) runs when the game is started with `-settlementName X -saveName Y
+   -benchmarkSaveCount 20 -benchmarkWarmUpLength 30 -skipModManager` and without `-benchmarkLength` and `-benchmarkSpeed`
+   (given both, the game runs its ordinary benchmark instead). `-skipModManager` loads the mods enabled in the mod manager
+   without waiting on its screen; the ordinary benchmark (`-benchmarkLength`) starts the game with every mod switched off,
+   so it measures the game alone, while this one measures the mods. It loads the save, waits the warm-up in seconds,
+   finishes the tick, saves 20 times into memory (`GameSaver.BenchmarkSavingToMemory`), writes `Finished saving
+   benchmark:` with the average, median, 90th percentile, minimum and maximum to `Player.log`, and quits. Those saves go
+   through `SaveWithoutFinishingTick` and `SaveWriter.WriteToSaveStream`, so this mod's snapshot workers
+   (`SerializedWorldFactory.Create`) are measured, Background save is not involved (it only takes queued saves), and the
+   Save timing feature logs one `Save to a stream` line per save with the stages split. `tools/benchmark-timberborn.ps1
+   -Settlement X -Save Y -SaveCount 20` launches it (it starts the game through Steam; `-WarmUpSeconds` sets the warm-up).
+   Use it for item A's decision beside the `Save:` lines of a played session.
 
 ## 6. Definition of done for a round
 

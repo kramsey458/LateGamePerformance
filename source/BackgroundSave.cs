@@ -326,7 +326,7 @@ namespace LateGamePerformance
     //
     // Rules that keep a save safe:
     //   - Only queued saves. The save on exit, BeaverBuddies' rehost save (both "instant": their caller expects
-    //     the file on return) and saves to a stream (BeaverBuddies sends those to joining players) run as the
+    //     the file on return) and saves to a stream (the game's save benchmark and crash-report save) run as the
     //     game's own code, untouched.
     //   - One job at a time. Any save of any kind first waits for a job still running, and so does anything that
     //     asks the save repository about files (listing, opening, deleting, exists), and quitting the game.

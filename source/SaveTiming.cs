@@ -170,7 +170,9 @@ namespace LateGamePerformance
             });
             feature.Patches.Add(new PatchSpec
             {
-                // Writes a save into a stream without a file; a multiplayer mod uses it for a joining player.
+                // Writes a save into a stream without a file: the game's save benchmark (-benchmarkSaveCount, via
+                // GameSaver.BenchmarkSavingToMemory) and the save it attaches to a crash report. No multiplayer mod
+                // calls it; BeaverBuddies sends its players the save file.
                 Name = "GameSaver.SaveWithoutFinishingTick",
                 Required = false,
                 Target = () => Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "SaveWithoutFinishingTick"),
