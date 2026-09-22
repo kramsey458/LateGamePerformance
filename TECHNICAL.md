@@ -398,10 +398,14 @@ What keeps a save safe:
 - **A prepared save never ends as an empty file.** If the `.saving` file cannot be opened, or another mod
   supplies the file service, or the save turns out not to be the queued one, it is written into the stream the
   game opened, there and then, errors included.
-- **If the worker fails**, the save is done again on the main thread from the same snapshot, the game's way. If
-  that fails too, the game's callback does not run (so no old autosave is deleted because of it), the game
-  gets the same `GameSaverException` it would have had, and the log says `SAVE FAILED`. After any worker failure
-  background saving stays off for the session.
+- **If the worker fails**, the save is done again on the main thread from the same snapshot: since 0.4.28 first
+  the worker's way once more (the `.saving` file, flushed and checked, then one rename), so an overwritten save
+  stays intact until its replacement is complete; if any step of that fails, straight into the file, the game's
+  way (it truncates the file first), which also works where a rename cannot and where the disk has room for the new
+  save only once the old one's space is freed. The bytes are the same archive either way. If that fails too, the
+  game's callback does not run (so no old autosave is deleted because of it), the game gets the same
+  `GameSaverException` it would have had, and the log says `SAVE FAILED`. After any worker failure background saving
+  stays off for the session, and the log says which way the save was written.
 - **If preparing fails**, nothing has been written: the feature turns itself off and the game's own code
   performs that save in full.
 
@@ -843,7 +847,7 @@ entities. Nearly all of those are trees, crops, paths, levees and platforms, who
 only managed fields of their own entity (growth progress, coordinates, a yield, an inventory's goods, a demolition
 mark) or stateless serializers, and write into their own entity's dictionaries. `SaveSnapshot = true` (the
 default) snapshots those entities on worker threads while the main thread snapshots the rest, then assembles the
-entities in the game's own order and lets the game's own code save the singletons. The save is the one the game
+entities in the game's own order and saves the singletons with the game's own loop. The save is the one the game
 would have written; only the thread that wrote part of it down differs.
 
 - An entity goes to a worker only if every persistent component on it is on the list in `SaveSnapshot.cs`, which
@@ -863,6 +867,20 @@ would have written; only the thread that wrote part of it down differs.
   alone. Beavers stay on the main thread (`Character` reads a transform, `MovementAnimator` reads Unity's time,
   `BehaviorManager` and everything else using the reference serializer), as does anything with a component the
   list does not name. Template names, a Unity name lookup, are read on the main thread for every entity first.
+- **Up to 0.4.27 most of those building entries did not take effect.** Every finished-pausable building (through
+  its workplace or goods consumption), dwelling, floodgate and gate also carries the game's `Automatable`, which was
+  not on the list and never shows in a save or the log, since its `Save` writes only while the building's
+  automation input is connected. In the owner's 02:07 save it alone kept about 340 buildings on the main thread
+  (177 workplaces, 104 dwellings, 46 floodgates). **Since 0.4.28** it is on the list with a condition checked per
+  entity: connected, its `Save` goes through the reference serializer, whose cache is a plain dictionary filled on
+  first use, so such a building stays on the main thread; not connected, the `Save` reads one field and one property
+  (`Transmitter != null`, a reference compare) and writes nothing, so the building may go to a worker. `Collect`
+  reads which it is on the main thread with the very expression the `Save` branches on (the same private field and
+  property getter, compiled), and nothing can connect an input while the main thread is inside `Create`. The once-
+  per-session line names the connected ones as `Timberborn.Automation.Automatable (automation input connected)`.
+  `WorkshopRandomNeedApplier` (workshops and zipline stations; its own time trigger's progress, the same `Save` as
+  `AreaNeedApplier`'s) joined the list too. Expected: about 340 more entities on the workers in that colony, about
+  400 left on the main thread (the 362 beavers, 36 zipline towers and a few others).
 - **Guarded by a hash (0.4.25).** Beside each name the list holds a hash (FNV-1a, 64 bits) of the IL bytes of that
   type's `Save(IEntitySaver)` as compiled, what the method does. A type is used on a worker only while its `Save`
   still hashes to what was read; after a game or fork update that changes one, that type keeps its entities on the
@@ -884,23 +902,57 @@ would have written; only the thread that wrote part of it down differs.
   patched implementation that is only reached through an interface call inside another mod's code, is not seen. Reviewed so far: MixedStorage's
   postfix on `SingleGoodAllower.Save` (it writes its storage's allocation into the same entity from a
   ConditionalWeakTable lookup; read at 1.0.0, the same since 0.5.8), which in 0.4.25 ran on the workers unchecked.
-  The harness reads the IL of every listed `Save` in the installed game (386 calls, 7 serializers), and with a
+  The harness reads the IL of every listed `Save` in the installed game (394 calls, 7 serializers), and with a
   stand-in registry checks that a foreign patch on a `Save`, on a callee, on a serializer or on a helper is refused,
   that a reviewed one and this mod's own are not, and that a changed registry is judged again.
-- Why those are safe: the simulation is not running during a save (the tick was finished first), the main thread
+- **Judged ahead of the first save (0.4.28).** The judging above (every listed type's IL walk, Harmony's registry,
+  the helpers' IL) was estimated at 0.2 to 0.5 s at the first save of a session, on top of that save's freeze. It
+  now runs at the first tick of every game scene (a prefix on `TickableSingletonService.TickAll` that does nothing
+  after that tick), which comes after every mod has patched what it patches while the scene loads, so the first
+  save normally finds the same number of patches and judges nothing; if the number changed after all, that save
+  judges again, as before. A line says how long it took (`SaveSnapshot: 93 listed components judged ahead of the
+  first save in N ms`). Harmony's list of every patched method is now taken once per judging pass and indexed by
+  name, where it was asked for again at every interface or virtual method a `Save` reached; the harness checks that
+  every verdict and its message are the same both ways over all listed types (with a stand-in registry of a few
+  hundred patched game methods, 1 fetch instead of 262), and that the types judged ahead get the verdicts the save
+  would have given them.
+- Why those are safe: the simulation is not running during a save (the tick was finished first, and since 0.4.28
+  the game's parallel tick has ended too, see the next section), the main thread
   is inside `Create` until the workers have joined, every worker writes only into its own entities' dictionaries,
   and the shared helpers they call (`PrimitiveTypeSerialization`, `SaveConversions`, `GoodAmountSerializer`,
   `GoodRegistryValueSerializer`) keep no state. The reference serializer's cache is not thread-safe, which is why
-  nothing that uses it is on the list.
+  nothing that uses it is on the list (`Automatable` only for the entities whose `Save` does not reach it).
 - If a worker throws for any reason, the results are discarded, the game's own `Create` runs, and the feature is
-  off for the session. The `SaveSnapshot:` stats line counts entities on workers and on the main thread and the
-  main thread's time per snapshot; once per session a second line names the components that kept entities on the
-  main thread, by how many entities carry them, so the list can be extended (since 0.4.25 every unlisted part of
-  an entity is counted, not only the first found).
+  off for the session. The same happens if a singleton's `Save` throws; the game's `Create` then saves every
+  singleton once more from the start. That is harmless: every singleton `Save` in the game (51) and in the installed
+  mods (BeaverBuddies MultiColony's 8, Optimized Local Housing's 1) only reads its own state and writes into the
+  world being built, except `DateSalter`'s two random draws for the save's salt, which BeaverBuddies keeps off the
+  game's random sequence in co-op; alone it only picks another salt. (BackgroundSave's fallback after a failed
+  preparation runs the snapshot twice the same way.)
+- The `SaveSnapshot:` stats line counts entities on workers and on the main thread and splits the main thread's
+  time per snapshot (0.4.28): collecting (template names and the per-entity check), its share of the entities (the
+  ones kept on it, then eligible ones it takes from the shared counter, with how many), waiting for the workers,
+  assembling, and the singletons, with the five slowest singletons by name:
+
+  ```
+  SaveSnapshot: 1 snapshot(s); per snapshot 8300 entities on worker threads and 3400 on the main thread; the main
+  thread spent 250 ms per snapshot: collecting 35, its share of the entities 110 (it took 900 of the workers' as
+  well), waiting for the workers 4, assembling 1, singletons 100 ms (workers 480 ms alongside); slowest singletons
+  per snapshot: WaterSimulator 30.1, TerrainMap 22.4, SoilContaminationSimulator 12.0, SoilMoistureSimulator 9.8,
+  GlobalGoodSamplingRegistry 6.5 ms
+  ```
+
+  (Illustration, not a measurement.) To time each singleton, the game's `SaveSingletons` loop is written out (the
+  repository's `GetSingletons<ISaveableSingleton>()`, one `SingletonSaver`, each singleton's `Save` in that order),
+  used only while both `SaveSingletons` overloads hash to what was read and nothing patches them; otherwise the
+  game's method runs, the singletons are timed as a whole and one line says why. The singletons stay on the main
+  thread: whether any of them is worth moving is what this line is for. Once per session a second line names the
+  components that kept entities on the main thread, by how many entities carry them, so the list can be extended
+  (since 0.4.25 every unlisted part of an entity is counted, not only the first found).
 - `SaveSnapshotVerify = true`, or the **Verify save snapshots** box on the settings page, takes the game's own
   entity snapshot as well at every save and compares every entity value by value (the game's own
   `SerializedEntity.Equals` compares lists by reference, so this mod has its own deep comparison). The mod's
-  snapshot is the one used, so the singletons are saved once, by the game's code; entity saves are pure reads, so
+  snapshot is the one used, so the singletons are saved once, in it; entity saves are pure reads, so
   taking them twice is safe. Measurement only; slower saves.
 - The workers are dedicated threads, not thread-pool tasks, because the pool may still be busy with this mod's
   route maps when a save starts; they and the main thread take eligible entities from one shared counter, so the
@@ -910,7 +962,52 @@ would have written; only the thread that wrote part of it down differs.
   `EntitySaver`, `ObjectSaver`, `SerializedEntity` and `SerializedWorld`: numbers, strings, lists and nested
   objects through a value serializer, a tenth of the entities kept on the calling thread; the result equals the
   sequential snapshot entity for entity and keeps the order, a throwing part comes back as a failure with nothing
-  thrown, and one worker or 64 give the same result.
+  thrown, and one worker or 64 give the same result. Since 0.4.28 also: a conditional type goes to a worker only in
+  its safe state, and is refused when its check cannot be built; the game's real `Automatable` goes only while not
+  connected (its `Save` then writes nothing, on a worker too) and SaveGuard follows it to `IsConnected` and the
+  reference serializer; the written-out singleton loop makes the same calls in the same order into the same world as
+  the game's `SaveSingletons` on a real `SerializedWorldFactory`; the whole prefix on that factory gives the split
+  stats line with the slowest singleton first; a patch on `SaveSingletons` leaves it to the game's method; a
+  singleton that throws hands the save to the game.
+
+### Waiting for the game's parallel tick before a save (always on, new in 0.4.28)
+
+Every tick ends by starting the game's parallel tick: the water simulation and soil moisture and contamination (and the
+water renderer's data) run as tasks on the game's own worker threads and write their maps until the next tick waits
+for them. The game's own save finishes the tick first (`TickableBucketService.FinishFullTick` ->
+`ForceFinishParallelTick`, which waits for those tasks). **BeaverBuddies skips that while it saves**: it moves every
+save to a tick boundary and then returns early from `FinishFullTick` while saving, and its `TickOnlyArrayFix`
+switches off the game's guard against reading those maps while the tasks may run. The snapshot could then read the
+water, moisture and contamination maps while a task still writes them. Today that window is small (the entities are
+snapshotted first and the parallel tick takes a few milliseconds), but a torn map in a save is a torn map.
+
+So at the start of every `SerializedWorldFactory.Create` a prefix at Harmony's first priority (before the save
+timing line's stage timer and before `SaveSnapshot`'s replacing prefix, and whether `SaveSnapshot` is on or not)
+waits until the game's `Parallelizer` has no task pending. In the game's own save nothing is pending by then and it
+costs one field read. The `Parallelizer` is the one `TickableSingletonService` uses, taken from its field when it
+loads and held weakly; one whose scene has unloaded is not waited for.
+
+It is the loop of the game's `Parallelizer.Wait`, not `Wait` itself: when a task has failed, `Wait` closes the game's
+worker threads, empties the failure queue and throws, and a caught exception there would turn the game's report of
+the failure at its next tick into an endless wait (a failed task never counts itself done). So it only watches the
+pending count and the failure queue, stops at once when a task has failed (the game reports it at its next tick, as
+it would have) or after 5 seconds, and the save goes on either way. It never calls `FinishParallelTick`
+(BeaverBuddies' postfix there ticks its buffer of late tickables, which would change the simulation on one computer
+only) or `ForceFinishParallelTick` (its event makes the maps apply pending modifications, which is simulation).
+Waiting changes nothing the tasks compute and nothing the game's next tick does, so it is not part of the
+simulation and not a setting. Its time shows in the save timing line's `everything else`. A stats line after saves:
+
+```
+ParallelTickWait: 1 snapshot(s); the game's parallel tick was still running at the start of 0 of them, waited 0.0
+ms in all (longest 0.0 ms)
+```
+
+Tested in the harness against the game's own `TickableSingletonService` and `Parallelizer` types (their pending
+count and failure queue set by the test, since the game's worker threads need Unity): nothing pending costs nothing,
+running tasks are waited for until the count is zero, a failed task ends the wait at once and stays in the game's
+queue, a tick that never ends is given up on, and Harmony orders the wait before the other prefixes on `Create`
+whatever the load order. BeaverBuddies should wait for the parallel tick itself before it saves; this is the mod's
+side of it until then.
 
 ### Memory clean-up right after a save (0.4.17 to 0.4.23, removed in 0.4.24)
 
@@ -1318,9 +1415,10 @@ contained: the maps a failing build leaves do not depend on the worker count, an
 are busy: every map must be complete and correct at the moment it is asked for. They do not run the game.
 
 `dotnet run --project tests -c Release -- --hashes` prints the current hash of every listed snapshot component's
-`Save` (game and, when installed, the BeaverBuddies MultiColony fork) and of the shared saving helpers, ready to
-paste into `SaveSnapshot.Allowed` and `SaveGuard.HelpersHash` after an update; the ordinary run checks every
-listed hash against what is installed.
+`Save` (game and, when installed, the BeaverBuddies MultiColony fork), of the shared saving helpers and of the
+game's `SaveSingletons` loop, ready to paste into `SaveSnapshot.Allowed`, `SaveGuard.HelpersHash` and
+`SaveSnapshot.SingletonLoopHash` after an update; the ordinary run checks every listed hash against what is
+installed.
 
 `tools/benchmark-timberborn.ps1` runs the game's built-in benchmark on a save with per-component tick timings
 (`-metrics`), for before/after comparisons of the game itself: `-benchmarkLength` makes the game start with every mod
