@@ -151,7 +151,10 @@ namespace LateGamePerformance
             // time), set into its own entity; the same Save as AreaNeedApplier's and the same read as Growable's.
             { "Timberborn.NeedApplication.WorkshopRandomNeedApplier", "a6fa1368d111df5c" },
             { "Timberborn.FireworkSystem.FireworkLauncher", "3845e4dd4e324f72" },
-            { "BeaverBuddies.Colonies.ColonyStamp", "ae23955dc80c940f" },
+            // Several reviewed versions may be listed, separated by '|'. BeaverBuddies MultiColony 1.4.0-beta2 to -beta5:
+            // `if (slot >= 0) Set(...)`; -beta12 adds `ColonyModeService.IsSeparateColonies &&`, a static bool read
+            // (`separateNow`), still nothing but its own field and a plain static read (reviewed 2026-09-22).
+            { "BeaverBuddies.Colonies.ColonyStamp", "ae23955dc80c940f|cb81466cba22c084" },
         };
 
         // One entity's share of the snapshot: what the game does per entity in SaveEntities/SaveEntity.
@@ -263,7 +266,7 @@ namespace LateGamePerformance
                 return Verdict.Refused;
             }
             string actual = SaveHash(type);
-            if (actual != expected)
+            if (Array.IndexOf(expected.Split('|'), actual) < 0)
             {
                 Log.Warning($"SaveSnapshot: the saving code of {type.FullName} is not the one that was read (it hashes to {actual}, " +
                             $"the one read to {expected}); its entities stay on the main thread until it is read again.");
