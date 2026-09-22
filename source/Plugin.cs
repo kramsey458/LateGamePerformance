@@ -221,6 +221,7 @@ namespace LateGamePerformance
         {
             HaulCache.OnTickStarted();
             MetricsDump.OnTickStarted();
+            UiThrottle.OnTickStarted();
             if (_config.StatsEveryTicks > 0 && ++_ticksSinceReport >= _config.StatsEveryTicks)
             {
                 _ticksSinceReport = 0;

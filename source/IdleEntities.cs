@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using HarmonyLib;
 using Timberborn.BaseComponentSystem;
 using Timberborn.TickSystem;
 
@@ -43,7 +44,6 @@ namespace LateGamePerformance
         {
             // The same keys as the game's _tickableEntities, so the same index means the same entity.
             public readonly SortedList<Guid, Record> Mirror = new SortedList<Guid, Record>();
-            public readonly List<TickableEntity> LeaveLater = new List<TickableEntity>();
             public bool Ticking;
         }
 
@@ -157,6 +157,9 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        // Last, so that another mod's prefix on the same method (BeaverBuddies hashes the game's list before the
+        // pass) still runs before the pass, and one that skips the pass skips this too.
+        [HarmonyPriority(Priority.Last)]
         internal static bool TickAllPrefix(object __instance)
         {
             if (!_active)
@@ -190,44 +193,41 @@ namespace LateGamePerformance
                 return true;
             }
             SortedList<Guid, Record> mirror = bucket.Mirror;
+            int total = all.Count;
             int ticked = 0;
-            try
+            // The game's loop, index for index; the flag replaces the visit. No try/finally: if an entity's Tick
+            // throws, the game leaves the bucket mid-pass (_isTicking set, removals pending) and so does this.
+            // Should the mirror stop being trusted mid-pass (a bookkeeping failure while an entity was added from
+            // inside a tick), every remaining entity is ticked, which is exactly the game's loop.
+            for (int i = 0; i < all.Count; i++)
             {
-                // The game's loop, index for index; the flag replaces the visit.
-                for (int i = 0; i < all.Count; i++)
+                if (!_active || mirror.Count != all.Count || mirror.Values[i].Awake)
                 {
-                    if (mirror.Values[i].Awake)
-                    {
-                        ticked++;
-                        TickEntity(all.Values[i]);
-                    }
+                    ticked++;
+                    TickEntity(all.Values[i]);
                 }
             }
-            finally
+            // What the game does at the end of its own pass, on both lists.
+            bucket.Ticking = false;
+            try
             {
-                // What the game does at the end of its own pass, on both lists.
-                bucket.Ticking = false;
-                try
+                _setTicking(__instance, false);
+                List<TickableEntity> toRemove = _toRemove(__instance);
+                for (int i = 0; i < toRemove.Count; i++)
                 {
-                    _setTicking(__instance, false);
-                    List<TickableEntity> toRemove = _toRemove(__instance);
-                    for (int i = 0; i < toRemove.Count; i++)
-                    {
-                        Guid id = toRemove[i].EntityId;
-                        all.Remove(id);
-                        mirror.Remove(id);
-                    }
-                    toRemove.Clear();
-                    bucket.LeaveLater.Clear();
+                    Guid id = toRemove[i].EntityId;
+                    all.Remove(id);
+                    mirror.Remove(id);
                 }
-                catch (Exception exception)
-                {
-                    Fail(exception);
-                }
+                toRemove.Clear();
+            }
+            catch (Exception exception)
+            {
+                Fail(exception);
             }
             _passes++;
             _ticked += ticked;
-            _leftOut += all.Count - ticked;
+            _leftOut += total - ticked;
             return false;
         }
 
@@ -365,6 +365,19 @@ namespace LateGamePerformance
         // game's list and counted, so the stats line shows it.
         private static void Resync(Bucket bucket, SortedList<Guid, TickableEntity> all)
         {
+            // Records of entities this bucket no longer holds go too.
+            List<TickableEntity> stale = new List<TickableEntity>();
+            foreach (KeyValuePair<TickableEntity, Record> pair in Records)
+            {
+                if (pair.Value.Bucket == bucket && !all.ContainsKey(pair.Key.EntityId))
+                {
+                    stale.Add(pair.Key);
+                }
+            }
+            foreach (TickableEntity entity in stale)
+            {
+                Forget(entity);
+            }
             bucket.Mirror.Clear();
             for (int i = 0; i < all.Count; i++)
             {

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
-using System.Threading.Tasks;
+using HarmonyLib;
 using Timberborn.EntitySystem;
 using Timberborn.SerializationSystem;
 using Timberborn.Persistence;
@@ -150,6 +150,8 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        // Last, so that measuring prefixes on Create (SaveTiming's stage timer) still run before it.
+        [HarmonyPriority(Priority.Last)]
         internal static bool CreatePrefix(object __instance, ref SerializedWorld __result)
         {
             if (!_active)
@@ -189,9 +191,13 @@ namespace LateGamePerformance
             _mainStopwatchTicks += Stopwatch.GetTimestamp() - stamp;
             _workerStopwatchTicks += workerTicks;
             _saves++;
+            foreach (Item item in items)
+            {
+                if (item.OnWorkers) _onWorkers++; else _onMain++;
+            }
             if (_verify)
             {
-                world = Verify(__instance, world, items, entities) ?? world;
+                Verify(__instance, world);
             }
             __result = world;
             return false;
@@ -204,6 +210,10 @@ namespace LateGamePerformance
         {
             List<Item> items = new List<Item>(registry.Entities.Count);
             List<IPersistentEntity> parts = new List<IPersistentEntity>();
+            if (!_unlistedLogged)
+            {
+                Unlisted.Clear();
+            }
             foreach (EntityComponent entity in registry.Entities)
             {
                 string template = retriever.GetTemplateName(entity);
@@ -234,8 +244,10 @@ namespace LateGamePerformance
             return items;
         }
 
-        // Every item's SerializedEntity (null where nothing was written), workers over the eligible ones in fixed
-        // strides while the main thread does the rest, then a join. Never throws: a failure comes back instead.
+        // Every item's SerializedEntity (null where nothing was written). Dedicated threads (the thread pool may
+        // be busy with this mod's route maps) take eligible items from a shared counter while the main thread
+        // snapshots the rest, then takes eligible items too until none are left, then joins. Which thread did an
+        // item does not matter: every result goes to its own slot. Never throws: a failure comes back instead.
         internal static SerializedEntity[] Build(List<Item> items, int workers, out Exception failure, out long workerTicks)
         {
             SerializedEntity[] results = new SerializedEntity[items.Count];
@@ -249,28 +261,38 @@ namespace LateGamePerformance
             }
             Exception firstFailure = null;
             long ticks = 0;
-            int count = Math.Min(Math.Max(1, workers), Math.Max(1, eligible.Count));
-            Task[] tasks = new Task[eligible.Count > 0 ? count : 0];
-            for (int w = 0; w < tasks.Length; w++)
+            int next = -1;
+            void TakeEligible()
             {
-                int worker = w;
-                tasks[w] = Task.Run(() =>
+                while (true)
+                {
+                    int k = Interlocked.Increment(ref next);
+                    if (k >= eligible.Count)
+                    {
+                        return;
+                    }
+                    int index = eligible[k];
+                    results[index] = Snapshot(items[index]);
+                }
+            }
+            int count = Math.Min(Math.Max(1, workers), eligible.Count);
+            Thread[] threads = new Thread[count];
+            for (int w = 0; w < count; w++)
+            {
+                threads[w] = new Thread(() =>
                 {
                     long started = Stopwatch.GetTimestamp();
                     try
                     {
-                        for (int k = worker; k < eligible.Count; k += count)
-                        {
-                            int index = eligible[k];
-                            results[index] = Snapshot(items[index]);
-                        }
+                        TakeEligible();
                     }
                     catch (Exception exception)
                     {
                         Interlocked.CompareExchange(ref firstFailure, exception, null);
                     }
                     Interlocked.Add(ref ticks, Stopwatch.GetTimestamp() - started);
-                });
+                }) { IsBackground = true, Name = "LateGamePerformance save snapshot " + w };
+                threads[w].Start();
             }
             try
             {
@@ -281,23 +303,25 @@ namespace LateGamePerformance
                         results[i] = Snapshot(items[i]);
                     }
                 }
+                TakeEligible();
             }
             catch (Exception exception)
             {
                 Interlocked.CompareExchange(ref firstFailure, exception, null);
             }
-            try
+            for (int w = 0; w < count; w++)
             {
-                Task.WaitAll(tasks);
-            }
-            catch (Exception exception)
-            {
-                Interlocked.CompareExchange(ref firstFailure, exception, null);
+                try
+                {
+                    threads[w].Join();
+                }
+                catch (Exception exception)
+                {
+                    Interlocked.CompareExchange(ref firstFailure, exception, null);
+                }
             }
             failure = firstFailure;
             workerTicks = ticks;
-            _onWorkers += eligible.Count;
-            _onMain += items.Count - eligible.Count;
             return failure == null ? results : null;
         }
 
@@ -326,14 +350,15 @@ namespace LateGamePerformance
             return world;
         }
 
-        // The game's own snapshot as well, compared entity by entity; the game's is the one used.
-        private static SerializedWorld Verify(object factory, SerializedWorld ours, List<Item> items, SerializedEntity[] entities)
+        // The game's own entity snapshot as well, compared entity by entity. The singletons are saved once, by the
+        // game's code, in the snapshot that is used (a singleton's Save may have side effects); the entities are
+        // pure reads, so taking them twice is safe.
+        private static void Verify(object factory, SerializedWorld ours)
         {
             try
             {
                 SerializedWorld theirs = new SerializedWorld(CurrentVersion());
                 _saveEntities(factory, theirs);
-                _saveSingletons(factory, theirs);
                 List<SerializedEntity> a = new List<SerializedEntity>(ours.Entities());
                 List<SerializedEntity> b = new List<SerializedEntity>(theirs.Entities());
                 long mismatches = 0;
@@ -353,13 +378,11 @@ namespace LateGamePerformance
                     }
                 }
                 _verifyMismatches += mismatches;
-                return theirs;
             }
             catch (Exception exception)
             {
                 _verify = false;
                 Log.Warning("SaveSnapshot verify failed and is off for this session; the snapshot itself is unaffected: " + exception);
-                return null;
             }
         }
 

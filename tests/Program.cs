@@ -46,7 +46,8 @@ internal static class Program
                      "Timberborn.MapStateSystem", "Timberborn.TerrainSystem", "Timberborn.BlockSystem", "Timberborn.WalkingSystem",
                      "Timberborn.CoreSound", "Timberborn.CameraSystem", "Timberborn.SoundSystem", "Timberborn.StatusSystem",
                      "Timberborn.EntityPanelSystem", "Timberborn.TimbermeshAnimations", "Timberborn.BaseComponentSystem",
-                     "Timberborn.EntitySystem", "Timberborn.TemplateSystem", "Timberborn.Versioning" })
+                     "Timberborn.EntitySystem", "Timberborn.TemplateSystem", "Timberborn.Versioning", "Timberborn.TopBarSystem",
+                     "Timberborn.BuildingsReachability" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -98,7 +99,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 94, $"94 patches declared (found {patchCount})");
+        Check(patchCount == 96, $"96 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -227,6 +228,13 @@ internal static class Program
         }
         Check(statusRuns == 25 && panelRuns == 50, $"ui throttle: 25 status and 50 panel updates in 100 frames (got {statusRuns}, {panelRuns})");
         Check(UiThrottle.PanelDue(1, true), "ui throttle: a newly shown entity is refreshed on its first frame");
+        int topBar = 0, reach = 0;
+        for (int i = 0; i < 80; i++)
+        {
+            topBar += UiThrottle.TopBarDue(i) ? 1 : 0;
+            reach += UiThrottle.ReachabilityDue(i) ? 1 : 0;
+        }
+        Check(topBar == 20 && reach == 10, $"ui throttle: the top bar every fourth frame and a selected entity's reachability every eighth tick ({topBar}, {reach})");
     }
 
     private static void TestConfigParsing()

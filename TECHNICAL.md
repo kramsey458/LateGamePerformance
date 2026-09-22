@@ -521,7 +521,10 @@ that becomes eligible (or is added) before the entity being ticked shifts it and
 one after it is reached. The mirror adds an entity that wakes up mid-pass at once when its id sorts after the
 entity being ticked, and after the pass when it sorts before. Entities that fall asleep or are removed mid-pass
 leave after the pass (ticking a sleeping entity does nothing), and the game's own deferred removals
-(`_entitiesToRemove`) are applied at the end of the pass as the game does. The harness
+(`_entitiesToRemove`) are applied at the end of the pass as the game does. If an entity's tick throws, the pass is
+left exactly as the game leaves it (mid-pass, removals pending); should the mirror stop being trusted in the middle
+of a pass, every remaining entity is ticked, which is the game's loop. The prefix runs at Harmony's last priority,
+so BeaverBuddies' own prefix on the same method, which hashes the game's list before the pass, still runs first. The harness
 (`tests/IdleEntitiesTests.cs`) replays a scripted history of 300 passes over the game's real bucket, entities
 and metered components, with components switched on and off and entities added and removed both between passes
 and from inside another entity's tick, and requires the sequence of effective ticks to be identical to a model of
@@ -613,8 +616,14 @@ would have written; only the thread that wrote part of it down differs.
   main thread's time per snapshot; once per session a second line names the components that kept entities on the
   main thread, by how many entities carry them, so the list can be extended.
 - `SaveSnapshotVerify = true`, or the **Verify save snapshots** box on the settings page, takes the game's own
-  snapshot as well at every save, compares every entity (the game's own `SerializedEntity.Equals`) and uses the
-  game's. Measurement only; slower saves.
+  entity snapshot as well at every save and compares every entity value by value (the game's own
+  `SerializedEntity.Equals` compares lists by reference, so this mod has its own deep comparison). The mod's
+  snapshot is the one used, so the singletons are saved once, by the game's code; entity saves are pure reads, so
+  taking them twice is safe. Measurement only; slower saves.
+- The workers are dedicated threads, not thread-pool tasks, because the pool may still be busy with this mod's
+  route maps when a save starts; they and the main thread take eligible entities from one shared counter, so the
+  main thread is never idle while workers still have entities left. The prefix runs at Harmony's last priority so
+  that measuring prefixes on `Create` (the save timing line's snapshot stage) still run.
 - The harness (`tests/SaveSnapshotTests.cs`) runs the builder over 3,000 fake entities with the game's real
   `EntitySaver`, `ObjectSaver`, `SerializedEntity` and `SerializedWorld`: numbers, strings, lists and nested
   objects through a value serializer, a tenth of the entities kept on the calling thread; the result equals the
@@ -652,6 +661,11 @@ picked up within a fraction of a second. The `SoundListener:` stats line says in
 - `EntityPanel.UpdateSingleton` refreshes every fragment of the selected entity's panel every frame, the largest
   single source of garbage among the game's systems at about 120 KB/s. It runs every second frame now, and always
   on the frame a different entity is shown.
+- `TopBarPanel.UpdateSingleton` refreshes the top bar's counters every frame (67 us). Every fourth frame (0.4.22).
+- `EntityReachabilityStatus.Tick` is a tick component the game switches on only while its entity is selected; it
+  then asks every reachability part of that entity on every tick, and the selected beaver in the logged session
+  cost up to ten times an ordinary one. It runs every eighth tick (0.4.22). Selection is per player, so this
+  status was never simulation state; the icon it toggles appears up to eight ticks later.
 
 The `UiThrottle:` stats line counts both. Neither is read by the simulation.
 

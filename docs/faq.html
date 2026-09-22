@@ -51,6 +51,7 @@
       <ul>
         <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.14 has been played since and reported as working well; what 0.4.15 to 0.4.20 add has not been played yet).</li>
         <li>On a computer that had memory clean-up freezes of most of a second about once a minute, incremental garbage collection removed them and made the frame rate much steadier at high tick rates.</li>
+        <li>Previews 0.4.21 and 0.4.22 (not yet played) stop visiting the ten thousand trees, crops and paths that have nothing to tick, and take most of a save's snapshot on worker threads.</li>
         <li>0.4.16 to 0.4.18 (not yet played) are aimed at what a logged 354-beaver session showed: the second of stutter after every autosave and memory clean-up, and the single slow beaver ticks and end-of-day slump from terrain path searches that restarted from the same tile.</li>
       </ul>
       <p>There is no controlled frame rate benchmark yet. The mod logs its own <a href="#timing">timing line</a> so you can see your colony's numbers.</p>

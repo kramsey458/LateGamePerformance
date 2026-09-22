@@ -296,6 +296,7 @@
       <div class="notice" style="margin:0">
         <p><strong>Not yet verified</strong></p>
         <ul class="checks no">
+          <li>Previews <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.21">0.4.21</a> and <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.22">0.4.22</a> (pre-releases, not yet played): trees, crops and paths with nothing to tick are passed over in the tick loop, and the save snapshot of those same entities is taken on worker threads, with a verify box. Both are checked against the game's real classes in the harness and were code-reviewed; the game running with them is not yet tested.</li>
           <li>Everything added in 0.4.15 to 0.4.20 (resumed terrain searches, the catch-up limit after a long frame, the memory clean-up inside the save frame, the audio listener and interface work every few frames, off-screen animation, the settings-page boxes) is tested against the game's assemblies but has not been played in a colony yet. A code review of all of it was done before 0.4.20 and its findings fixed.</li>
           <li>0.4.14 has been played and reported as working well, but no stats lines from that session have been read yet, so the in-game savings are not measured.</li>
           <li>The tree search against the game's own search inside a running game (the model comes from reading the game's code).</li>
