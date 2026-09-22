@@ -46,7 +46,7 @@
         <li>Built against Timberborn 1.1.2.4</li>
       </ul>
       <div class="notice ok" role="note" data-release-pinned="0.4.23">
-        <p><strong>Played in a real late-game colony, most recently as 0.4.23.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8), was reported as working well as 0.4.14, and as 0.4.23 as working amazingly well. The stats lines from those sessions have not been read yet, so the savings are not measured. <a href="#status">See exactly what is and isn't tested.</a></p>
+        <p><strong>Played in a real late-game colony, most recently as 0.4.23.</strong> In a save of about 350 beavers it gave noticeably fewer lag spikes (played as 0.4.8), was reported as working well as 0.4.14, and as 0.4.23 as working amazingly well. The stats lines of one 0.4.23 session have been read and turned into the next round, preview <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.25">0.4.25</a> (a pre-release, not yet played), but no feature has been measured before and after in the same save. <a href="#status">See exactly what is and isn't tested.</a></p>
       </div>
     </div>
     <figure class="diagram">
@@ -279,7 +279,7 @@
       </div>
       <div class="tiles wide" style="grid-template-columns:repeat(2,1fr)">
         <div class="tile"><div class="t-value">about 350</div><div class="t-label">beavers in the late-game save it was played in</div><div class="t-note">noticeably fewer lag spikes</div></div>
-        <div class="tile"><div class="t-value">297</div><div class="t-label">automated checks pass</div><div class="t-note">including 106 patch targets checked against the game</div></div>
+        <div class="tile"><div class="t-value">297</div><div class="t-label">automated checks pass</div><div class="t-note">including 106 patch targets checked against the game (335 and 119 in preview 0.4.25)</div></div>
         <div class="tile"><div class="t-value">0</div><div class="t-label">differences from the game's tree search</div><div class="t-note">in 4,000 random forests</div></div>
         <div class="tile"><div class="t-value">9.5 million</div><div class="t-label">route map nodes compared with the game's own</div><div class="t-note">every one identical</div></div>
       </div>
@@ -300,7 +300,7 @@
         <ul class="checks">
           <li>Played in a late-game save of about 350 beavers: noticeably fewer lag spikes as 0.4.8, reported as working well as 0.4.14 and as working amazingly well as 0.4.23.</li>
           <li>Played in multiplayer sessions on two computers, including a 35-minute session logged on both.</li>
-          <li>297 automated checks pass against the installed game's own assemblies, including 106 patch targets.</li>
+          <li>297 automated checks pass against the installed game's own assemblies, including 106 patch targets; the 0.4.25 preview has 335, including 119.</li>
           <li>The tick loop that passes over entities with nothing to tick, the save snapshot on worker threads, the plant water levels from the water worker and the soil lists from the soil workers are each tested against the game's real classes: the same ticks in the same order, the same save entity for entity, the same levels and events, the same cells.</li>
           <li>Resumed terrain searches run against the game's real search classes on a random terrain: every search from scratch is identical node for node, and 1,200 searches in pricing runs all give the game's distance.</li>
           <li>The water map copy made on a worker thread holds the same bytes as the game's own, and the soil scans update the same cells in the same order, tested against the game's real classes.</li>

@@ -72,10 +72,10 @@
     <div class="answer">
       <p>Yes, but none of them change what the game simulates.</p>
       <ul>
-        <li><strong>In the game</strong> (<strong>Mods &gt; Late Game Performance</strong>): <strong>Incremental garbage collection</strong>, <strong>Warn when garbage collection is not incremental</strong>, <strong>Record per-component timings</strong> and <strong>Adaptive garbage collection pacing (experimental)</strong>.</li>
+        <li><strong>In the game</strong> (<strong>Mods &gt; Late Game Performance</strong>): <strong>Incremental garbage collection</strong>, the one decision that is yours to make because it edits a file in the game's folder, and three measurement boxes for a test session: <strong>Diagnostics timers</strong>, <strong>Verify terrain path searches</strong> and <strong>Verify save snapshots</strong>. The 0.4.25 preview adds <strong>Verify every feature</strong> and two one-off memory measurements that untick themselves.</li>
         <li><strong>In <code>version-1.1\LateGamePerformance.cfg</code></strong>: testing switches, how the work is split over threads, and which log lines are written. Restart after editing.</li>
       </ul>
-      <p>The hauling cache, the route maps and the tree and plant search are always on, the same for everyone. To run without one of them, disable the mod.</p>
+      <p>Everything that affects the simulation (the hauling cache, the route maps, the tree and plant search and the rest) is always on, the same for everyone on the same version. To run without one of them, disable the mod.</p>
     </div>
   </details>
 
@@ -86,7 +86,7 @@
 
   <details id="get">
     <summary>Where do I get it?</summary>
-    <div class="answer"><p>From the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest">GitHub releases page</a>, as a ZIP you extract into your Mods folder. It also needs Harmony and Mod Settings from the Steam Workshop. See the <a href="install.html">install guide</a>.</p></div>
+    <div class="answer"><p>From the <a href="https://github.com/timbermods/LateGamePerformance/releases/latest">GitHub releases page</a>, as a ZIP you extract into your Mods folder. It also needs Harmony and Mod Settings from the Steam Workshop. See the <a href="install.html">install guide</a>. Previews are on the same page, marked pre-release: the current one is <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.25">0.4.25</a>, which has not been played yet; its notes say what it changes and what to look for in the log.</p></div>
   </details>
 
   <h2 id="co-op-section">Multiplayer and BeaverBuddies</h2>
@@ -144,7 +144,7 @@
 
   <details id="verify">
     <summary>Can I check it against the game?</summary>
-    <div class="answer"><p>Yes. <code>HaulCacheVerify = true</code> and <code>YielderSearchVerify = true</code> in <code>LateGamePerformance.cfg</code> run the game's own code as well, compare, log any difference, and use the game's result. They are slower than no mod, so use them for a test session and switch them off afterwards. In the stats lines look for <code>verify mismatches 0</code>. Any mismatch is a bug worth reporting.</p></div>
+    <div class="answer"><p>Yes. Every feature that replaces a game calculation has a verify setting in <code>LateGamePerformance.cfg</code> (<code>HaulCacheVerify</code>, <code>YielderSearchVerify</code>, <code>PlantWaterVerify</code>, <code>DistrictCountsVerify</code>, <code>WaterMapCopyVerify</code>, <code>SoilScansVerify</code>, <code>HomeSearchVerify</code>, <code>TerrainSearchVerify</code> and <code>SaveSnapshotVerify</code>; the last two are also boxes on the settings page). Each runs the game's own code as well, compares and logs any difference, and all but the terrain search check then use the game's result. They are slower than no mod, so use them for a test session and switch them off afterwards. In the stats lines look for <code>verify mismatches 0</code>; any mismatch is a bug worth reporting. The 0.4.25 preview adds one box, <strong>Verify every feature</strong>, that turns all of them on for a session.</p></div>
   </details>
 
   <h2 id="gc-section">Memory clean-up (garbage collection)</h2>
