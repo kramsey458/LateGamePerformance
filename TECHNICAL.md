@@ -1453,63 +1453,14 @@ Since `TerrainSearch` runs at Harmony's last priority (see Build and test) the t
 terrain A* numbers include those searches, timed as the mod answers them (resumed or from its previous search).
 Numbers from before and after that change are not comparable; the `TerrainSearch:` stats line is unchanged.
 
-### Walking without moving the beaver at every step (always on, new in 0.4.28)
+### Walking: PathFollow (0.4.28 only, removed in 0.4.29)
 
-Every tick every walking beaver is moved along its path by `PathFollower.MoveAlongPath`, in steps of at most a tenth
-of a tile: about twenty steps per beaver per tick. Each step reads the beaver's Unity transform twice (the position to
-move from, and "has it reached the last corner") and writes it once, and a write moves the whole beaver: its model,
-its status icons and their colliders. In the 0.4.23 session `WalkerMover` took 2.1 ms per tick, about 26 us per beaver
-that moved.
-
-The mod runs the game's loop with the position kept in a local instead of in the transform, and writes the transform
-where something outside the loop could look at it: right before each call of the speed provider (the walker's speed
-manager looks up the water at the beaver's tile when a corner is reached), read back right after it, and once after
-the loop, before the game's own smoothing corner, the animator and the `MovedAlongPath` event (ziplines, tubes). The
-result is the game's to the bit:
-
-- Everything before the loop is the game's own private methods, called with the real transform. The loop is the
-  game's, statement for statement, with the game's own `MoveInDirection`, `InStoppingProximity`,
-  `Vector3.Distance` and `GetMovementSpeed`, and the one expression it computes itself (the corner's time) written the
-  same way; only where the game reads the transform, the mod reads its local.
-- The local holds exactly what the transform would: a beaver is the root of its entity (the game instantiates every
-  entity without a parent), and a root transform gives back the floats it was given. A beaver whose transform has a
-  parent (a wonder's pilot) is left to the game's method. Nothing reads the transform between two writes but the speed
-  provider, which is handed the right one, and Unity runs nobody's code when a position is written.
-- The corners go into a list of the mod's and are copied into the game's after the loop. If anything throws before
-  that, the beaver, its corner index and (in verify mode) its corners are put back, the feature turns itself off (see
-  A simulation feature that turns itself off) and the game's own method moves it.
-- A transpiler on `MoveAlongPath`, or another mod's patch on the two helpers the loop no longer calls
-  (`AddAnimatedPathCorner`, `ReachedLastPathCorner`), would not run in the mod's loop; then every move is the game's,
-  with one log line. Other mods' prefixes and postfixes on `MoveAlongPath` run as before (the prefix runs at Harmony's
-  last priority). `WalkerMove` still calls `MoveAlongPath` through its patched entry point, with its kept delegate as the
-  speed provider.
-
-`PathFollowVerify = true` runs the game's loop first, through the game's own `AddAnimatedPathCorner`,
-`ReachedLastPathCorner` and `AddSmoothingAnimatedPathCorner`, reading and writing the real transform as the game does,
-puts the beaver back, runs the mod's loop, and compares the final position, the corner index and every animated
-corner bit for bit. This is the check of the one thing the harness cannot run: Unity's transform. The mod's move is
-kept; the animator and the event run once.
-
-The tests copy the IL of `MoveAlongPath` and of every private method it calls, as compiled in the installed game, into
-dynamic methods whose Unity calls (the transform, `Time.time`, the animator: nine calls) go to a stand-in that stores
-exactly the floats it is given; the rest is the game's code, including the real `NavigationService`'s stopping
-distance. The mod's prefix moves a second `PathFollower` over the same paths with its game-method delegates pointed at
-those copies: 113,000 moves in 1,500 random walks (steps of every length including none and ones below the game's
-threshold, corners with instant speed, speed changes, ticks of a fortieth to half a second, new paths mid-walk,
-verify mode on in every fourth walk) are identical to the game's, bit for bit: position, corner index, animated
-corners, what the animator is handed, the `MovedAlongPath` events. They also check that a beaver with a parent and a
-foreign patch are left to the game, that verify mode on a transform that does not give back what it was given counts
-a mismatch and still hands over the mod's move, and that a failure after the transform was written puts everything
-back and hands the move to the game, which then moves the beaver as without the mod.
-
-```
-[LateGamePerformance] Last 1000 ticks. PathFollow: 75000 moves along a path, 19.6 steps each, in 21.0 ms (0.28 us
-each); the transform was written 76500 times where the game writes it 1545000 times; 0 moves left to the game (a
-parent transform or another mod's patch)
-```
-
-(An illustration, not a measurement: how much a move costs in the game now is what the line is there to show; the
-harness has no Unity to measure the transform writes that are left out.)
+0.4.28 replaced `PathFollower.MoveAlongPath` with a copy that kept the walking beaver's position in a variable between
+its 0.1-tile steps, writing the transform about 11 times less often. Played in the 362-beaver colony it gained nothing:
+183 moves per tick at 9.3 us each, and `WalkerMover` stayed at 2.2-2.3 ms per tick against 2.1 on 0.4.23, so the
+transform writes were not where the time goes. A copy of a 50-line simulation method that rests on Unity returning the
+exact floats it was given is risk without a return, so 0.4.29 removes it and walking is the game's own code again.
+A `PathFollowVerify` line left in an old settings file is ignored.
 
 ### Reachability areas without a table per update (always on, new in 0.4.28)
 
@@ -1729,7 +1680,6 @@ own versions of these only read.
 | `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
 | `HomeSearchVerify` | `false` | Run the game's own walk for a beaver to move in as well and compare the pick, and ask every beaver whose answer was kept again; logs and counts mismatches, the mod's pick moves in. For testing. |
-| `PathFollowVerify` | `false` | Run the game's path-following loop through the beaver's transform first, then the mod's, and compare the move bit for bit; logs and counts mismatches, the mod's move is kept. For testing. |
 | `ReachabilityVerify` | `false` | Let the game's own flood fill the game's own area table as well and compare every node's area; logs and counts mismatches, the mod's answer is given. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
 | `SaveSnapshot` | `true` | Snapshot trees, crops, paths, levees and platforms on worker threads at every save. Saving only; may differ between peers. |

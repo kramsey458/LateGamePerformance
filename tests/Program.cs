@@ -178,7 +178,7 @@ internal static class Program
             TerrainReach.CreateFeature(), MapChanges.CreateFeature(), BehaviorLog.CreateFeature(), WalkerMove.CreateFeature(),
             PhysicsSync.CreateFeature(), ShaftAnimators.CreateFeature(),
             Plugin.CreateTickFeature(), ParallelTickWait.CreateFeature(),
-            PathFollow.CreateFeature(new Config()), Reachability.CreateFeature(new Config())
+            Reachability.CreateFeature(new Config())
         };
         int patchCount = 0;
         foreach (Feature feature in features)
@@ -193,7 +193,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 130, $"130 patches declared (found {patchCount})");
+        Check(patchCount == 129, $"129 patches declared (found {patchCount})");
         TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
         TestHaulCacheFlush();
@@ -208,7 +208,6 @@ internal static class Program
         SaveSnapshotTests.Run(Check);
         HomeSearchTests.Run(Check);
         RenderingTests.Run(Check);
-        PathFollowTests.Run(Check);
         ReachabilityTests.Run(Check);
         TestTurnedOff();
         string[] expectedWarnings =
@@ -228,7 +227,6 @@ internal static class Program
             "ParallelTickWait: one of the game's parallel tasks has failed", "ParallelTickWait: the game's parallel tick was still running after",
             "HomeSearch verify: the mod moves in", "HomeSearch verify: the kept answer for", "HomeSearch failed",
             "PhysicsSync failed", "AnimatorCulling failed", "ShaftAnimators failed",
-            "PathFollow verify: a move differs from the game's own loop", "PathFollow failed",
             "Reachability verify: node", "Reachability failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
@@ -248,7 +246,7 @@ internal static class Program
     private static void TestTurnedOff()
     {
         string[] off = TurnedOff.Names();
-        Check(off.SequenceEqual(new[] { "RouteMaps", "TerrainMaps", "PlantWater", "DistrictCounts", "HomeSearch", "PathFollow", "Reachability" }),
+        Check(off.SequenceEqual(new[] { "RouteMaps", "TerrainMaps", "PlantWater", "DistrictCounts", "HomeSearch", "Reachability" }),
             $"turned off: each simulation feature a forced failure above turned off was reported, once ({string.Join(", ", off)})");
         bool[] all = Enumerable.Repeat(true, Plugin.SimulationFeatureNames.Length).ToArray();
         string one = Plugin.TurnedOffLine(all, new[] { "RouteMaps" });
@@ -527,7 +525,7 @@ internal static class Program
         bool[] allStarted = Enumerable.Repeat(true, Plugin.SimulationFeatureNames.Length).ToArray();
         Check(Plugin.SimulationFeaturesLine(allStarted) ==
               "Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, " +
-              "WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on, PathFollow on, Reachability on. " +
+              "WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on, Reachability on. " +
               "These are the same for every player on this version.",
             "startup: one line says which simulation features are running");
         bool eachCalledOut = true;
@@ -541,9 +539,9 @@ internal static class Program
         }
         Check(eachCalledOut && Plugin.SimulationFeatureNames.Distinct().Count() == allStarted.Length,
             "startup: a feature that could not start is called out, each by its own name");
-        Check(config.PathFollow && config.Reachability && !typeof(Config).GetProperty(nameof(Config.PathFollow)).CanWrite &&
-              !typeof(Config).GetProperty(nameof(Config.Reachability)).CanWrite,
-            "config: PathFollow and Reachability are fixed, not settings");
+        Check(config.Reachability && !typeof(Config).GetProperty(nameof(Config.Reachability)).CanWrite &&
+              typeof(Config).GetProperty("PathFollow") == null && typeof(Config).GetField("PathFollowVerify") == null,
+            "config: Reachability is fixed, not a setting; PathFollow (0.4.28) is gone");
         Check(!config.RecordTimings, "config: per-component timings are off unless asked for");
         config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true", "RecordTimings = true" }));
         Check(config.RouteMapsWorkers == 5 && config.YielderSearchVerify && config.RecordTimings, "config: key case-insensitive, trailing comment, testing switches still work");
@@ -552,8 +550,8 @@ internal static class Program
         Check(all.VerifyAll && all.HaulCacheVerify && all.YielderSearchVerify && all.PlantWaterVerify && all.DistrictCountsVerify &&
               all.WaterMapCopyVerify && all.SoilScansVerify && all.TerrainSearchVerify && all.HomeSearchVerify && all.SaveSnapshotVerify &&
               !new Config().VerifyAll, "config: VerifyAll switches on every verify mode, off by default");
-        Check(all.PathFollowVerify && all.ReachabilityVerify && !new Config().PathFollowVerify && !new Config().ReachabilityVerify,
-            "config: VerifyAll switches on the path follow and reachability checks too, off by default");
+        Check(all.ReachabilityVerify && !new Config().ReachabilityVerify,
+            "config: VerifyAll switches on the reachability check too, off by default");
         Check(all.AnimatorLod && all.AnimatorLodDistance == 0 && new Config().AnimatorLodDistance == 80,
             "config: the animator distance is clamped at 0 and 80 tiles by default");
         Check(all.UnityMarkers == "Camera.Render; Culling ;; Culling" &&

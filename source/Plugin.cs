@@ -16,7 +16,7 @@ namespace LateGamePerformance
         {
             "HaulCache", "RouteMaps", "YielderSearch", "TerrainMaps", "PlantWater", "DistrictCounts", "WaterMapCopy",
             "SoilScans", "TerrainSearch", "IdleEntities", "HomeSearch",
-            "PathFollow", "Reachability"
+            "Reachability"
         };
 
         private static Config _config = new Config();
@@ -129,11 +129,6 @@ namespace LateGamePerformance
             {
                 HomeSearch.Activate();
             }
-            bool pathFollow = config.PathFollow && PathFollow.CreateFeature(config).Apply(HarmonyId);
-            if (pathFollow)
-            {
-                PathFollow.Activate();
-            }
             bool reachability = config.Reachability && Reachability.CreateFeature(config).Apply(HarmonyId);
             if (reachability)
             {
@@ -172,7 +167,7 @@ namespace LateGamePerformance
             {
                 haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts, waterMapCopy, soilScans,
                 terrainSearch, idleEntities, homeSearch,
-                pathFollow, reachability
+                reachability
             };
             Log.Info(SimulationFeaturesLine(_started));
             if (config.WaterRendering)
@@ -316,7 +311,6 @@ namespace LateGamePerformance
             HomeSearch.VerifyEnabled = on || cfg.HomeSearchVerify;
             TerrainSearch.VerifyEnabled = on || cfg.TerrainSearchVerify;
             SaveSnapshot.VerifyEnabled = on || cfg.SaveSnapshotVerify;
-            PathFollow.VerifyEnabled = on || cfg.PathFollowVerify;
             Reachability.VerifyEnabled = on || cfg.ReachabilityVerify;
         }
 
@@ -407,7 +401,7 @@ namespace LateGamePerformance
                              TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), HomeSearch.TakeStatsLine(),
                              TerrainReach.TakeStatsLine(), BehaviorLog.TakeStatsLine(), WalkerMove.TakeStatsLine(),
                              TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine(),
-                             ParallelTickWait.TakeStatsLine(), PathFollow.TakeStatsLine(), Reachability.TakeStatsLine()
+                             ParallelTickWait.TakeStatsLine(), Reachability.TakeStatsLine()
                          })
                 {
                     if (line != null)
