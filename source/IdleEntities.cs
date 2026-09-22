@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using Timberborn.BaseComponentSystem;
 using Timberborn.TickSystem;
@@ -21,9 +22,12 @@ namespace LateGamePerformance
     // walking the components; only entities with a component switched on are ticked. A component can only be
     // switched through BaseComponent.EnableComponent and DisableComponent (the setter is private), so those two
     // are hooked and flip the flag; TickableEntityBucket.Add and Remove keep the keys in step, with the same
-    // deferral of removals during a pass that the game has. An entity whose tick components are all disabled
-    // does nothing when ticked, and the index is the game's, so everything the game would do, including its own
-    // quirk of ticking an entity again when something is inserted before it mid-pass, happens exactly as before.
+    // deferral of removals during a pass that the game has. Each pass first makes sure the keys still match the
+    // game's list, rebuilding the mirror if not; the walk over the keys for that is skipped while the list's own
+    // change counter has not moved since they last matched and no Add or Remove came through the hooks (every 128th
+    // pass walks them anyway). An entity whose tick components are all disabled does nothing when ticked, and the
+    // index is the game's, so everything the game would do, including its own quirk of ticking an entity again when
+    // something is inserted before it mid-pass, happens exactly as before.
     // The game's own list is untouched; BeaverBuddies reads it for its per-tick hash.
     //
     // Simulation feature: always on, the same on every computer. Self-disables on any bookkeeping exception and
@@ -45,13 +49,25 @@ namespace LateGamePerformance
             // The same keys as the game's _tickableEntities, so the same index means the same entity.
             public readonly SortedList<Guid, Record> Mirror = new SortedList<Guid, Record>();
             public bool Ticking;
+            // The game's list and its change counter when its keys were last found equal to the mirror's (the list is
+            // null once a postfix has changed the mirror's keys since), and the passes since the keys were last walked
+            // (see Unchanged).
+            public SortedList<Guid, TickableEntity> CheckedList;
+            public int CheckedVersion;
+            public int PassesSinceWalk;
         }
+
+        // A bucket's keys are walked on at least every 128th of its passes, even with the list's counter unmoved.
+        private const int WalkEvery = 128;
 
         private static Func<object, SortedList<Guid, TickableEntity>> _entities;
         private static Func<object, List<TickableEntity>> _toRemove;
         private static Action<object, bool> _setTicking;
         private static Func<object, object> _components;
         private static Func<object, object> _inner;
+        // SortedList's own change counter; null when the runtime's list has none this knows, and then the keys are
+        // walked on every pass.
+        private static Func<object, int> _listVersion;
 
         private static readonly Dictionary<object, Bucket> Buckets = new Dictionary<object, Bucket>();
         private static readonly Dictionary<TickableEntity, Record> Records = new Dictionary<TickableEntity, Record>();
@@ -65,6 +81,7 @@ namespace LateGamePerformance
         private static long _ticked;
         private static long _leftOut;
         private static long _resyncs;
+        private static long _keyChecks;
 
         public static Feature CreateFeature(Config config)
         {
@@ -124,6 +141,30 @@ namespace LateGamePerformance
             _setTicking = Reflect.FieldSetter<bool>(bucket, "_isTicking");
             _components = Reflect.FieldGetter<object>(typeof(TickableEntity), "_tickableComponents");
             _inner = Reflect.FieldGetter<object>(typeof(MeteredTickableComponent), "_tickableComponent");
+            _listVersion = ChangeCounter(typeof(SortedList<Guid, TickableEntity>));
+        }
+
+        // The list's change counter, which its every insert, removal and clear moves. It is 'version' in the game's Mono
+        // and in .NET 8; '_version', the name List<T> uses, is tried in case a runtime renames it. Null if neither is
+        // there, and then the keys are walked on every pass, as before.
+        internal static Func<object, int> ChangeCounter(Type listType)
+        {
+            foreach (string name in new[] { "version", "_version" })
+            {
+                FieldInfo field = AccessTools.Field(listType, name);
+                if (field != null && !field.IsStatic && field.FieldType == typeof(int))
+                {
+                    try
+                    {
+                        return Reflect.FieldGetter<int>(listType, name);
+                    }
+                    catch (Exception)
+                    {
+                        return null;
+                    }
+                }
+            }
+            return null;
         }
 
         public static void Activate()
@@ -151,8 +192,10 @@ namespace LateGamePerformance
             double ticks = _passes / 128.0;
             string line = $"IdleEntities: per tick {_ticked / ticks:0} entities ticked and {_leftOut / ticks:0} passed over because " +
                           "none of their tick parts was switched on" +
+                          $"; keys walked against the game's list on {_keyChecks} of {_passes} passes" +
+                          (_listVersion == null ? " (the list's change counter was not found)" : "") +
                           (_resyncs > 0 ? $"; the mirror had to be rebuilt {_resyncs} time(s), which should not happen" : "");
-            _passes = _ticked = _leftOut = _resyncs = 0;
+            _passes = _ticked = _leftOut = _resyncs = _keyChecks = 0;
             return line;
         }
 
@@ -180,10 +223,14 @@ namespace LateGamePerformance
                     bucket = new Bucket();
                     Buckets[__instance] = bucket;
                 }
-                if (bucket.Mirror.Count != all.Count || !SameKeys(bucket, all))
+                int version = _listVersion != null ? _listVersion(all) : 0;
+                if (bucket.Mirror.Count != all.Count || !(Unchanged(bucket, all, version) || SameKeys(bucket, all)))
                 {
                     Resync(bucket, all);
                 }
+                // The keys match now; until the counter moves or a postfix changes the mirror they still will.
+                bucket.CheckedList = _listVersion != null ? all : null;
+                bucket.CheckedVersion = version;
                 _setTicking(__instance, true);
                 bucket.Ticking = true;
             }
@@ -247,6 +294,8 @@ namespace LateGamePerformance
                 Record record = Register(bucket, tickableEntity);
                 // The game's Add inserts at once, even during a pass; so does the mirror, at the same index.
                 bucket.Mirror[tickableEntity.EntityId] = record;
+                // The next pass walks the keys (see Unchanged), even should another mod have skipped the game's Add.
+                bucket.CheckedList = null;
             }
             catch (Exception exception)
             {
@@ -277,6 +326,8 @@ namespace LateGamePerformance
                 if (!bucket.Ticking)
                 {
                     bucket.Mirror.Remove(tickableEntity.EntityId);
+                    // As in Add: the next pass walks the keys, even should another mod have skipped the game's Remove.
+                    bucket.CheckedList = null;
                 }
                 // During a pass the game defers the removal to the end of TickAll (_entitiesToRemove); the mirror
                 // removes the same keys there.
@@ -354,8 +405,25 @@ namespace LateGamePerformance
             }
         }
 
+        // Whether the game's list is the one whose keys last matched the mirror's, with its change counter where it stood
+        // then and the mirror untouched by the postfixes since; if so, the walk over the keys is skipped. Every change to a
+        // SortedList's keys (an insert, a removal, a clear) moves its counter, so the game's keys are as they were. The
+        // mirror's keys change in Add's postfix and in Remove's outside a pass, which both clear CheckedList so that the
+        // next pass walks whatever the game's list did (another mod's prefix may have skipped the game's Add or Remove
+        // while these postfixes still ran), and in the end-of-pass removals, where each key goes from both lists (moving
+        // the counter) or is in neither. So the keys still match, the walk would have found them equal, and skipping it
+        // changes nothing. The walk runs anyway on every 128th pass of a bucket, which catches a change that bypasses the
+        // counter (only a write to the list's private fields could) or a counter that went all the way round.
+        private static bool Unchanged(Bucket bucket, SortedList<Guid, TickableEntity> all, int version)
+        {
+            return _listVersion != null && ReferenceEquals(bucket.CheckedList, all) && version == bucket.CheckedVersion &&
+                   ++bucket.PassesSinceWalk < WalkEvery;
+        }
+
         private static bool SameKeys(Bucket bucket, SortedList<Guid, TickableEntity> all)
         {
+            _keyChecks++;
+            bucket.PassesSinceWalk = 0;
             IList<Guid> mine = bucket.Mirror.Keys;
             IList<Guid> theirs = all.Keys;
             for (int i = 0; i < theirs.Count; i++)
@@ -393,6 +461,7 @@ namespace LateGamePerformance
                 record.Awake = AnyEnabled(record.Components);
                 bucket.Mirror.Add(entity.EntityId, record);
             }
+            bucket.PassesSinceWalk = 0;
             _resyncs++;
         }
 
