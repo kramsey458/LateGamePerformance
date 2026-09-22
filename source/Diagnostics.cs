@@ -308,6 +308,24 @@ namespace LateGamePerformance
         }
         // ReSharper restore InconsistentNaming
 
+        // TerrainSearch's kept searches (0.4.30) run the terrain A* without going through
+        // TerrainAStarPathfinder.FillFlowFieldWithPath; it reports each one here, so the terrain A* figures still count
+        // every search.
+        internal static void TerrainSearchStarting(object flowField, out SearchState state)
+        {
+            if (_pathNodes == null)
+            {
+                state = default;
+                return;
+            }
+            SearchPrefix(flowField, out state);
+        }
+
+        internal static void TerrainSearchDone(object flowField, SearchState state)
+        {
+            SearchPostfix(TerrainSearches, flowField, state);
+        }
+
         private static void SearchPostfix(SearchTimer timer, object flowField, SearchState state)
         {
             if (state.Stamp == 0)

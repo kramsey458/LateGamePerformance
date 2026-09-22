@@ -853,7 +853,7 @@ switched on before its `Awake` has run. The `IdleEntities:` line now reads `... 
 over because none of their tick parts was switched on or would do anything (110 of them only had ranged effect
 buildings with no mechanical part switched on)`, or says why the rule is off.
 
-### Terrain path searches resumed instead of restarted (always on, new in 0.4.18)
+### Terrain path searches resumed instead of restarted (always on, new in 0.4.18; kept per start tile since 0.4.30)
 
 When no route map answers a path question, the game runs an A* search over the terrain graph on the main thread,
 inside the beaver's tick (`TerrainAStarPathfinder.FillFlowFieldWithPath`). That happens when a beaver standing off
@@ -899,16 +899,97 @@ What is the same and what is not:
   different route, different distance, different reachability. It never changes the answer, so it may differ
   between players; after a terrain change or a list-of-destinations search the comparison restarts from the mod's
   state, and a failure inside the comparison only switches the comparison off (0.4.20). Slower; for testing.
-- The `TerrainSearch:` stats line counts searches answered from the previous search, started from scratch and
-  resumed, with the tiles each explored and the time.
+- The `TerrainSearch:` stats line counts searches answered from an earlier search from the same tile, started from
+  scratch and resumed, with the tiles each explored, the time and (0.4.30) the longest single search.
 - Measured in the harness (`tests/TerrainSearchTests.cs`, the game's real `TerrainAStarPathfinder`, `PathFlowField`,
   `BinaryHeap` and `HeuristicsCalculator` on a random 90 x 90 terrain with the game's default costs): 300 searches
   from scratch identical to the game's node for node; in 1,200 searches from 150 tiles, 8 per tile, reachability and
-  distance agree every time (88% bit for bit, 12% within rounding), the mod explored 376,000 tiles where the game's
-  restarts explore 747,000, and in 79% of the searches with the same distance the route was a different, equally
+  distance agree every time (87% bit for bit, 13% within rounding), the mod explored 376,000 tiles where the game's
+  restarts explore 747,000, and in 78% of the searches with the same distance the route was a different, equally
   short one. Verify mode over 600 searches with 17 list-of-destinations searches and 11 terrain changes mixed in
   reported no distance or reachability difference.
 - If anything throws, the feature switches itself off for the session and the game's own search runs.
+
+**Kept searches per start tile (0.4.30).** The resume above almost never happened in a real colony: the 0.4.28
+session (362 beavers, `Diagnostics` on) logged 0 to 8 resumes per 1000 ticks against about 4,000 searches from
+scratch, need picks (`DistrictNeedBehaviorService.PickBestAction`) cost 0.4 to 0.7 ms per tick, and the two single
+picks of 96 and 106 ms fell in the blocks where terrain A* explored 59,000 to 77,000 tiles (7,000 to 20,000 in the
+others), longest single terrain search 14.8 ms. The reason is in the game's code: `PickShortestAction` prices every
+building i that could satisfy the need with `ActionDurationCalculator.DurationWithReturnInHours`, the trip beaver ->
+i plus the trip i -> the place the beaver has to be back at; each trip is `Walker.CalculateTravelTimeInHours` ->
+`NavigationService.FindPathUnlimitedRange` -> `PathfindingService.FindPathUncached`, whose last resort is the private
+`FindTerrainPathUncached(start, destination, out distance, pathCorners)`. That fills the one default field
+(`TerrainFlowFieldCache.GetDefaultFlowField()`) with `TerrainAStarPathfinder.FillFlowFieldWithPath` and reads the
+distance and corners out of it with `FlowFieldPathFinder.FindPathInFlowField`. The starts alternate (beaver,
+building 1, beaver, building 2, ...), so every question throws the previous search away.
+
+- A replacing prefix (last priority) on that `FindTerrainPathUncached` overload does the game's steps with a kept
+  search in place of the default field: node ids from the game's `NodeIdService`, the search for the start tile
+  chosen from up to 32 kept by start tile (a free one, a new one, or the least recently used, counted in
+  questions), the search run in that slot's own `PathFlowField` and heap with the same rules as above (answered from
+  the field, resumed, or from scratch the game's way), then the game's own `FindPathInFlowField` on that field for
+  the same bool, distance and corners. A question with no kept search for its start and a start or destination off
+  the navmesh, and any failure, is handed to the game's own method, which runs on its own default field, untouched
+  by the mod. The default field is read only by the two `FindTerrainPathUncached` overloads (checked in the
+  decompiled game), so leaving it alone changes nothing else.
+- The list-of-destinations overload stays the game's, on the default field: it always starts over, and which
+  destination it stops at depends on its search order (its heuristic aims at the average of the destinations), so
+  nothing from an earlier search may be used there. After one, no kept search stands for "the game's last search".
+- Terrain changes: a postfix on `TerrainFlowFieldCache.OnNavMeshUpdated` hands the same changed tiles to every
+  kept field through the game's own `PathFlowField.OnNodesChanged`, at the moment the default field gets them, so a
+  kept field is emptied exactly when the game's field would be (the harness compares the two after each change), and
+  no kept search resumes across a change (answers from a field that the change did not empty stay, as the game's
+  do). A new scene, the game's save into memory (`GameSaver.SaveWithoutFinishingTick`), a failure and the feature's
+  start drop every kept search, so a player who has just loaded a save and the one who wrote it start from the same
+  empty state.
+- Exactness is the class of difference this feature already had, now for more questions: a search from scratch is
+  the game's to the bit; an answer from a kept search, or a resumed one, gives the game's distance up to
+  floating-point rounding, and possibly an equally short different route. Where the game would answer from its
+  one field (the question's start was the last one asked), kept searches answer the same way; they also answer
+  when other tiles' questions came in between, where the game would have searched again. Zipline and tube steps
+  cheaper than the heuristic allows: from 0.4.30 the check looks at every step out of an explored tile in both
+  directions (the terrain graph's steps go both ways at one cost), including steps to tiles already explored, where
+  0.4.29 checked only the steps it pushed and only one way; a kept search that met such a step answers only while
+  it is the search the game's field would hold, and is never resumed.
+- Every player gets the same answer: which kept search answers, and what it holds, depends only on the sequence of
+  questions and terrain changes, and the memory limit counts tiles and heap entries, not bytes the runtime reports.
+- Memory: a kept field costs memory by the most tiles it ever held; the mod counts 48 bytes a tile (dictionary
+  entry and bucket at up to twice the tiles) and 16 a heap entry, and above 32 MB drops the least recently used
+  kept searches (the one just used stays). Measured in the harness: one search over a whole 258 x 258 map (58,150
+  tiles, an unreachable destination) holds 1.7 MB in its field's dictionary, counted as 2.7 MB with its heap, so the
+  limit keeps about 12 such searches; ordinary searches of a few thousand tiles cost a few hundred KB each. The kept
+  heaps start at 256 entries, where the game's one heap is sized for a quarter of the map's nodes (7 MB on a large
+  map).
+- Two changes to the search itself, both run by every search: the loop is compiled once into a single method that
+  calls the game's own methods on the game's own types (the 0.4.18 loop called each operation through a delegate and
+  took about 1.6 times the game's time per tile in the harness, 1.3 times now; under .NET 8 the game's method is
+  also recompiled with runtime profiles, which Unity's Mono does not do, so the gap in the game is probably smaller,
+  not measured), and a resumed search re-prices its
+  frontier in place on the heap's array and restores heap order in one pass, rather than popping and pushing every
+  entry; equally priced entries may then pop in another order, which only resumed searches see.
+- `Diagnostics`: kept searches do not go through `TerrainAStarPathfinder.FillFlowFieldWithPath`, so they report to
+  the terrain A* timer themselves; its figures still count every terrain search.
+- Verify mode compares every kept answer with a shadow field that stands in for the game's default field (the
+  game's own algorithm, answering from its last search as the game does, receiving every terrain change the game's
+  field receives, and starting over after a list-of-destinations search), with the same categories.
+- Stats line, for example: `TerrainSearch: 5280 terrain path searches in 727.2 ms (longest 2.01 ms): 2332 answered
+  from an earlier search from the same tile, 1019 started from scratch exploring 688597 tiles, 1929 resumed exploring
+  691883 more tiles, 0 started over after meeting a step cheaper than the heuristic allows; searches kept for up to
+  32 start tiles, so these answers and resumes also come after other tiles' searches: 5280 searches used them, 32 kept
+  now (~6.0 MB), 212 new start tiles replaced the least recently used, 291 kept searches emptied by terrain changes, 0
+  dropped to stay under 32 MB`.
+- Measured in the harness with need picks (30 beavers, some moving, each round pricing 12 of 24 buildings with the
+  trip on to one of 5 essential places, 5,280 questions, 48 terrain changes mixed in), against the game's own
+  `FindTerrainPathUncached` on its own `PathfindingService`: every search from scratch (1,019) identical to the game's
+  node for node, distance and reachability the game's in every question (4,817 bit for bit, 463 within rounding);
+  the kept searches explored 1.38 million tiles where the game explores 3.37 million (41%), in 734 ms against the
+  game's 1,118 ms. With verify on and list-of-destinations searches and terrain changes mixed in: no distance or
+  reachability difference, and the answers the same as with verify off. On a terrain where one step in twelve is
+  cheaper than the heuristic allows: the game's answer to every one of 2,880 questions. Least-recently-used
+  replacement, the memory limit, terrain changes against the game's own field, and a forced failure (the game's
+  method answers, the feature turns off and says so) are tested too.
+- Not done: resuming across a terrain change that did not touch the kept field (the frontier's costs could have
+  changed), and keeping the list-of-destinations search (see above).
 
 ### Home search without the per-beaver overhead (always on, new in 0.4.23)
 
@@ -1452,6 +1533,9 @@ and Harmony then skipped the timer's, so the terrain A* numbers left out every s
 Since `TerrainSearch` runs at Harmony's last priority (see Build and test) the timer's prefix runs first, and the
 terrain A* numbers include those searches, timed as the mod answers them (resumed or from its previous search).
 Numbers from before and after that change are not comparable; the `TerrainSearch:` stats line is unchanged.
+From 0.4.30 the one-destination searches from `PathfindingService.FindTerrainPathUncached` go to `TerrainSearch`'s
+kept searches without calling `FillFlowFieldWithPath`; each reports to the terrain A* timer itself, so the figures
+still count every terrain search.
 
 ### Walking: PathFollow (0.4.28 only, removed in 0.4.29)
 

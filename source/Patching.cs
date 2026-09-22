@@ -176,8 +176,10 @@ namespace LateGamePerformance
                 }
                 else if (parameter.ParameterType.IsByRef)
                 {
-                    // "ref" hands the patch the target's own argument slot: the types must be the same.
-                    if (parameter.ParameterType.GetElementType() != match.ParameterType)
+                    // "ref" hands the patch the target's own argument slot: the types must be the same. The target's
+                    // own "out" or "ref" argument is taken with "ref" of its element type.
+                    Type targetType = match.ParameterType.IsByRef ? match.ParameterType.GetElementType() : match.ParameterType;
+                    if (parameter.ParameterType.GetElementType() != targetType)
                     {
                         problems.Add($"{feature.Name}/{patch.Name}: ref parameter '{parameter.Name}' type mismatch");
                     }

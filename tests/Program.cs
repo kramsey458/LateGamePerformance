@@ -193,7 +193,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 129, $"129 patches declared (found {patchCount})");
+        Check(patchCount == 131, $"131 patches declared (found {patchCount})");
         TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
         TestHaulCacheFlush();
@@ -222,7 +222,8 @@ internal static class Program
             "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing",
             "DistrictCounts verify: output capacity of Good0: the mod counted", "DistrictCounts failed",
             "WaterMapCopy verify: the copy made on a worker differs from the game's.",
-            "PlantWater verify: object 3 read", "PlantWater verify: object 3 read", "SaveSnapshot: the saving code of",
+            "PlantWater verify: object 3 read", "PlantWater verify: object 3 read", "TerrainSearch failed and turned itself off",
+            "SaveSnapshot: the saving code of",
             "SaveSnapshot failed while the singleton SlowSingleton saved its state",
             "ParallelTickWait: one of the game's parallel tasks has failed", "ParallelTickWait: the game's parallel tick was still running after",
             "HomeSearch verify: the mod moves in", "HomeSearch verify: the kept answer for", "HomeSearch failed",
@@ -246,7 +247,7 @@ internal static class Program
     private static void TestTurnedOff()
     {
         string[] off = TurnedOff.Names();
-        Check(off.SequenceEqual(new[] { "RouteMaps", "TerrainMaps", "PlantWater", "DistrictCounts", "HomeSearch", "Reachability" }),
+        Check(off.SequenceEqual(new[] { "RouteMaps", "TerrainMaps", "PlantWater", "DistrictCounts", "TerrainSearch", "HomeSearch", "Reachability" }),
             $"turned off: each simulation feature a forced failure above turned off was reported, once ({string.Join(", ", off)})");
         bool[] all = Enumerable.Repeat(true, Plugin.SimulationFeatureNames.Length).ToArray();
         string one = Plugin.TurnedOffLine(all, new[] { "RouteMaps" });
