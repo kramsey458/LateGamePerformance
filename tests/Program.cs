@@ -55,7 +55,8 @@ internal static class Program
                      "Timberborn.BuildingsReachability", "Timberborn.DwellingSystem", "Timberborn.Beavers", "Timberborn.GameDistricts",
                      "Timberborn.SimulationSystem", "Timberborn.Common", "Timberborn.Multithreading", "Timberborn.BehaviorSystem",
                      "Timberborn.TimeSystem", "Timberborn.EnterableSystem", "Timberborn.CharacterMovementSystem", "Timberborn.BehaviorSystemUI",
-                     "Timberborn.Physics", "Timberborn.SelectionSystem", "Timberborn.ModularShafts", "Timberborn.MechanicalSystem" })
+                     "Timberborn.Physics", "Timberborn.SelectionSystem", "Timberborn.ModularShafts", "Timberborn.MechanicalSystem",
+                     "Timberborn.Reproduction", "Timberborn.SimpleOutputBuildings" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -191,10 +192,11 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 133, $"133 patches declared (found {patchCount})");
+        Check(patchCount == 128, $"128 patches declared (found {patchCount})");
         TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
         TestHaulCacheFlush();
+        HaulCacheTests.Run(Check);
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
         TerrainAndWaterTests.Run(_managed, Check);
@@ -210,7 +212,8 @@ internal static class Program
         {
             "YielderSearch: result differs from the game's own search. Mod: nothing to take. Game: nothing in range.",
             "HaulCache verify: cached list differs from vanilla (cached 2, vanilla 2).",
-            "CatchUp failed", "RouteMaps: a route map could not be built on the first try", "RouteMaps failed",
+            "CatchUp failed", "HaulCache verify: cached list differs from vanilla (cached 8, vanilla 6).",
+            "RouteMaps: a route map could not be built on the first try", "RouteMaps failed",
             "RouteMaps failed", "TerrainMaps: a terrain route map could not be built on the first try", "TerrainMaps failed",
             "PlantWater verify: object 1 stores level 7 where the mod knew 3",
             "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
@@ -329,9 +332,11 @@ internal static class Program
         return line.Contains("Simulation features: ") && line.Contains("turned themselves off during this session");
     }
 
-    // Everything the haul cache holds is dropped at the start of every tick. That hook must come with the cache: the
-    // TickHooks feature (stats lines, metrics) is optional and can fail on its own. Each tick runs every prefix the
-    // given features put on TickableSingletonService.TickAll, as Harmony would.
+    // Up to 0.4.27 everything the haul cache held was dropped at the start of every tick; from 0.4.28 the fixed value
+    // is 0 and nothing is dropped on a timer (HaulCacheTests drive what drops an entry instead). The tick hook stays
+    // the cache's own (it counts ticks, and would drop on a non-zero fixed value): the TickHooks feature (stats lines,
+    // metrics) is optional and can fail on its own. Each tick runs every prefix the given features put on
+    // TickableSingletonService.TickAll, as Harmony would.
     private static void TestHaulCacheFlush()
     {
         MethodBase tickAll = Reflect.Method("Timberborn.TickSystem.TickableSingletonService", "TickAll");
@@ -363,12 +368,15 @@ internal static class Program
         Feature haulCache = HaulCache.CreateFeature(new Config());
         Feature tickHooks = Plugin.CreateTickFeature();
         PatchSpec own = haulCache.Patches.Find(patch => patch.Prefix != null && Equals(patch.Target(), tickAll));
-        Check(own != null && own.Required, "haul cache: its per-tick flush is its own required prefix on TickableSingletonService.TickAll");
+        Check(own != null && own.Required, "haul cache: its tick hook is its own required prefix on TickableSingletonService.TickAll");
         FieldInfo epoch = typeof(HaulCache).GetField("_epoch", BindingFlags.Static | BindingFlags.NonPublic);
+        FieldInfo ticks = typeof(HaulCache).GetField("_ticks", BindingFlags.Static | BindingFlags.NonPublic);
+        FieldInfo every = typeof(HaulCache).GetField("_flushEveryTicks", BindingFlags.Static | BindingFlags.NonPublic);
         HaulCache.Activate();
-        int Flushes(params Feature[] installed)
+        int Flushes(out long counted, params Feature[] installed)
         {
             int before = (int)epoch.GetValue(null);
+            long ticksBefore = (long)ticks.GetValue(null);
             for (int tick = 0; tick < 3; tick++)
             {
                 foreach (Feature feature in installed)
@@ -382,13 +390,18 @@ internal static class Program
                     }
                 }
             }
+            counted = (long)ticks.GetValue(null) - ticksBefore;
             return (int)epoch.GetValue(null) - before;
         }
-        int alone = Flushes(haulCache);
-        int both = Flushes(haulCache, tickHooks);
-        Check(alone == 3, $"haul cache: dropped on each of 3 ticks with the TickHooks feature missing (dropped {alone} times)");
-        Check(both == 3, $"haul cache: dropped once per tick with TickHooks installed too ({both} times in 3 ticks)");
-
+        int alone = Flushes(out long countedAlone, haulCache);
+        int both = Flushes(out long countedBoth, haulCache, tickHooks);
+        Check((int)every.GetValue(null) == 0 && alone == 0 && both == 0,
+            $"haul cache: nothing is dropped on a timer, with or without the TickHooks feature (dropped {alone} and {both} times in 3 ticks)");
+        Check(countedAlone == 3 && countedBoth == 3,
+            $"haul cache: its own hook counts every tick once, with or without TickHooks ({countedAlone}, {countedBoth})");
+        every.SetValue(null, 1);
+        int timed = Flushes(out _, haulCache, tickHooks);
+        Check(timed == 3, $"haul cache: a fixed value of 1 (up to 0.4.27) would still drop everything once per tick ({timed} times in 3 ticks)");
     }
 
     private static void TestCatchUp()
@@ -500,7 +513,7 @@ internal static class Program
         Check(!config.UiThrottle && config.SoundListener && config.AnimatorCulling,
             "config: SoundListener, UiThrottle and AnimatorCulling are ways out, on by default");
         Check(!config.LimitCatchUp && new Config().LimitCatchUp, "config: LimitCatchUp is a setting, on by default");
-        Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 1 && config.RouteMaps && config.YielderSearch && config.TerrainSearch && config.IdleEntities && config.HomeSearch,
+        Check(config.HaulCache && config.HaulCacheFlushEveryTicks == 0 && config.RouteMaps && config.YielderSearch && config.TerrainSearch && config.IdleEntities && config.HomeSearch,
             "config: what decides which simulation code runs cannot be changed from the file");
         Check(config.Diagnostics, "config: bool case-insensitive");
         Check(config.StatsEveryTicks == 0, "config: negative clamped to 0");

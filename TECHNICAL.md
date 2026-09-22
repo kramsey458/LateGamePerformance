@@ -18,14 +18,57 @@ with the same comparison as the game, so haulers get the same list the game woul
 
 Up to 0.4.11 the district's sorted list was kept as well, until any building in it changed. In every session
 measured, on two computers, it was never served from cache once: a hauler that takes a job reserves stock, which
-changes a building, so the next request always found the list out of date. It was removed in 0.4.12. What does
-get reused is the per-building part, about a third of the time.
+changes a building, so the next request always found the list out of date. It was removed in 0.4.12.
 
-As a safety net, everything cached is dropped every tick. An input
-the mod does not track, such as one added by another mod, can then be out of date only within a single tick.
-(Up to 0.4.8 that interval was a setting; it is fixed now, see Settings.) The drop is the cache's own required
-hook at the start of the tick (`TickableSingletonService.TickAll`), so the cache never runs without it; it used to
-ride on the optional hook that also writes the stats lines.
+**Kept across ticks (0.4.28).** Up to 0.4.27 everything cached was also dropped at the start of every tick, as a
+safety net for an input the mod might not know about. With 370-650 requests per 1000 ticks (0.4.23, 359 beavers)
+that left only the second and later requests of a tick anything to reuse: about a third of the 253 buildings per
+request, at 0.71-0.78 ms per request. From 0.4.28 nothing is dropped on a timer (`HaulCacheFlushEveryTicks` is
+fixed at 0; up to 0.4.8 it was a setting, see Settings). That rests on every input of the game's eight haul
+providers (emptying, unwanted stock, simple output, bring nutrients, obtain, supply, fill input, manufactory) being
+covered, which was read provider by provider in Timberborn 1.1.2.4; the table is at the top of `source/HaulCache.cs`:
+
+- Stock, reservations and the capacity rule's changes all raise the inventory's changed event, which is hooked
+  (`Inventory.InvokeInventoryChangedEvent`). So does "unwanted stock" appearing or disappearing (when it appears as
+  an inventory is enabled, the enable hook covers it). Enabling and disabling an inventory (`Inventory.Enable` /
+  `Disable`, which every caller in the game goes through) and blocking and unblocking a building
+  (`BlockableObject.Block` / `Unblock`) are hooked. These four hooks are required from 0.4.28 (optional before, when
+  the per-tick drop covered a missing one).
+- The five flags a provider reads (haul priority, marked for emptying, obtaining, supplying, the current recipe)
+  are compared with the values they had when the building's jobs were computed, on every request, instead of being
+  hooked: their setters are 8-byte methods, and Mono compiles a method under 20 bytes of IL into its callers, where
+  a hook would not run (up to 0.4.27 they were hooked). Every hook left is on a method of 20 bytes or more.
+- The allowed goods, their amounts, the capacity and the input and output sets are set once, in
+  `Inventory.Initialize`.
+- The capacity rules: the game's single-good rule (and MixedStorage's allocation, read at 0.5.8 and 1.0.0) and the
+  workshop recipe rule announce every change through the changed event. The lumberjack and gatherer flags' rule
+  (`InRangeYielderGoodAllower`) also depends on the number of assigned workers and on goods on their way in, which
+  nothing announces; both only matter for a good with nothing in stock, and the flag's own provider (simple output)
+  only counts goods in stock. So such a building is kept only while its providers are simple output, emptying and
+  unwanted stock; beside any other provider it is asked again on every request.
+- A building with a haul provider or a capacity rule of any other type (another mod's, or a subclass) is asked again
+  on every request.
+- If another mod patches one of the 30 methods the table was read from (the providers, the fill calculator,
+  `LimitedAmount`, the capacity rules, the flags' getters), or the game's IL of those methods is not what was read (a
+  hash, as the save snapshot's allow-list uses), nothing is kept between requests and every request asks every
+  building, the game's own way; `Player.log` says which. MixedStorage's `LimitPatch` on
+  `SingleGoodAllower.AllowedAmount` was read and is accepted.
+- A building joining or leaving a district still drops everything, and so does a new game scene.
+
+What is kept is the game's own answer (`HaulCandidate.GetWeightedBehaviors`), asked again whenever it could have
+changed, and the district's list is assembled and sorted from those answers on every request as before, so the list
+is the game's. `HaulCacheVerify` builds the game's own list on every request as well and compares, whether the
+buildings' answers were computed in this tick or kept from an earlier one. The tests build buildings from the
+game's real components (providers, inventories with the game's capacity rules, blockable object, emptiable,
+obtainer, supplier, manufactory, haul priority), wire them with the game's own methods and compare every request
+with the game's own `GetWorkplaceBehaviorsOrdered`: answers survive ticks; each hooked change (stock, stock and
+capacity reservations, the single-good rule, enable, disable, block, unblock) asks exactly that building again; each
+of the five flags changed with no hook at all is noticed; the flag's unannounced inputs leave its list the game's;
+the flag rule beside fill input and another mod's provider are asked every time; verify catches an answer that went
+stale across two ticks. In the harness (.NET 8, 250 buildings, one request per tick, 8 buildings changed per tick)
+a request takes the game 0.12-0.14 ms, the cache with the per-tick drop 0.13-0.16 ms and the cache keeping answers
+0.05-0.07 ms (several runs).
+Expected in the logged colony: 70-90% of buildings reused, about 0.2 ms per tick; not yet played.
 
 If anything throws inside the cache, it switches itself off for the session and the game's own code runs.
 If a required game method is missing (for example after a game update), the feature does not enable at all.
@@ -253,7 +296,7 @@ only after a change), with a full walk every 200 ticks as a safety net. The stat
 the cache, the largest map, the walks made and skipped, and any unbuilt map the safety net found that the hooks had
 missed.
 
-### District resource counts on worker threads (always on, new in 0.4.13)
+### District resource counts (always on, new in 0.4.13; one walk per inventory on the main thread since 0.4.28)
 
 Every tick each district adds up, for every good, what all its storage holds and how much room it has
 (`DistrictResourceCounter.Tick`): 1.07 ms per tick in the colony this is measured in. The numbers feed the top
@@ -262,37 +305,52 @@ the game's numbers at the game's moment. Counting less often, or only what chang
 what an inventory may hold depends on things with no reliable change signal, and a stale number would change
 what an automation building does.
 
-Most of the cost is the room question, which the game asks per inventory per allowed good with a linear search
-inside (a warehouse that allows 30 goods does some 900 string comparisons to report one number). Both questions
-are pure reads of the inventory, and the answer is a sum of whole numbers, which comes out the same in any
-order. So the inventories are dealt out to worker threads, each worker asks the game's own questions
-(`Inventory.Stock`, `Gives`, `PublicInput`, `GetCapacity`) and adds up into its own tables, and the main thread
-adds the workers' tables into the game's tables. The two steps that go through interfaces a mod may implement
-(goods inside workshops, goods being carried) then run as the game's own code on the main thread.
+Most of the cost is the room question. The game asks it per inventory per allowed good (`Inventory.GetCapacity`:
+`LimitedAmount` = the smaller of the capacity rule's `AllowedAmount` and `StorableGoodRegistry.GetAmount`), and
+`GetAmount` searches the allowed goods from the start for the first entry with that id, so a warehouse that allows
+25 goods does some 300 string comparisons to report one number; then it asks `Gives` per good.
 
-- What may run on a worker is decided per inventory. `GetCapacity` asks the inventory's `IGoodDisallower`, which
-  a mod may implement; only the game's four implementations, which were read and are pure, go to workers. Any
-  other inventory is counted on the main thread by the same code.
-- If another mod has patched one of the methods the workers would call, the feature stands down with one log
-  line and the game's own count runs. The numbers are the same either way.
-- Exception (0.4.15): patches that were read and are safe on worker threads are accepted, by mod id, patch method
-  and target together. So far one: MixedStorage's `LimitPatch.Prefix` on `SingleGoodAllower.AllowedAmount` (read
-  at MixedStorage 0.5.7). It answers from the allocation the player set and the storage's capacity, and the only
-  thing it writes is its own per-storage cache of limits, rebuilt from those same values; each storage is counted
-  by exactly one worker. The log says `DistrictCounts: another mod patches ... that patch was read and is safe`.
-  Up to 0.4.14 MixedStorage's patch made the feature stand down.
-- Districts with fewer than 96 storage inventories are left to the game's loop.
+**0.4.28: one walk per inventory, on the main thread.** An inventory's allowed goods are only ever added to, in
+`Inventory.Initialize`: they live in a registry nothing else can reach, with no way to remove or change an entry. So
+for each inventory the mod asks the game once, in the list's order, for each allowed good's id, what `GetAmount`
+returns for it (the first entry with that id, also for a good listed twice) and whether the inventory `Gives` it,
+and keeps the answers until the inventory holds a different registry or its registry a different number of goods
+(initialised again), or the inventory is a different object. Each count then does what `GetCapacity` and the game's
+capacity counter do, in their order: skip an inventory whose capacity is ignorable (read every time; emptying
+switches it), then for every allowed good call the real `AllowedAmount` of the inventory's current capacity rule
+(another mod's patch on it runs, as it would for the game), take the smaller with the kept amount, and add it when
+it is above 0 and the good is given. The stock part is the game's own loop. Both write straight into the game's
+tables, stock for every inventory first and then room, in the district's own order: the tables end up equal to the
+game's, down to which keys they hold and the order they were added in.
+
+- If another mod patches a method whose answers are kept or stood in for (`GetCapacity`, `LimitedAmount`, `Gives`,
+  the allowed and output goods, `GetAmount`) or the game's own counting (`StockCounter`, `CapacityCounter`), the
+  feature stands down with one log line and the game's own count runs. The numbers are the same either way.
+  A patch on a capacity rule (MixedStorage's `LimitPatch` on `SingleGoodAllower.AllowedAmount`) no longer needs
+  reading: the rules are called on the game thread, the way the game calls them.
+- Every district is counted this way, however small (up to 0.4.27 districts under 96 inventories were left to the
+  game, because waking the threads cost more than it saved). A new game scene drops what is kept.
 - The tests fill one counter with the game's `UpdateCounters` and one with the mod over 700 real `Inventory`
-  objects with the game's own capacity rules (and one stand-in mod rule, which must only ever be asked on the
-  main thread), and compare every good through the game's public `GetResourceCount`, for six rounds with stock
-  moving in between. In the harness one count takes the game 1.9 ms and the mod 0.5 ms.
-- `DistrictCountsVerify = true` lets the game count as well, compares, and puts the mod's numbers back in the
-  game's tables (up to 0.4.26 the game's stayed there). If anything throws, the feature switches itself off; the
-  game's count starts by clearing every table, so nothing of the failed one is left.
+  objects with the game's own capacity rules (one stand-in mod rule; some inventories list a good twice), and compare
+  every good through the game's public `GetResourceCount` and the four tables entry by entry, for six rounds with
+  stock moving in between; then with an inventory initialised again, a replaced registry of the same size, a replaced
+  inventory, ignorable capacity switched and a capacity rule swapped; then with each of the stood-in methods patched.
+- They also time it at the logged colony's size (236 inventories, 38 warehouses of 25 goods, .NET 8, several runs):
+  the game's loop 95-160 us, the walk on the main thread 40-65 us. The same walk dealt out to 7 worker threads takes
+  25-35 us while the threads are still awake, but 140-350 us once they have gone to sleep between counts, as they do
+  between ticks, and 115-140 us even awake once every warehouse's rule takes a shared lock, as MixedStorage's does
+  under Mono. So the count left the worker threads. In the game (Mono) all of these are slower; the verify mode's
+  timing of the game's own count is what settles it there.
+- `DistrictCountsVerify = true` lets the game count as well, times it (the stats line prints both), compares, and
+  puts the mod's numbers back in the game's tables (up to 0.4.26 the game's stayed there). If anything throws, the
+  feature switches itself off; the game's count starts by clearing every table, so nothing of the failed one is left.
 
-**0.4.25.** The count runs on this mod's own worker threads (see Worker threads) instead of `Parallel.For`. In the
-0.4.23 session a count of 233 inventories took 0.67 ms, nearly all of it waking and joining thread-pool threads that
-had gone to sleep between ticks; the work itself is a few tens of microseconds.
+**0.4.13 to 0.4.27.** The inventories were dealt out to worker threads, each asking the game's own questions
+(`Inventory.Stock`, `Gives`, `PublicInput`, `GetCapacity`) into its own tables, which the main thread added into the
+game's. Only inventories whose capacity rule was one of the game's four (read and pure) went to workers, and
+MixedStorage's `LimitPatch` was accepted from 0.4.15 as safe there. From 0.4.25 on the mod's own worker threads (see
+Worker threads) instead of `Parallel.For`. Measured in 0.4.23 (236 inventories, 7 threads): 0.66-0.93 ms per count,
+with a 14.6 ms maximum, no better than the game's own loop.
 
 ### Water map copy on a worker thread (always on, new in 0.4.14)
 
@@ -1226,7 +1284,8 @@ or while one runs, simply runs alone on the calling thread. A job is told how ma
 its results in slots no two workers share, so how the work is split is never simulation state. The `TickWorkers:`
 stats line counts jobs shared, threads, wakes while still spinning and from sleep, and jobs run alone. The
 harness runs strided sums over four workers, a throwing worker, a job started inside a job, more workers than the
-maximum and a maximum below one.
+maximum and a maximum below one. (The district counts left these threads again in 0.4.28: see District resource
+counts.)
 
 ### A simulation feature that turns itself off (always on, new in 0.4.27)
 
@@ -1399,11 +1458,18 @@ Numbers from before and after that change are not comparable; the `TerrainSearch
 Every `StatsEveryTicks` ticks (default 1000) one line is logged, for example:
 
 ```
-[LateGamePerformance] Last 1000 ticks. HaulCache: 517 hauler list requests built in 310.0 ms (0.600 ms each);
-buildings reused 42010/129250, recomputed 87240
+[LateGamePerformance] Last 1000 ticks. HaulCache: 517 hauler list requests built in 110.0 ms (0.213 ms each);
+buildings reused 110500/129250 (98300 from an earlier tick), recomputed 18750 (2100 of them on every request: a
+haul provider or capacity rule the mod has not read)
 ```
 
-"buildings reused" is the work saved: each reused building is one the game would have scanned again.
+"buildings reused" is the work saved: each reused building is one the game would have scanned again. "from an
+earlier tick" (0.4.28) counts the reuses the per-tick drop used to rule out. "on every request" counts buildings
+that are never kept (another mod's provider or capacity rule, or a lumberjack or gatherer flag's rule beside a
+provider that reads its limits); the part is left out when there are none. If nothing is kept at all (another mod's
+unread patch, or game code that is not what was read), the line ends with `; nothing kept between requests:` and
+the reason. With `HaulCacheVerify` it ends with `; verify mismatches N; the game's own build alongside took X ms
+(Y ms each)`, to compare with "ms each".
 
 Two lines for the features added in 0.4.12:
 
@@ -1435,15 +1501,18 @@ alongside the game; 6 more built directly on the main thread in batches of fewer
 Both map lines end with `; N maps whose first build threw were built again on the main thread` when that happened
 (see When a map build throws).
 
-One for the district counts (0.4.13):
+One for the district counts (0.4.13; this form since 0.4.28):
 
 ```
-[LateGamePerformance] Last 1000 ticks. DistrictCounts: 1000 counts of 640 inventories on 7 workers in 310.0 ms
-(0.310 ms each); 0 inventories per count on the main thread; 0 counts of small districts left to the game
+[LateGamePerformance] Last 1000 ticks. DistrictCounts: 1000 counts of 236 inventories on the main thread in 150.0 ms
+(0.150 ms each); allowed goods read anew for 3 inventories; verify mismatches 0; the game's own count of the same
+took 600.0 ms (0.600 ms each)
 ```
 
-"ms each" is to be compared with the 1.07 ms the game's own count was measured at. "on the main thread" counts
-inventories whose capacity rule comes from a mod.
+"ms each" is the stock and room count, the part the mod does instead of the game. "allowed goods read anew" counts
+inventories whose kept allowed goods were read from the game (new, rebuilt or initialised again); after the first
+count it stays near 0. The verify part is only there with `DistrictCountsVerify`: the game's own count
+(`StockCounter.UpdateStock` + `CapacityCounter.UpdateCapacity`) of the same district, timed, to compare with "ms each".
 
 Three for the features added in 0.4.14:
 
@@ -1541,7 +1610,7 @@ search check asks the game's own dwelling predicates. The game's own versions of
 | `LimitCatchUp` | `true` | After a long frame, run at most twice an ordinary frame's simulation time in the next one instead of everything the long frame missed. Pacing only; may differ between peers. |
 | `Diagnostics` | `false` | Timers for route map rebuilds, need selection, walker path finding and the game's A* searches. |
 | `PlantWaterVerify` | `false` | Read every water level again on the main thread and compare with the worker threads' result, and compare the levels known from the last pass with the stored ones; the worker's levels are stored. For testing. |
-| `DistrictCountsVerify` | `false` | Let the game count each district's resources as well and compare; the mod's numbers are put back. For testing. |
+| `DistrictCountsVerify` | `false` | Let the game count each district's resources as well, time it (both times are on the stats line) and compare; the mod's numbers are put back. For testing. |
 | `WaterMapCopyVerify` | `false` | Let the game copy the water map every tick as well and compare with the worker's copy, which is then swapped in. For testing. |
 | `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |

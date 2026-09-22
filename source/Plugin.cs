@@ -438,6 +438,7 @@ namespace LateGamePerformance
             SoilScans.SceneCreated();
             HomeSearch.SceneCreated();
             SaveSnapshot.SceneCreated();
+            DistrictCounts.SceneCreated();
             _ticksSinceReport = 0;
             string turnedOffLine = TurnedOffLine();
             if (turnedOffLine != null)

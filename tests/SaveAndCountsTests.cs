@@ -733,6 +733,12 @@ internal static class SaveAndCountsTests
                 storage.Add(new GoodAmount(good, 1 + random.Next(60)));
             }
         }
+        if (index % 7 == 3)
+        {
+            // A second entry for a good already allowed, with another amount: StorableGoodRegistry.GetAmount answers
+            // the first entry's amount for both.
+            amounts.Add(new StorableGoodAmount(StorableGood.CreateAsGivable(goods[start]), 3 + random.Next(50)));
+        }
         allowed.Add(amounts);
         Set(inventory, "_allowedGoods", allowed);
         Set(inventory, "_storage", storage);
@@ -802,6 +808,7 @@ internal static class SaveAndCountsTests
 
     private static void RunDistrictCounts(Action<bool, string> check)
     {
+        DistrictCounts.ResetForTests();
         DistrictCounts.CreateFeature(new Config { DistrictCountsVerify = true });
         DistrictCounts.BindAccessors();
         DistrictCounts.PatchesOn = method => new[] { (Plugin.HarmonyId + ".HaulCache", "LateGamePerformance.HaulCache.InputChangedPostfix") };
@@ -822,7 +829,7 @@ internal static class SaveAndCountsTests
         DistrictResourceCounter games = NewCounter(inventories);
         DistrictResourceCounter mods = NewCounter(inventories);
 
-        bool same = true, replaced = true;
+        bool same = true, replaced = true, sameTables = true;
         string last = null;
         int different = 0;
         for (int round = 0; round < 6; round++)
@@ -840,6 +847,7 @@ internal static class SaveAndCountsTests
             replaced &= !(round % 2 == 0 ? DistrictCounts.UpdatePrefix(mods) : DistrictCounts.TickPrefix(mods));
             string expected = Counts(games, goods);
             same &= expected == Counts(mods, goods);
+            sameTables &= Tables(games) == Tables(mods);
             if (expected != last)
             {
                 different++;
@@ -848,65 +856,106 @@ internal static class SaveAndCountsTests
         }
         check(replaced && same && different == 6,
             "district counts: 700 real inventories, six rounds, every good reads the same as after the game's own count");
+        check(sameTables,
+            "district counts: the four tables hold the game's keys, values and insertion order exactly, not only the same reads");
         check(ModDisallower.Calls > 0 && ModDisallower.CallsOnOtherThreads == 0,
-            $"district counts: a capacity rule that is not the game's own is only ever asked on the game thread ({ModDisallower.Calls} calls)");
+            $"district counts: every capacity rule, the game's and a mod's, is asked on the game thread ({ModDisallower.Calls} calls)");
         string line = DistrictCounts.TakeStatsLine();
-        check(line != null && line.Contains("6 counts of 700 inventories") && line.Contains("175 inventories per count on the main thread") &&
-              line.Contains("verify mismatches 0"), "district counts: stats line (" + line + ")");
+        check(line != null && line.Contains("6 counts of 700 inventories on the main thread") &&
+              line.Contains("allowed goods read anew for 700 inventories") && line.Contains("verify mismatches 0") &&
+              line.Contains("the game's own count of the same took"), "district counts: stats line (" + line + ")");
 
-        // For the record, not a check: the same count both ways, without the verify pass.
-        DistrictCounts.ResetForTests();
-        DistrictCounts.CreateFeature(new Config());
-        DistrictCounts.Activate();
-        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-        for (int i = 0; i < 200; i++)
+        // Re-initialised or replaced: the kept allowed goods are read again, and the counts stay the game's.
+        Inventory changed = list.First(inventory => inventory.AllowedGoods.Count > 0 &&
+                                                    !(bool)typeof(Inventory).GetField("_ignorableCapacity", Any).GetValue(inventory));
+        StorableGoodRegistry registry = (StorableGoodRegistry)typeof(Inventory).GetField("_allowedGoods", Any).GetValue(changed);
+        registry.Add(new List<StorableGoodAmount>
         {
-            games.UpdateCounters();
-        }
-        double gameMs = watch.Elapsed.TotalMilliseconds / 200;
-        watch.Restart();
-        for (int i = 0; i < 200; i++)
-        {
-            DistrictCounts.UpdatePrefix(mods);
-        }
-        Console.WriteLine($"     timing: one count of 700 inventories, the game {gameMs:0.000} ms, the mod {watch.Elapsed.TotalMilliseconds / 200:0.000} ms " +
-                          "(a quarter of these inventories are held on the main thread by the test's stand-in mod rule)");
+            new StorableGoodAmount(StorableGood.CreateGiveableAndTakeable("Good29"), 77),
+            new StorableGoodAmount(StorableGood.CreateGiveableAndTakeable(changed.AllowedGoods[0].StorableGood.GoodId), 5)
+        });
+        games.UpdateCounters();
+        DistrictCounts.UpdatePrefix(mods);
+        bool afterAdd = Counts(games, goods) == Counts(mods, goods);
+        string addLine = DistrictCounts.TakeStatsLine();
+        Inventory other = list.Last(inventory => inventory.AllowedGoods.Count > 2);
+        StorableGoodRegistry swapped = new StorableGoodRegistry();
+        swapped.Add(other.AllowedGoods.Reverse().Select(good => new StorableGoodAmount(good.StorableGood, good.Amount + 3)).ToList());
+        Set(other, "_allowedGoods", swapped);
+        Inventory replacement = NewInventory(new Random(99), goods, 5);
+        inventories.Remove(list[7]);
+        inventories.Add(replacement);
+        games.UpdateCounters();
+        DistrictCounts.UpdatePrefix(mods);
+        bool afterSwap = Counts(games, goods) == Counts(mods, goods);
+        string swapLine = DistrictCounts.TakeStatsLine();
+        inventories.Remove(replacement);
+        inventories.Add(list[7]);
+        check(afterAdd && addLine.Contains("allowed goods read anew for 1 inventories") && afterSwap &&
+              swapLine.Contains("allowed goods read anew for 2 inventories"),
+            "district counts: an inventory initialised again (more allowed goods, one of them a second entry for a good " +
+            "it had), a replaced allowed-goods registry of the same size and a replaced inventory are read again, and " +
+            "every good still reads the game's count");
+
+        // What is read on every count, never kept: ignorable capacity (the emptying registry switches it) and the
+        // capacity rule itself.
+        Inventory toggled = list.First(inventory => !(bool)typeof(Inventory).GetField("_ignorableCapacity", Any).GetValue(inventory) &&
+                                                    inventory.AllowedGoods.Count > 3);
+        toggled.SetIgnorableCapacity(true);
+        Inventory ruled = list.First(inventory => inventory != toggled && inventory.AllowedGoods.Count > 3 &&
+                                                  !(bool)typeof(Inventory).GetField("_ignorableCapacity", Any).GetValue(inventory));
+        object previousRule = typeof(Inventory).GetField("_goodDisallower", Any).GetValue(ruled);
+        Set(ruled, "_goodDisallower", new ModDisallower());
+        games.UpdateCounters();
+        DistrictCounts.UpdatePrefix(mods);
+        bool live = Counts(games, goods) == Counts(mods, goods);
+        toggled.SetIgnorableCapacity(false);
+        Set(ruled, "_goodDisallower", previousRule);
+        games.UpdateCounters();
+        DistrictCounts.UpdatePrefix(mods);
+        check(live && Counts(games, goods) == Counts(mods, goods),
+            "district counts: ignorable capacity and the capacity rule are read on every count, so switching either reads the game's count");
         DistrictCounts.TakeStatsLine();
 
-        // A small district is left to the game.
+        // The count at the logged colony's size, for the record: the game's loop, the walk on the main thread, and the
+        // walk dealt out to the worker threads.
+        RunDistrictCountsTiming(goods, games, mods);
+
+        // Every district is counted by the mod now, however small: the walk has no threads to wake.
         HashSet<Inventory> few = new HashSet<Inventory>(list.Take(40));
+        DistrictResourceCounter smallGames = NewCounter(few);
         DistrictResourceCounter small = NewCounter(few);
-        check(DistrictCounts.UpdatePrefix(small), "district counts: a small district is left to the game's loop");
+        smallGames.UpdateCounters();
+        check(!DistrictCounts.UpdatePrefix(small) && Counts(smallGames, goods) == Counts(small, goods),
+            "district counts: a small district is counted by the mod too, with the game's numbers");
 
         check(DistrictCounts.Difference(new Dictionary<string, int> { { "a", 1 }, { "b", 0 } }, new Dictionary<string, int> { { "a", 1 } }) == null &&
               DistrictCounts.Difference(new Dictionary<string, int> { { "a", 1 } }, new Dictionary<string, int> { { "a", 2 } }) != null &&
               DistrictCounts.Difference(new Dictionary<string, int> { { "a", 1 }, { "c", 3 } }, new Dictionary<string, int> { { "a", 1 } }) != null,
             "district counts: the comparison reads both tables the way the game does, value or 0");
 
-        // Another mod patches something the workers would call: the game's own count runs, quietly.
-        DistrictCounts.ResetForTests();
-        DistrictCounts.PatchesOn = method => method.Name == "GetCapacity" ? new[] { ("some.other.mod", "Other.Patch.Prefix") } : null;
-        DistrictCounts.Activate();
-        check(DistrictCounts.UpdatePrefix(mods) && !DistrictCounts.IsActive,
-            "district counts: if another mod patches a method the workers call, the game's own count runs");
+        // Another mod patches something the walk stands in for: the game's own count runs, quietly.
+        foreach ((string type, string method) in new[]
+                 {
+                     ("Inventory", "GetCapacity"), ("Inventory", "LimitedAmount"), ("Inventory", "Gives"), ("Inventory", "get_AllowedGoods"),
+                     ("StorableGoodRegistry", "GetAmount"), ("CapacityCounter", "CountInventoryCapacity"), ("StockCounter", "UpdateStock")
+                 })
+        {
+            DistrictCounts.ResetForTests();
+            DistrictCounts.PatchesOn = target => target.Name == method && target.DeclaringType.Name == type
+                ? new[] { ("some.other.mod", "Other.Patch.Prefix") } : null;
+            DistrictCounts.Activate();
+            check(DistrictCounts.UpdatePrefix(mods) && !DistrictCounts.IsActive,
+                $"district counts: if another mod patches {type}.{method}, the game's own count runs");
+        }
 
-        // MixedStorage's AllowedAmount prefix was read and is accepted; any other patch of the same mod is not.
+        // A patch on a capacity rule runs for the mod as for the game (the rules are called on the game thread, the
+        // way the game calls them), so MixedStorage's allocation limit needs no review any more.
         List<string> accepted = new List<string>();
         DistrictCounts.PatchesOn = method => method.Name == "AllowedAmount" && method.DeclaringType.Name == "SingleGoodAllower"
             ? new[] { ("kyler.mixedstorage", "MixedStorage.LimitPatch.Prefix") } : null;
-        check(DistrictCounts.ForeignPatch(accepted) == null && accepted.Count == 1 && accepted[0].Contains("kyler.mixedstorage"),
-            "district counts: MixedStorage's allocation limit patch is accepted, and logged");
-        DistrictCounts.PatchesOn = method => method.Name == "AllowedAmount" && method.DeclaringType.Name == "SingleGoodAllower"
-            ? new[] { ("kyler.mixedstorage", "MixedStorage.SomethingNew.Prefix") } : null;
-        check(DistrictCounts.ForeignPatch(null) != null,
-            "district counts: a patch from the same mod that was not read still hands counting to the game");
-        DistrictCounts.PatchesOn = method => method.Name == "AllowedAmount" && method.DeclaringType.Name == "SingleGoodAllower"
-            ? new[] { ("someone.else", "MixedStorage.LimitPatch.Prefix") } : null;
-        check(DistrictCounts.ForeignPatch(null) != null,
-            "district counts: the same patch name under another mod's id is not accepted");
-        DistrictCounts.PatchesOn = method => method.Name == "GetCapacity" ? new[] { ("kyler.mixedstorage", "MixedStorage.LimitPatch.Prefix") } : null;
-        check(DistrictCounts.ForeignPatch(null) != null,
-            "district counts: the reviewed patch is only accepted on the method it was reviewed on");
+        check(DistrictCounts.ForeignPatch(accepted) == null && accepted.Count == 0 && DistrictCounts.ReviewedPatches.Length == 0,
+            "district counts: a patch on a capacity rule (MixedStorage's allocation limit) leaves the count to the mod");
 
         DistrictCounts.PatchesOn = method => null;
         RunDistrictCountsVerifyOnlyMeasures(check, list, goods);
@@ -924,6 +973,169 @@ internal static class SaveAndCountsTests
         games.UpdateCounters();
         mods.UpdateCounters();
         check(Counts(games, goods) == Counts(mods, goods), "district counts: and the game's count then leaves nothing of the failed one behind");
+    }
+
+    // The four tables as the game holds them: keys, values and order.
+    private static string Tables(DistrictResourceCounter counter)
+    {
+        object stock = typeof(DistrictResourceCounter).GetField("_stockCounter", Any).GetValue(counter);
+        object capacity = typeof(DistrictResourceCounter).GetField("_capacityCounter", Any).GetValue(counter);
+        StringBuilder text = new StringBuilder();
+        foreach ((object owner, string field) in new[]
+                 {
+                     (stock, "_outputStock"), (stock, "_inputOutputStock"), (capacity, "_outputCapacity"), (capacity, "_inputOutputCapacity")
+                 })
+        {
+            foreach (KeyValuePair<string, int> pair in (Dictionary<string, int>)owner.GetType().GetField(field, Any).GetValue(owner))
+            {
+                text.Append(pair.Key).Append('=').Append(pair.Value).Append(',');
+            }
+            text.Append('|');
+        }
+        return text.ToString();
+    }
+
+    // MixedStorage's allocation rule under Mono: a ConditionalWeakTable lookup, which takes the table's one lock, on
+    // every AllowedAmount call. Here a lookup under a lock shared by every storage.
+    private sealed class LockedRule : IGoodDisallower
+    {
+        private static readonly object Gate = new object();
+        public Dictionary<string, int> Limits;
+
+#pragma warning disable CS0067
+        public event EventHandler<DisallowedGoodsChangedEventArgs> DisallowedGoodsChanged;
+#pragma warning restore CS0067
+
+        public int AllowedAmount(string goodId)
+        {
+            lock (Gate)
+            {
+                return Limits.TryGetValue(goodId, out int limit) ? limit : 0;
+            }
+        }
+    }
+
+    // A district like the logged one: 236 inventories, 38 of them warehouses allowing 25 goods each, the rest workshops,
+    // flags and piles with one to four. Timed the game's way, the mod's way on the main thread, and the mod's walk dealt
+    // out to the worker threads (TickWorkers, as up to 0.4.27, with a table per worker added up on the main thread),
+    // each with the warehouses under the game's single-good rule and under a locked rule (MixedStorage under Mono).
+    private static void RunDistrictCountsTiming(string[] goods, DistrictResourceCounter games, DistrictResourceCounter mods)
+    {
+        foreach (bool locked in new[] { false, true })
+        {
+            Random random = new Random(21);
+            HashSet<Inventory> district = new HashSet<Inventory>();
+            for (int i = 0; i < 236; i++)
+            {
+                Inventory inventory;
+                if (i < 38)
+                {
+                    inventory = NewInventory(random, goods, 1);
+                    StorableGoodRegistry allowed = new StorableGoodRegistry();
+                    allowed.Add(goods.Take(25).Select(good => new StorableGoodAmount(StorableGood.CreateGiveableAndTakeable(good), 180)).ToList());
+                    Set(inventory, "_allowedGoods", allowed);
+                    Set(inventory, "_ignorableCapacity", false);
+                    if (locked)
+                    {
+                        Set(inventory, "_goodDisallower", new LockedRule { Limits = goods.Take(25).ToDictionary(good => good, good => 7) });
+                    }
+                }
+                else
+                {
+                    inventory = NewInventory(random, goods, i % 5 == 0 ? i + 1 : i);
+                    if (typeof(Inventory).GetField("_goodDisallower", Any).GetValue(inventory) is ModDisallower)
+                    {
+                        Set(inventory, "_goodDisallower", Activator.CreateInstance(
+                            typeof(Inventory).Assembly.GetType("Timberborn.InventorySystem.NullGoodDisallower", true), true));
+                    }
+                }
+                district.Add(inventory);
+            }
+            DistrictResourceCounter gameCounter = NewCounter(district);
+            DistrictResourceCounter modCounter = NewCounter(district);
+            DistrictCounts.ResetForTests();
+            DistrictCounts.CreateFeature(new Config());
+            DistrictCounts.Activate();
+            DistrictCounts.UpdatePrefix(modCounter);
+            gameCounter.UpdateCounters();
+            bool agrees = Counts(gameCounter, goods) == Counts(modCounter, goods);
+
+            Inventory[] items = district.ToArray();
+            int workers = Math.Max(1, TickWorkers.Maximum);
+            Dictionary<string, int>[][] tallies = Enumerable.Range(0, workers)
+                .Select(_ => Enumerable.Range(0, 4).Select(__ => new Dictionary<string, int>()).ToArray()).ToArray();
+            Dictionary<string, int>[] merged = Enumerable.Range(0, 4).Select(_ => new Dictionary<string, int>()).ToArray();
+            DistrictCounts.AllowedGoods[] lists = new DistrictCounts.AllowedGoods[items.Length];
+            void OnWorkers()
+            {
+                for (int i = 0; i < items.Length; i++)
+                {
+                    lists[i] = DistrictCounts.AllowedOf(items[i]);
+                }
+                int used = 1;
+                TickWorkers.Run(workers, (worker, sharing) =>
+                {
+                    if (worker == 0)
+                    {
+                        used = sharing;
+                    }
+                    Dictionary<string, int>[] tally = tallies[worker];
+                    foreach (Dictionary<string, int> table in tally)
+                    {
+                        table.Clear();
+                    }
+                    for (int i = worker; i < items.Length; i += sharing)
+                    {
+                        DistrictCounts.CountStock(items[i], tally[0], tally[1]);
+                        DistrictCounts.CountCapacity(items[i], lists[i], tally[2], tally[3]);
+                    }
+                });
+                for (int table = 0; table < 4; table++)
+                {
+                    merged[table].Clear();
+                    for (int worker = 0; worker < used; worker++)
+                    {
+                        foreach (KeyValuePair<string, int> pair in tallies[worker][table])
+                        {
+                            DistrictCounts.Add(merged[table], pair.Key, pair.Value);
+                        }
+                    }
+                }
+            }
+            double Time(Action count)
+            {
+                for (int i = 0; i < 200; i++)
+                {
+                    count();
+                }
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < 2000; i++)
+                {
+                    count();
+                }
+                return watch.Elapsed.TotalMilliseconds / 2000;
+            }
+            double gameMs = Time(() => gameCounter.UpdateCounters());
+            double mainMs = Time(() => DistrictCounts.UpdatePrefix(modCounter));
+            double workersMs = Time(OnWorkers);
+            // One count per tick, with the rest of the tick in between (the workers go back to sleep).
+            double sleptMs = 0;
+            for (int i = 0; i < 100; i++)
+            {
+                Thread.Sleep(2);
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                OnWorkers();
+                sleptMs += watch.Elapsed.TotalMilliseconds / 100;
+            }
+            Console.WriteLine($"     timing{(agrees ? "" : " (COUNTS DIFFER)")}: one count of 236 inventories (38 warehouses x 25 goods), " +
+                              (locked ? "warehouses under a locked rule (MixedStorage under Mono)" : "warehouses under the game's single-good rule") +
+                              $": the game {gameMs * 1000:0} us, the walk on the main thread {mainMs * 1000:0} us, the walk on {workers} " +
+                              $"worker threads {workersMs * 1000:0} us back to back and {sleptMs * 1000:0} us with 2 ms between counts");
+        }
+        DistrictCounts.ResetForTests();
+        DistrictCounts.CreateFeature(new Config());
+        DistrictCounts.Activate();
+        DistrictCounts.TakeStatsLine();
     }
 
     // A capacity rule that answers differently every time it is asked: the game's count in verify mode then comes out
