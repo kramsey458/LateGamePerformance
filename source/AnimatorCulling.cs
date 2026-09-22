@@ -10,7 +10,10 @@ namespace LateGamePerformance
     // out walking. For an animator none of whose renderers is visible (Unity counts shadow casters as visible),
     // this keeps the game's own time-keeping (Time, RepeatedTime, PlayingFinished, the AnimationChanged event, the
     // wonder's saved animation time) exactly as it is and leaves out only the pose writes. When the object comes
-    // back into view its pose is written again on that frame's update, from the time it would have had anyway.
+    // back into view its pose is written again from the time it would have had anyway; on the single frame in
+    // which it first reappears it can still show the pose it had when it left the screen, because Unity decides
+    // visibility after the update. An animation that plays once and finishes off screen gets its final pose
+    // written at that moment, since the game never updates a finished animation again.
     //
     // Rendering only. The simulation reads animator time, never a node transform or a material.
     internal static class AnimatorCulling
@@ -29,6 +32,7 @@ namespace LateGamePerformance
         private static Func<object, float> _speed;
         private static Func<object, object> _currentAnimation;
         private static Action<object, float> _updateTime;
+        private static Action<object> _writePose;
         private static readonly ConditionalWeakTable<object, Entry> Entries = new ConditionalWeakTable<object, Entry>();
 
         // Swappable for the test harness, which has no Unity.
@@ -53,6 +57,7 @@ namespace LateGamePerformance
                     _speed = Reflect.FieldGetter<float>(animator, "_speed");
                     _currentAnimation = Reflect.FieldGetter<object>(animator, "_currentAnimation");
                     _updateTime = Reflect.InstanceCall<Action<object, float>>(Reflect.Method(AnimatorType, "UpdateTime"));
+                    _writePose = Reflect.InstanceCall<Action<object>>(Reflect.Method(AnimatorType, "UpdateAnimationUpdaters"));
                     return Reflect.Method(AnimatorType, "UpdateAnimation");
                 },
                 Prefix = Reflect.Own(typeof(AnimatorCulling), nameof(UpdatePrefix))
@@ -98,6 +103,12 @@ namespace LateGamePerformance
                     return true;
                 }
                 _updateTime(__instance, deltaTime);
+                if (_playingFinished(__instance))
+                {
+                    // Played once and just finished: the game will not touch it again, so its last pose is written
+                    // now (the wonder, the working-hours bell).
+                    _writePose(__instance);
+                }
                 _skipped++;
                 return false;
             }

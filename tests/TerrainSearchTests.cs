@@ -13,9 +13,11 @@ using Vector3Int = UnityEngine.Vector3Int;
 //   1. every search that starts from scratch leaves the field identical to the game's, node for node (parents,
 //      distances, marks): the same code path the game runs, on its own heap, so tie-breaks match;
 //   2. sequences of searches from one tile (a beaver pricing buildings) give the game's distance, within
-//      floating-point rounding, never explore more tiles than the game's restarts, and do resume;
+//      floating-point rounding, explore in total about half the tiles the game's restarts do, and do resume;
 //   3. verify mode, with list-of-destination searches and terrain changes mixed in, reports no distance or
-//      reachability difference.
+//      reachability difference;
+//   4. on a terrain with steps cheaper than the heuristic allows (as a zipline is), searches that met one are not
+//      resumed from, and verify mode still reports no distance difference.
 internal static class TerrainSearchTests
 {
     private const BindingFlags Any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -117,7 +119,7 @@ internal static class TerrainSearchTests
         check(beyond == 0, $"terrain search: distance is the game's in all searches ({exact} bit for bit, {rounding} within rounding, {beyond} beyond)");
         check(sameRoute > 0 && sameRoute <= exact, $"terrain search: the route is the game's in {sameRoute} of {exact} equal-distance searches; the rest are equally short routes the game would not have picked");
         check(resumed > 200, $"terrain search: {resumed} searches resumed the previous one ({line})");
-        check(modExplored > 0 && modExplored < gameExplored, $"terrain search: explored {modExplored} tiles where the game's restarts explore {gameExplored}");
+        check(modExplored > 0 && modExplored < gameExplored, $"terrain search: explored {modExplored} tiles in total where the game's restarts explore {gameExplored}");
         check(TerrainSearch.IsActive, "terrain search: still active");
 
         // 3. Verify mode with list-of-destination searches and terrain changes mixed in.
@@ -161,7 +163,42 @@ internal static class TerrainSearchTests
         check(Number(line, @"(\d+) DIFFERENT DISTANCE") == 0 && Number(line, @"(\d+) DIFFERENT REACHABILITY") == 0,
             $"terrain search verify: no distance or reachability difference after {multis} list searches and {changes} terrain changes ({line})");
         check(Number(line, @"verify: (\d+) identical") > 0 && TerrainSearch.IsActive, "terrain search verify: identical answers counted, feature still active");
+
+        // 4. Steps cheaper than the heuristic allows: a second terrain where one edge in twelve costs 0.3.
+        object cheapGraph = RouteMapsTests.Create("TerrainNavMeshGraph", nodeIdService, groupService);
+        RouteMapsTests.Call(cheapGraph, "Load");
+        List<int> cheapNodes = BuildTerrain(cheapGraph, random, cheapEdges: true);
+        object cheapField = RouteMapsTests.Create("PathFlowField");
+        TerrainSearch.CreateFeature(new Config { TerrainSearchVerify = true });
+        TerrainSearch.Activate();
+        for (int round = 0; round < 150; round++)
+        {
+            int start = cheapNodes[random.Next(cheapNodes.Count)];
+            for (int k = 0; k < 6; k++)
+            {
+                TerrainSearch.FillPrefix(modPathfinder, cheapGraph, cheapField, start, cheapNodes[random.Next(cheapNodes.Count)]);
+            }
+        }
+        line = TerrainSearch.TakeStatsLine();
+        long restarted = Number(line, @"(\d+) started over");
+        check(Number(line, @"(\d+) DIFFERENT DISTANCE") == 0 && Number(line, @"(\d+) DIFFERENT REACHABILITY") == 0,
+            $"terrain search on uneven costs: verify reports no distance or reachability difference ({line})");
+        check(restarted > 0 && Number(line, @"(\d+) resumed") >= 0, $"terrain search on uneven costs: {restarted} resumed searches met a cheap step and started over the game's way");
+        check(TerrainSearch.IsActive, "terrain search on uneven costs: feature still active");
+
+        // Forgetting: after the join save the field answers nothing and the next search is fresh.
         TerrainSearch.CreateFeature(new Config());
+        TerrainSearch.Activate();
+        int s0 = nodes[random.Next(nodes.Count)];
+        TerrainSearch.FillPrefix(modPathfinder, graph, modField, s0, nodes[random.Next(nodes.Count)]);
+        TerrainSearch.TakeStatsLine();
+        TerrainSearch.JoinSavePostfix();
+        check(Count(modField) == 0 && (int)modField.GetType().GetField("_startNodeId", Any).GetValue(modField) == -1,
+            "terrain search: the join save empties the field");
+        TerrainSearch.FillPrefix(modPathfinder, graph, modField, s0, nodes[random.Next(nodes.Count)]);
+        line = TerrainSearch.TakeStatsLine();
+        check(line != null && line.Contains("1 started from scratch") && line.Contains("0 resumed"), "terrain search: and the next search is fresh (" + line + ")");
+        TerrainSearch.SceneCreated();
     }
 
     private static long Number(string line, string pattern)
@@ -183,7 +220,7 @@ internal static class TerrainSearchTests
         nodeIdService.GetType().GetField("_idToCoordinatesTable", Any).SetValue(nodeIdService, table);
     }
 
-    private static List<int> BuildTerrain(object graph, Random random)
+    private static List<int> BuildTerrain(object graph, Random random, bool cheapEdges = false)
     {
         bool[] walkable = new bool[Width * Height];
         for (int i = 0; i < walkable.Length; i++) walkable[i] = random.Next(100) >= 12;
@@ -202,6 +239,7 @@ internal static class TerrainSearchTests
                 int id = x * Height + y;
                 if (!walkable[id]) continue;
                 float straight = random.Next(20) == 0 ? 3f : 1f;
+                if (cheapEdges && random.Next(12) == 0) straight = 0.3f;
                 if (x + 1 < Width && walkable[id + Height]) Connect(id, id + Height, straight);
                 if (y + 1 < Height && walkable[id + 1]) Connect(id, id + 1, straight);
                 if (x + 1 < Width && y + 1 < Height && walkable[id + Height + 1]) Connect(id, id + Height + 1, 1.4142135f);

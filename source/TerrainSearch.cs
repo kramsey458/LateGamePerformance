@@ -28,10 +28,15 @@ namespace LateGamePerformance
     // distance, because the game's heuristic never overestimates a terrain step (0.9 per straight tile, 1.273
     // per diagonal, against costs of 1 and 1.414), except for the last bits of floating-point rounding when the
     // shortest distance is reached by a different but equally short route; and in that case the route itself can
-    // be a different one of equal length. Every player on this version gets the same answer, because the search
-    // state depends only on the simulation's own sequence of questions (the only other caller is the game's
-    // debug-mode cursor tool). TerrainSearchVerify runs the unmodified algorithm alongside on a shadow field and
-    // counts every difference; it never changes what the game is told, so it may differ between players.
+    // be a different one of equal length. Ziplines and tubes carry their own costs, which the heuristic does not
+    // know; wherever a search pushes across a step cheaper than the heuristic allows, the guarantee is gone, so
+    // such a search is never resumed from and a resumed search that meets one starts over the game's way. Every
+    // player on this version gets the same answer, because the search state depends only on the simulation's
+    // own sequence of questions (the only other caller is the game's debug-mode cursor tool); when the host
+    // writes the save a joining player loads, both forget their history so the next question is fresh on both.
+    // TerrainSearchVerify runs the unmodified algorithm alongside on a shadow field and counts every difference;
+    // it never changes what the game is told, so it may differ between players, and a failure in it only switches
+    // the comparison off.
     internal static class TerrainSearch
     {
         private const string PathfinderType = "Timberborn.Navigation.TerrainAStarPathfinder";
@@ -42,6 +47,7 @@ namespace LateGamePerformance
         private const string AStarNodeType = "Timberborn.Navigation.AStarNode";
         private const string NavMeshNodeType = "Timberborn.Navigation.NavMeshNode";
         private const string HeuristicsType = "Timberborn.Navigation.HeuristicsCalculator";
+        private const string GameSaverType = "Timberborn.GameSaveRuntimeSystem.GameSaver";
 
         private static Engine _engine;
         private static bool _active;
@@ -58,6 +64,7 @@ namespace LateGamePerformance
         private static long _answered;
         private static long _fresh;
         private static long _resumed;
+        private static long _restarted;
         private static long _freshNodes;
         private static long _resumedNodes;
         private static long _stopwatchTicks;
@@ -103,6 +110,15 @@ namespace LateGamePerformance
                 Target = () => Reflect.Method(FieldType, "OnNodesChanged"),
                 Postfix = Reflect.Own(self, nameof(NodesChangedPostfix))
             });
+            feature.Patches.Add(new PatchSpec
+            {
+                // The save a multiplayer host writes for a joining player. The joiner starts with an empty field, so
+                // the host forgets its own history too: the next question is a fresh search on both.
+                Name = "GameSaver.SaveWithoutFinishingTick",
+                Required = false,
+                Target = () => Reflect.Method(GameSaverType, "SaveWithoutFinishingTick"),
+                Postfix = Reflect.Own(self, nameof(JoinSavePostfix))
+            });
             return feature;
         }
 
@@ -110,6 +126,12 @@ namespace LateGamePerformance
         {
             State.Valid = false;
             _active = true;
+        }
+
+        // A new game or map: the previous scene's field and heap are gone, and node ids mean other tiles.
+        public static void SceneCreated()
+        {
+            State.Forget();
         }
 
         internal static bool IsActive => _active;
@@ -131,9 +153,10 @@ namespace LateGamePerformance
                 return null;
             }
             double ms = _stopwatchTicks * 1000.0 / Stopwatch.Frequency;
-            string line = $"TerrainSearch: {_answered + _fresh + _resumed} terrain path searches in {ms:0.0} ms: {_answered} answered " +
-                          $"from the previous search, {_fresh} started from scratch exploring {_freshNodes} tiles, {_resumed} resumed " +
-                          $"exploring {_resumedNodes} more tiles";
+            string line = $"TerrainSearch: {_answered + _fresh + _resumed + _restarted} terrain path searches in {ms:0.0} ms: " +
+                          $"{_answered} answered from the previous search, {_fresh} started from scratch exploring {_freshNodes} tiles, " +
+                          $"{_resumed} resumed exploring {_resumedNodes} more tiles, {_restarted} started over after meeting a step " +
+                          "cheaper than the heuristic allows";
             if (_verify)
             {
                 line += $"; verify: {_verifyIdentical} identical, {_verifyRounding} same distance within rounding, " +
@@ -141,7 +164,7 @@ namespace LateGamePerformance
                         $"{_verifyFound} DIFFERENT REACHABILITY; the game's search explored {_verifyShadowNodes} tiles, " +
                         $"this mod's {_verifyRealNodes}";
             }
-            _answered = _fresh = _resumed = _freshNodes = _resumedNodes = _stopwatchTicks = 0;
+            _answered = _fresh = _resumed = _restarted = _freshNodes = _resumedNodes = _stopwatchTicks = 0;
             _verifyIdentical = _verifyRounding = _verifyRoute = _verifyDistance = _verifyFound = 0;
             _verifyShadowNodes = _verifyRealNodes = 0;
             return line;
@@ -170,6 +193,10 @@ namespace LateGamePerformance
                         _fresh++;
                         _freshNodes += explored;
                         break;
+                    case Engine.Outcome.Restarted:
+                        _restarted++;
+                        _freshNodes += explored;
+                        break;
                     default:
                         _resumed++;
                         _resumedNodes += explored;
@@ -177,7 +204,17 @@ namespace LateGamePerformance
                 }
                 if (_verify)
                 {
-                    Verify(__instance, terrainNavMeshGraph, flowField, startNodeId, destinationNodeId, explored);
+                    // A comparison that fails switches only the comparison off: the answer above stands, and a
+                    // measurement that one player has on must never change what that player's game does.
+                    try
+                    {
+                        Verify(__instance, terrainNavMeshGraph, flowField, startNodeId, destinationNodeId, explored);
+                    }
+                    catch (Exception exception)
+                    {
+                        _verify = false;
+                        Log.Warning("TerrainSearch verify failed and is off for this session; the search itself is unaffected: " + exception);
+                    }
                 }
                 return false;
             }
@@ -197,6 +234,14 @@ namespace LateGamePerformance
         {
             Touched(__instance);
         }
+
+        internal static void JoinSavePostfix()
+        {
+            if (_active)
+            {
+                _engine.ForgetHistory(State);
+            }
+        }
         // ReSharper restore InconsistentNaming
 
         private static void Touched(object field)
@@ -206,12 +251,10 @@ namespace LateGamePerformance
                 return;
             }
             State.Valid = false;
-            if (_verify)
-            {
-                // The game's own field would have gone through the same change from its own contents; the two
-                // may now differ in what they hold, so the comparison starts again from this mod's state.
-                State.ShadowValid = false;
-            }
+            // The game's own field would have gone through the same change from its own contents; the two may now
+            // differ in what they hold, so the comparison (if it is on, or gets switched on later) starts again
+            // from this mod's state.
+            State.ShadowValid = false;
         }
 
         private static void Verify(object pathfinder, object graph, object field, int start, int dest, int explored)
@@ -264,7 +307,9 @@ namespace LateGamePerformance
             {
                 Answered,
                 Fresh,
-                Resumed
+                Resumed,
+                // Resumed, met a step cheaper than the heuristic allows, and started over the game's way.
+                Restarted
             }
 
             public enum Comparison
@@ -285,10 +330,23 @@ namespace LateGamePerformance
                 public int NodeCount;
                 // The tile the last search stopped at: it was explored, but its neighbours were never pushed.
                 public int LastDestination;
+                // False once a search from this start pushed across a step cheaper than the heuristic allows (a
+                // zipline, a tube): explored tiles may then not hold their shortest distance, so nothing resumes.
+                public bool Consistent;
                 // Verify mode: the unmodified algorithm's own field and heap.
                 public object Shadow;
                 public object ShadowHeap;
                 public bool ShadowValid;
+
+                public void Forget()
+                {
+                    Valid = false;
+                    Field = null;
+                    Heap = null;
+                    Shadow = null;
+                    ShadowHeap = null;
+                    ShadowValid = false;
+                }
             }
 
             public float LastReal;
@@ -299,6 +357,10 @@ namespace LateGamePerformance
 
             public abstract Comparison Compare(object pathfinder, object graph, object field, int start, int dest, State state,
                 out int shadowExplored);
+
+            // Drop the resume state and empty the game's field, so the next question is searched from scratch here
+            // as it will be on a player who loads the save being written now.
+            public abstract void ForgetHistory(State state);
         }
 
         internal sealed class Engine<TNode, TAStar> : Engine
@@ -338,6 +400,8 @@ namespace LateGamePerformance
             private readonly List<TAStar> _rekey = new List<TAStar>();
             private readonly List<int> _routeA = new List<int>();
             private readonly List<int> _routeB = new List<int>();
+            // Set by Run/Expand when a pushed step is cheaper than the heuristic allows (h(from) - h(to) > cost).
+            private bool _uneven;
 
             public Engine()
             {
@@ -416,32 +480,64 @@ namespace LateGamePerformance
                 {
                     return Outcome.Answered;
                 }
-                bool resume = state.Valid && ReferenceEquals(state.Field, field) && ReferenceEquals(state.Heap, heap) &&
-                              _fieldStart(field) == start && _refreshed(field) && !_fullyFilled(field) &&
-                              _nodes(field).Count == state.NodeCount;
+                bool resume = state.Valid && state.Consistent && ReferenceEquals(state.Field, field) &&
+                              ReferenceEquals(state.Heap, heap) && _fieldStart(field) == start && _refreshed(field) &&
+                              !_fullyFilled(field) && _nodes(field).Count == state.NodeCount;
                 int before = _nodes(field).Count;
+                bool found;
+                Outcome outcome;
+                _uneven = false;
                 if (resume)
                 {
                     Reprice(heap, field, heuristics);
                     Expand(graph, field, heap, heuristics, state.LastDestination);
+                    found = Run(graph, field, heap, heuristics, dest);
+                    outcome = Outcome.Resumed;
+                    if (_uneven)
+                    {
+                        // Somewhere in the continued search the distances may no longer be the shortest ones the
+                        // game's own restart would find. Do it the game's way.
+                        _uneven = false;
+                        before = 0;
+                        found = Fresh(graph, field, heap, heuristics, start, dest);
+                        outcome = Outcome.Restarted;
+                    }
                 }
                 else
                 {
-                    _clearField(field, start);
-                    _clearHeap(heap);
-                    Push(heap, heuristics, start, -1, 0f);
                     before = 0;
+                    found = Fresh(graph, field, heap, heuristics, start, dest);
+                    outcome = Outcome.Fresh;
                 }
-                bool found = Run(graph, field, heap, heuristics, dest);
                 explored = _nodes(field).Count - before;
                 state.Field = field;
                 state.Heap = heap;
                 state.Start = start;
                 state.NodeCount = _nodes(field).Count;
                 state.LastDestination = dest;
+                state.Consistent = !_uneven;
                 // After a full exploration the game answers every later question itself (CheckedPath).
-                state.Valid = found;
-                return resume ? Outcome.Resumed : Outcome.Fresh;
+                state.Valid = found && !_uneven;
+                return outcome;
+            }
+
+            // The game's search from scratch: clear, push the start, run.
+            private bool Fresh(object graph, object field, object heap, object heuristics, int start, int dest)
+            {
+                _clearField(field, start);
+                _clearHeap(heap);
+                Push(heap, heuristics, start, -1, 0f);
+                return Run(graph, field, heap, heuristics, dest);
+            }
+
+            public override void ForgetHistory(State state)
+            {
+                if (state.Field != null)
+                {
+                    // The game's initial state: no start, no tiles. Its next question cannot be answered from it.
+                    _clearField(state.Field, -1);
+                }
+                state.Forget();
             }
 
             // The frontier was priced for the previous target; price it for this one. Entries for tiles explored
@@ -470,6 +566,7 @@ namespace LateGamePerformance
             private void Expand(object graph, object field, object heap, object heuristics, int id)
             {
                 float g = _distance(field, id);
+                float hHere = _h(heuristics, id);
                 ReadOnlyList<TNode> neighbors = _neighbors(graph, id);
                 for (int i = 0; i < neighbors.Count; i++)
                 {
@@ -477,7 +574,8 @@ namespace LateGamePerformance
                     int neighborId = _nodeId(neighbor);
                     if (!_hasNode(field, neighborId))
                     {
-                        Push(heap, heuristics, neighborId, id, g + _nodeCost(neighbor));
+                        float cost = _nodeCost(neighbor);
+                        PushChecked(heap, heuristics, neighborId, id, g + cost, hHere, cost);
                     }
                 }
             }
@@ -500,6 +598,7 @@ namespace LateGamePerformance
                         _markPartial(field);
                         return true;
                     }
+                    float hHere = _h(heuristics, id);
                     ReadOnlyList<TNode> neighbors = _neighbors(graph, id);
                     for (int i = 0; i < neighbors.Count; i++)
                     {
@@ -507,8 +606,9 @@ namespace LateGamePerformance
                         int neighborId = _nodeId(neighbor);
                         if (!_hasNode(field, neighborId))
                         {
-                            float gScore = g + _nodeCost(neighbor);
-                            Push(heap, heuristics, neighborId, id, gScore);
+                            float cost = _nodeCost(neighbor);
+                            float gScore = g + cost;
+                            PushChecked(heap, heuristics, neighborId, id, gScore, hHere, cost);
                         }
                     }
                 }
@@ -520,6 +620,19 @@ namespace LateGamePerformance
             {
                 float f = g + _h(heuristics, id);
                 _push(heap, _newEntry(id, parent, g, f));
+            }
+
+            // The same push (same float operations, same entry) plus the consistency check: a step whose cost is
+            // below the drop in the heuristic breaks the shortest-distance guarantee the resume relies on.
+            private void PushChecked(object heap, object heuristics, int id, int parent, float g, float hFrom, float cost)
+            {
+                float h = _h(heuristics, id);
+                float f = g + h;
+                _push(heap, _newEntry(id, parent, g, f));
+                if (hFrom - h > cost + 0.001f)
+                {
+                    _uneven = true;
+                }
             }
 
             // Verify mode: the unmodified algorithm on its own field and heap, then a comparison of what the game

@@ -46,13 +46,12 @@
 
   <details id="how-much">
     <summary>How much faster will my game be?</summary>
-    <div class="answer" data-release-pinned="0.4.14">
+    <div class="answer" data-release-pinned="0.4.20">
       <p>There is no single figure, because it depends on your colony and your computer. What has been reported so far:</p>
       <ul>
-        <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.14 has been played since and reported as working well).</li>
+        <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.14 has been played since and reported as working well; what 0.4.15 to 0.4.20 add has not been played yet).</li>
         <li>On a computer that had memory clean-up freezes of most of a second about once a minute, incremental garbage collection removed them and made the frame rate much steadier at high tick rates.</li>
-        <li>Preview <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.18">0.4.18</a> (pre-release, not yet played) is aimed at the single slow beaver ticks and the end-of-day slump: terrain path searches from the same tile continue instead of restarting.</li>
-        <li>Previews <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.16">0.4.16</a> and <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.17">0.4.17</a> (pre-releases, not yet played) stop the second of stutter that followed every autosave and memory clean-up in a logged 354-beaver session, by not letting one frame catch up everything a long frame missed, and move the memory clean-up that followed each autosave into the save's own frame.</li>
+        <li>0.4.16 to 0.4.18 (not yet played) are aimed at what a logged 354-beaver session showed: the second of stutter after every autosave and memory clean-up, and the single slow beaver ticks and end-of-day slump from terrain path searches that restarted from the same tile.</li>
       </ul>
       <p>There is no controlled frame rate benchmark yet. The mod logs its own <a href="#timing">timing line</a> so you can see your colony's numbers.</p>
     </div>
@@ -98,7 +97,7 @@
         <li>Hauling lists, tree searches and route maps are checked against the game's own code, including node for node for route maps.</li>
         <li>Nothing that affects the simulation is a setting, so the same version behaves the same for every player.</li>
         <li>Which route maps get built never depends on what any single player's screen asked for.</li>
-        <li>The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on</code> is the same in every player's log.</li>
+        <li>The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on</code> is the same in every player's log.</li>
       </ul>
       <p>See <a href="index.html#status">what is tested, and what isn't</a>.</p>
     </div>

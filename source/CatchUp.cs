@@ -40,6 +40,7 @@ namespace LateGamePerformance
 
         // Swappable for the test harness, which has no Unity.
         internal static Func<float> UnscaledDeltaTime = () => UnityEngine.Time.unscaledDeltaTime;
+        internal static Func<float> MaximumDeltaTime = () => UnityEngine.Time.maximumDeltaTime;
 
         private static Policy _policy = new Policy();
         private static bool _active;
@@ -94,7 +95,9 @@ namespace LateGamePerformance
             }
             try
             {
-                float unscaled = UnscaledDeltaTime();
+                // What the ticker was handed is the unscaled frame time, capped by Unity at maximumDeltaTime,
+                // times the game speed; the cap is applied here too so the ratio below is exact.
+                float unscaled = Math.Min(UnscaledDeltaTime(), MaximumDeltaTime());
                 if (unscaled <= 0f)
                 {
                     return;

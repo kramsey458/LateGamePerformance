@@ -86,6 +86,14 @@ namespace LateGamePerformance
             _active = true;
         }
 
+        // A new scene has a new camera and listener.
+        public static void SceneCreated()
+        {
+            _policy = new Policy();
+            _hasCamera = false;
+            _measuring = false;
+        }
+
         public static string TakeStatsLine()
         {
             if (!_active || _ran + _skipped == 0)

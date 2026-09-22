@@ -86,7 +86,7 @@
   <ol>
     <li>Quit the game, then open <code>%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log</code>. If you have already restarted, the previous session is in <code>Player-prev.log</code>.</li>
     <li>Search for <code>[LateGamePerformance]</code>. At startup you should see a line for the version and one for the features:
-<pre><code class="log-line">[LateGamePerformance] <span data-release="version">0.4.14</span> loading.</code><code class="log-line">[LateGamePerformance] Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on. These are the same for every player on this version.</code></pre></li>
+<pre><code class="log-line">[LateGamePerformance] <span data-release="version">0.4.14</span> loading.</code><code class="log-line">[LateGamePerformance] Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on. These are the same for every player on this version.</code></pre></li>
     <li>Another startup line reports the garbage collector. <code>GC: incremental=False</code> means memory clean-ups stop the whole game while they run. <a href="#gc">You can change that</a>.</li>
     <li>While you play, a stats line appears every 1,000 ticks (10 minutes at normal speed). The numbers in this example are an illustration of the format, and yours will differ:
 <pre><code class="log-line">[LateGamePerformance] Last 1000 ticks. HaulCache: 412 hauler list requests, 251 served from cache, 161 rebuilt in 96.3 ms (0.598 ms each); buildings recomputed 40211/61843</code></pre></li>
@@ -108,7 +108,7 @@
   </ul>
 
   <h2 id="multiplayer">Multiplayer</h2>
-  <p>Every player installs the <strong>same version</strong> of the mod. That is all: nothing that affects the simulation is a setting, so the same version behaves the same for everyone. The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on</code> should read the same in every player's <code>Player.log</code>. If one player's line says <code>OFF</code>, see <a href="troubleshooting.html#off">Troubleshooting</a>. Incremental garbage collection, thread counts and timing logs may differ between players. The mod has been played in multiplayer on two computers; if you try it, please <a href="https://github.com/timbermods/LateGamePerformance/issues/new">tell us how it went</a>.</p>
+  <p>Every player installs the <strong>same version</strong> of the mod. That is all: nothing that affects the simulation is a setting, so the same version behaves the same for everyone. The startup line <code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on</code> should read the same in every player's <code>Player.log</code>. If one player's line says <code>OFF</code>, see <a href="troubleshooting.html#off">Troubleshooting</a>. Incremental garbage collection, thread counts and timing logs may differ between players. The mod has been played in multiplayer on two computers; if you try it, please <a href="https://github.com/timbermods/LateGamePerformance/issues/new">tell us how it went</a>.</p>
 
   <h2 id="update">Updating</h2>
   <ol>

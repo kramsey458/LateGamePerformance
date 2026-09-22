@@ -97,7 +97,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 87, $"87 patches declared (found {patchCount})");
+        Check(patchCount == 88, $"88 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -147,6 +147,7 @@ internal static class Program
         Check(policy.Allow(0f) == 0f && policy.Allow(-1f) == -1f, "catch-up: paused frames are left alone");
         // The prefix scales the game's delta by the same ratio, so the speed and Unity's own cap stay in it.
         CatchUp.Activate();
+        CatchUp.MaximumDeltaTime = () => 1f / 3f;
         for (int i = 0; i < 200; i++)
         {
             CatchUp.UnscaledDeltaTime = () => 0.016f;
@@ -160,6 +161,13 @@ internal static class Program
         string line = CatchUp.TakeStatsLine();
         Check(line != null && line.Contains("after 1 long frame(s)") && line.Contains("1.9 s of game time") &&
               line.Contains("longest such frame 300 ms"), "catch-up stats: " + line);
+        // A 2 s stall: Unity hands the ticker a third of a second times the speed, and the policy's share of the
+        // capped time is what the ticker keeps.
+        CatchUp.UnscaledDeltaTime = () => 2f;
+        float stalled = 7f / 3f;
+        CatchUp.UpdatePrefix(ref stalled);
+        Check(Math.Abs(stalled - 7f * (2f * 0.0169f)) < 0.02f, $"catch-up prefix: a stall beyond Unity's cap is scaled from the capped time (got {stalled:0.000})");
+        CatchUp.TakeStatsLine();
         Check(CatchUp.TakeStatsLine() == null, "catch-up stats: nothing to say when nothing was limited");
         CatchUp.UnscaledDeltaTime = () => throw new InvalidOperationException("no unity");
         float untouched = 1f;

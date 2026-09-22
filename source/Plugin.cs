@@ -280,6 +280,8 @@ namespace LateGamePerformance
             BackgroundSave.SceneCreated();
             WaterMapCopy.SceneCreated();
             WaterRendering.SceneCreated();
+            TerrainSearch.SceneCreated();
+            SoundListenerSkip.SceneCreated();
             _ticksSinceReport = 0;
         }
     }

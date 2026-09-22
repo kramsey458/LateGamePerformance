@@ -527,16 +527,20 @@ What is the same and what is not:
   straight tile and 1.273 per diagonal, against costs of 1 and 1.414), so every explored tile already holds its
   shortest distance when the search continues. The one exception is floating-point rounding in the last bits when
   the shortest distance is reached by a different but equally short route, and in that case the route itself can be
-  a different one of equal length. Ziplines and tubes carry their own costs; a route through them can be priced
-  differently by the game's own search too, because its heuristic does not know them.
+  a different one of equal length. Ziplines and tubes carry their own costs, which the heuristic does not know;
+  from 0.4.20 every push checks the step against the heuristic's drop, a search that pushed across a cheaper step
+  is never resumed from, and a resumed search that meets one starts over the game's way (counted as "started
+  over" in the stats line), so the distance stays the game's there too.
 - Every player on this version gets the same answer: the search state depends only on the simulation's own
-  sequence of questions. The only other caller of this search is the game's debug-mode cursor tool.
+  sequence of questions. The only other caller of this search is the game's debug-mode cursor tool. When the host
+  writes the save a joining player loads (`GameSaver.SaveWithoutFinishingTick`), the host empties the field and
+  forgets its history, so the next question is a fresh search on both computers (0.4.20).
 - `TerrainSearchVerify = true`, or the **Verify terrain path searches** box on the settings page (0.4.19), runs the
   unmodified algorithm alongside on a shadow field and heap, compares what
   the game is told after every search and counts: identical, same distance within rounding, equally short but
   different route, different distance, different reachability. It never changes the answer, so it may differ
   between players; after a terrain change or a list-of-destinations search the comparison restarts from the mod's
-  state. Slower; for testing.
+  state, and a failure inside the comparison only switches the comparison off (0.4.20). Slower; for testing.
 - The `TerrainSearch:` stats line counts searches answered from the previous search, started from scratch and
   resumed, with the tiles each explored and the time.
 - Measured in the harness (`tests/TerrainSearchTests.cs`, the game's real `TerrainAStarPathfinder`, `PathFlowField`,
@@ -594,8 +598,10 @@ own private `UpdateTime` and leaves out the pose writes. So `Time`, `RepeatedTim
 transforms and material values of something nobody can see go unwritten. When the object comes back into view its
 pose is written again on that frame's update, from the time it would have had anyway; on the single frame in which
 it first reappears it can show the pose it had when it left the screen. The renderer list of each animator is
-looked up on first sight and again every 600 frames or when one was destroyed. The `AnimatorCulling:` stats line
-counts updates left out. Rendering only: the simulation reads animator time (the wonder, the clutch, particle
+looked up on first sight and again every 600 frames or when one was destroyed. An animation that plays once and
+finishes while off screen (the wonder, the working-hours bell) gets its final pose written at that moment, because
+the game never updates a finished animation again (0.4.20). The `AnimatorCulling:` stats line counts updates left
+out. Rendering only: the simulation reads animator time (the wonder, the clutch, particle
 triggers, the character model), never a node transform or a material.
 
 ### Catch-up limit (on by default, new in 0.4.16)
@@ -606,7 +612,8 @@ of game time, three and a half ticks: in a 35-minute session log of a 354-beaver
 by frames of 131, 66, 142, 290 and 107 ms, and every collection by a similar tail. One hitch became about a second
 of stutter.
 
-`LimitCatchUp = true` (the default) limits what one frame may catch up to twice the recent ordinary frame time
+`LimitCatchUp = true` (the default) limits what one frame may catch up (measured from the same capped unscaled
+frame time Unity hands the ticker) to twice the recent ordinary frame time
 (at least a thirtieth of a second); the rest is simply not run, so the simulation loses a fraction of a second of
 wall clock per hitch. Which ticks run, and in what order, is unchanged, and how many buckets a frame runs already
 differs between players and machines, so this is pacing, not simulation. The limit follows each machine's own
