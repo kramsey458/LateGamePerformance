@@ -280,7 +280,7 @@
       <div class="notice" style="margin:0">
         <p><strong>Not yet verified</strong></p>
         <ul class="checks no">
-          <li>Preview <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.16">0.4.16</a> (pre-release, not yet played): after a long frame such as an autosave or a memory clean-up, the simulation no longer catches up all at once. In a logged 354-beaver session every such hitch was followed by about a second of stutter. The rule is tested on its own; the game running with it is not.</li>
+          <li>Previews <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.16">0.4.16</a> and <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.17">0.4.17</a> (pre-releases, not yet played): after a long frame such as an autosave or a memory clean-up, the simulation no longer catches up all at once, which in a logged 354-beaver session turned every such hitch into about a second of stutter; the memory clean-up that followed every autosave a second later now happens in the save's own frame; and the audio listener and two interface systems stop redoing their work every frame. The rules are tested on their own; the game running with them is not.</li>
           <li>0.4.14 has been played and reported as working well, but no stats lines from that session have been read yet, so the in-game savings are not measured.</li>
           <li>The tree search against the game's own search inside a running game (the model comes from reading the game's code).</li>
           <li>A controlled frame rate benchmark. The improvement is reported from play and logs, and it depends on your colony.</li>
