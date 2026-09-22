@@ -5,9 +5,11 @@ using Timberborn.SettingsSystem;
 
 namespace LateGamePerformance
 {
-    // The in-game settings page (Mod Settings mod). One box: the one decision that is the player's to make, because
-    // it edits a file in the game's folder. Everything else either is not a setting at all (what affects the
-    // simulation) or is a diagnostic in the .cfg that a player never needs to see.
+    // The in-game settings page (Mod Settings mod). Three boxes: the one decision that is the player's to make,
+    // because it edits a file in the game's folder, and the two measurements a tester is asked to switch on for a
+    // session. Nothing that affects the simulation is here (see Config); the other .cfg keys are for tracking a
+    // problem down and a player never needs to see them. The two measurement boxes start from the .cfg value and
+    // remember what the player last chose.
     //
     // This class is the only place that touches Mod Settings types. It pushes values into plain static fields on
     // the features, so nothing else in the mod depends on that assembly being loadable.
@@ -21,6 +23,20 @@ namespace LateGamePerformance
                             "saving a backup beside it; unticking removes the line. Takes effect the next time the " +
                             "game starts. Steam's 'verify integrity of game files' undoes it. Player.log says whether " +
                             "it worked. Does not affect the simulation, so multiplayer peers may differ."));
+
+        public ModSetting<bool> DiagnosticsTimers { get; } = new ModSetting<bool>(Plugin.Current.Diagnostics,
+            ModSettingDescriptor.Create("Diagnostics timers")
+                .SetTooltip("Time the game's own route map fills, need selection, walker path finding and terrain and " +
+                            "road path searches, and log a Diagnostics: line with the stats every 1000 ticks. Adds a " +
+                            "little overhead to hot code; switch it on for one session when asked for numbers. Does " +
+                            "not affect the simulation, so multiplayer peers may differ."));
+
+        public ModSetting<bool> VerifyTerrainSearches { get; } = new ModSetting<bool>(Plugin.Current.TerrainSearchVerify,
+            ModSettingDescriptor.Create("Verify terrain path searches")
+                .SetTooltip("Run the game's own terrain path search alongside this mod's resumed one and count every " +
+                            "difference in the TerrainSearch: line (identical, within rounding, equally short other " +
+                            "route, different distance). Never changes what the game is told; slower. For one test " +
+                            "session. Does not affect the simulation, so multiplayer peers may differ."));
 
         public PerformanceSettings(ISettings settings, ModSettingsOwnerRegistry modSettingsOwnerRegistry,
             ModRepository modRepository) : base(settings, modSettingsOwnerRegistry, modRepository)
@@ -56,6 +72,10 @@ namespace LateGamePerformance
                 // The startup GC line still says what state it is in.
             }
             IncrementalGc.ValueChanged += (_, value) => GcReport.ApplyIncremental(value);
+            Diagnostics.Enabled = DiagnosticsTimers.Value;
+            DiagnosticsTimers.ValueChanged += (_, value) => Diagnostics.Enabled = value;
+            TerrainSearch.VerifyEnabled = VerifyTerrainSearches.Value;
+            VerifyTerrainSearches.ValueChanged += (_, value) => TerrainSearch.VerifyEnabled = value;
         }
     }
 

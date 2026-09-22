@@ -531,7 +531,8 @@ What is the same and what is not:
   differently by the game's own search too, because its heuristic does not know them.
 - Every player on this version gets the same answer: the search state depends only on the simulation's own
   sequence of questions. The only other caller of this search is the game's debug-mode cursor tool.
-- `TerrainSearchVerify = true` runs the unmodified algorithm alongside on a shadow field and heap, compares what
+- `TerrainSearchVerify = true`, or the **Verify terrain path searches** box on the settings page (0.4.19), runs the
+  unmodified algorithm alongside on a shadow field and heap, compares what
   the game is told after every search and counts: identical, same distance within rounding, equally short but
   different route, different distance, different reachability. It never changes the answer, so it may differ
   between players; after a terrain change or a list-of-destinations search the comparison restarts from the mod's
@@ -616,7 +617,8 @@ and the ordinary frame time it measured. It is hooked into `Ticker.Update`, whic
 
 ### Diagnostics (off by default)
 
-`Diagnostics = true` times code this mod does not change: route map (road flow field) fills, including the ones
+`Diagnostics = true`, or the **Diagnostics timers** box on the settings page (0.4.19), times code this mod does not
+change: route map (road flow field) fills, including the ones
 the game still does on demand; need selection (`DistrictNeedBehaviorService.PickBestAction`); walker path finding
 (`Walker.FindPath`, once per new destination); and the game's two A* searches (`RoadAStarPathfinder` and
 `TerrainAStarPathfinder`), which it falls back to when no route map answers. That happens when a beaver standing off
@@ -624,7 +626,9 @@ the road network (a field, a forest) prices the buildings that could satisfy a n
 a search for a place that cannot be reached explores the whole area first. The line reports, per method, calls,
 total time and the longest single call; for the A* searches also how many calls were real searches (rather than
 answers out of the previous search from the same node), how many nodes they explored, and how many explored
-everything reachable. It adds overhead to hot code, so switch it off again after collecting numbers.
+everything reachable. It adds overhead to hot code, so switch it off again after collecting numbers. Since 0.4.19
+the hooks are installed whether or not the timers are on, so that the box works without a restart; off, each hooked
+call costs one boolean check.
 
 ### Stats
 
@@ -730,11 +734,14 @@ features, disable the mod.
 | `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
-One setting is on the in-game settings page (**Mods > Late Game Performance**), not in this file:
-**Incremental garbage collection**, described above. It is there because it is the one decision that is the
-player's to make: it edits a file in the game's folder. Up to 0.4.9 the page had three more boxes; from 0.4.10
-per-component timings are `RecordTimings` in this file, the warning asks once and needs no setting, and adaptive
-pacing is removed.
+Three settings are on the in-game settings page (**Mods > Late Game Performance**): **Incremental garbage
+collection**, described above, which is there because it is the one decision that is the player's to make (it
+edits a file in the game's folder); and, since 0.4.19, **Diagnostics timers** and **Verify terrain path searches**,
+the two measurements a tester is asked to switch on for a session. Those two mirror the `Diagnostics` and
+`TerrainSearchVerify` keys in this file: a box starts from the file's value and then remembers what was last chosen
+on the page, so the page wins once it has been used. Both can be switched while a game is running. Nothing on the
+page affects the simulation. Up to 0.4.9 the page had other boxes; from 0.4.10 per-component timings are
+`RecordTimings` in this file, the warning asks once and needs no setting, and adaptive pacing is removed.
 
 ## Suggested first test
 

@@ -14,9 +14,12 @@ namespace LateGamePerformance
     //   - the two A* searches the game falls back to when no route map answers: a beaver standing off the road
     //     network (a field, a forest) pricing a building, or walking to a random spot. Both run on the main
     //     thread inside the beaver's tick, and a search for an unreachable place explores the whole area.
-    // Adds a prefix+postfix to hot methods, so leave it off for normal play.
+    // Adds a prefix+postfix to hot methods. The patches are always installed; Enabled (the settings page box
+    // "Diagnostics timers", or the .cfg key) says whether they measure. Off, each is one boolean check.
     internal static class Diagnostics
     {
+        internal static volatile bool Enabled;
+
         private const string RoadFlowFieldGeneratorType = "Timberborn.Navigation.RoadFlowFieldGenerator";
         private const string AccessFlowFieldType = "Timberborn.Navigation.AccessFlowField";
         private const string PathFlowFieldType = "Timberborn.Navigation.PathFlowField";
@@ -203,7 +206,7 @@ namespace LateGamePerformance
         private static void FillPrefix(object flowField, out long __state)
         {
             // FillFlowField returns immediately for an already filled field; only real fills are timed.
-            __state = _isFilled(flowField) ? 0 : Stopwatch.GetTimestamp();
+            __state = !Enabled || _isFilled(flowField) ? 0 : Stopwatch.GetTimestamp();
         }
 
         private static void FillPostfix(object flowField, long __state)
@@ -219,21 +222,32 @@ namespace LateGamePerformance
 
         private static void StampPrefix(out long __state)
         {
-            __state = Stopwatch.GetTimestamp();
+            __state = Enabled ? Stopwatch.GetTimestamp() : 0;
         }
 
         private static void NeedPickPostfix(long __state)
         {
-            NeedPicks.Add(Stopwatch.GetTimestamp() - __state);
+            if (__state != 0)
+            {
+                NeedPicks.Add(Stopwatch.GetTimestamp() - __state);
+            }
         }
 
         private static void WalkerPathPostfix(long __state)
         {
-            WalkerPaths.Add(Stopwatch.GetTimestamp() - __state);
+            if (__state != 0)
+            {
+                WalkerPaths.Add(Stopwatch.GetTimestamp() - __state);
+            }
         }
 
         private static void SearchPrefix(object flowField, out SearchState __state)
         {
+            if (!Enabled)
+            {
+                __state = default;
+                return;
+            }
             __state = new SearchState
             {
                 Stamp = Stopwatch.GetTimestamp(), StartNode = _pathStart(flowField), Nodes = _pathNodes(flowField).Count
@@ -253,6 +267,10 @@ namespace LateGamePerformance
 
         private static void SearchPostfix(SearchTimer timer, object flowField, SearchState state)
         {
+            if (state.Stamp == 0)
+            {
+                return;
+            }
             timer.All.Add(Stopwatch.GetTimestamp() - state.Stamp);
             int nodes = _pathNodes(flowField).Count;
             // A search clears the field and fills it again; an answer from the last search leaves it alone. A

@@ -282,8 +282,9 @@ internal static class Program
                 settings++;
             }
         }
-        Check(settings == 1 && page.GetProperty("IncrementalGc") != null,
-            "settings page: exactly one setting, incremental garbage collection");
+        Check(settings == 3 && page.GetProperty("IncrementalGc") != null && page.GetProperty("DiagnosticsTimers") != null &&
+              page.GetProperty("VerifyTerrainSearches") != null,
+            "settings page: three settings: incremental garbage collection, diagnostics timers, verify terrain searches");
         // The main menu notice is built by the game's container: it needs one public constructor whose
         // parameters are things the main menu binds, and the game calls it through this interface.
         Type notice = typeof(GcNotice);

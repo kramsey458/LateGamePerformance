@@ -13,6 +13,9 @@ namespace LateGamePerformance
 
         private static Config _config = new Config();
         private static bool _diagnosticsActive;
+
+        // Read by the settings page for the defaults of the boxes that mirror .cfg keys.
+        internal static Config Current => _config;
         private static long _ticksSinceReport;
 
         public void StartMod(IModEnvironment modEnvironment)
@@ -152,10 +155,10 @@ namespace LateGamePerformance
             {
                 MetricsDump.CreateFeature(config).Apply(HarmonyId);
             }
-            if (config.Diagnostics)
-            {
-                _diagnosticsActive = Diagnostics.CreateFeature().Apply(HarmonyId);
-            }
+            // The timers are installed always and switched on from the settings page or the .cfg, so a player can
+            // turn them on for one session without editing a file. Off, each hooked call costs one boolean check.
+            Diagnostics.Enabled = config.Diagnostics;
+            _diagnosticsActive = Diagnostics.CreateFeature().Apply(HarmonyId);
             CreateTickFeature().Apply(HarmonyId);
             if (config.GcReport)
             {
@@ -263,7 +266,7 @@ namespace LateGamePerformance
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {catchUpLine}");
                 }
-                if (_diagnosticsActive)
+                if (_diagnosticsActive && Diagnostics.Enabled)
                 {
                     Log.Info($"Last {_config.StatsEveryTicks} ticks. {Diagnostics.TakeStatsLine()}");
                 }

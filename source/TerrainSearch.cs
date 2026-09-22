@@ -45,7 +45,15 @@ namespace LateGamePerformance
 
         private static Engine _engine;
         private static bool _active;
-        private static bool _verify;
+        private static volatile bool _verify;
+
+        // The shadow comparison, from the settings page box "Verify terrain path searches" or the .cfg key. It never
+        // changes the answer, so it can be switched at any time.
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set => _verify = value;
+        }
         private static readonly Engine.State State = new Engine.State();
         private static long _answered;
         private static long _fresh;
