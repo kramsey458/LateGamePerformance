@@ -105,8 +105,13 @@ namespace LateGamePerformance
             {
                 TerrainSearch.Activate();
             }
+            bool idleEntities = config.IdleEntities && IdleEntities.CreateFeature(config).Apply(HarmonyId);
+            if (idleEntities)
+            {
+                IdleEntities.Activate();
+            }
             Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts,
-                waterMapCopy, soilScans, terrainSearch));
+                waterMapCopy, soilScans, terrainSearch, idleEntities));
             if (config.WaterRendering)
             {
                 if (WaterRendering.CreateTilesFeature().Apply(HarmonyId))
@@ -170,16 +175,17 @@ namespace LateGamePerformance
         // one failed to start (a game update moved something). One line, the same words for everyone, so two
         // players' logs can be compared at a glance.
         internal static string SimulationFeaturesLine(bool haulCache, bool routeMaps, bool yielderSearch,
-            bool terrainMaps, bool plantWater, bool districtCounts, bool waterMapCopy, bool soilScans, bool terrainSearch)
+            bool terrainMaps, bool plantWater, bool districtCounts, bool waterMapCopy, bool soilScans, bool terrainSearch,
+            bool idleEntities)
         {
             string line = "Simulation features: HaulCache " + (haulCache ? "on" : "OFF") + ", RouteMaps " +
                           (routeMaps ? "on" : "OFF") + ", YielderSearch " + (yielderSearch ? "on" : "OFF") +
                           ", TerrainMaps " + (terrainMaps ? "on" : "OFF") + ", PlantWater " + (plantWater ? "on" : "OFF") +
                           ", DistrictCounts " + (districtCounts ? "on" : "OFF") + ", WaterMapCopy " +
                           (waterMapCopy ? "on" : "OFF") + ", SoilScans " + (soilScans ? "on" : "OFF") + ", TerrainSearch " +
-                          (terrainSearch ? "on" : "OFF") + ".";
+                          (terrainSearch ? "on" : "OFF") + ", IdleEntities " + (idleEntities ? "on" : "OFF") + ".";
             return haulCache && routeMaps && yielderSearch && terrainMaps && plantWater && districtCounts && waterMapCopy &&
-                   soilScans && terrainSearch
+                   soilScans && terrainSearch && idleEntities
                 ? line + " These are the same for every player on this version."
                 : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
                   "own code for it. In multiplayer, check that the other players' logs show the same line.";
@@ -248,7 +254,7 @@ namespace LateGamePerformance
                          {
                              WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine(),
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
-                             TerrainSearch.TakeStatsLine()
+                             TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine()
                          })
                 {
                     if (line != null)
@@ -282,6 +288,7 @@ namespace LateGamePerformance
             WaterRendering.SceneCreated();
             TerrainSearch.SceneCreated();
             SoundListenerSkip.SceneCreated();
+            IdleEntities.SceneCreated();
             _ticksSinceReport = 0;
         }
     }

@@ -1,0 +1,407 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using Timberborn.BaseComponentSystem;
+using Timberborn.TickSystem;
+
+namespace LateGamePerformance
+{
+    // Entities with nothing to tick are passed over in the tick loop.
+    //
+    // Every tree, crop, path, levee and platform is a tickable entity: it carries a tick component that is
+    // switched off nearly all the time (the "demolition blocked" status only while marked for demolition, the
+    // "unreachable" status only while selected). The game still visits every one of them 128 times a day: a
+    // native call to ask whether the object is active, a try block, a walk over its components to find each
+    // one disabled. About 10,000 of the 11,500 entity ticks in the logged 354-beaver colony were such visits.
+    //
+    // This keeps, per bucket, a second sorted list with exactly the game's keys, holding one flag per entity:
+    // whether any of its tick components is enabled. The replacement of TickableEntityBucket.TickAll walks the
+    // game's list by the game's own index and, for each position, reads that flag instead of asking Unity and
+    // walking the components; only entities with a component switched on are ticked. A component can only be
+    // switched through BaseComponent.EnableComponent and DisableComponent (the setter is private), so those two
+    // are hooked and flip the flag; TickableEntityBucket.Add and Remove keep the keys in step, with the same
+    // deferral of removals during a pass that the game has. An entity whose tick components are all disabled
+    // does nothing when ticked, and the index is the game's, so everything the game would do, including its own
+    // quirk of ticking an entity again when something is inserted before it mid-pass, happens exactly as before.
+    // The game's own list is untouched; BeaverBuddies reads it for its per-tick hash.
+    //
+    // Simulation feature: always on, the same on every computer. Self-disables on any bookkeeping exception and
+    // hands the loop back to the game.
+    internal static class IdleEntities
+    {
+        private const string BucketType = "Timberborn.TickSystem.TickableEntityBucket";
+
+        private sealed class Record
+        {
+            public TickableEntity Entity;
+            public Bucket Bucket;
+            public BaseComponent[] Components;
+            public bool Awake;
+        }
+
+        private sealed class Bucket
+        {
+            // The same keys as the game's _tickableEntities, so the same index means the same entity.
+            public readonly SortedList<Guid, Record> Mirror = new SortedList<Guid, Record>();
+            public readonly List<TickableEntity> LeaveLater = new List<TickableEntity>();
+            public bool Ticking;
+        }
+
+        private static Func<object, SortedList<Guid, TickableEntity>> _entities;
+        private static Func<object, List<TickableEntity>> _toRemove;
+        private static Action<object, bool> _setTicking;
+        private static Func<object, object> _components;
+        private static Func<object, object> _inner;
+
+        private static readonly Dictionary<object, Bucket> Buckets = new Dictionary<object, Bucket>();
+        private static readonly Dictionary<TickableEntity, Record> Records = new Dictionary<TickableEntity, Record>();
+        private static readonly Dictionary<BaseComponent, Record> ByComponent = new Dictionary<BaseComponent, Record>();
+
+        // Swappable for the test harness, where the game's Tick cannot run without Unity.
+        internal static Action<TickableEntity> TickEntity = entity => entity.Tick();
+
+        private static bool _active;
+        private static long _passes;
+        private static long _ticked;
+        private static long _leftOut;
+        private static long _resyncs;
+
+        public static Feature CreateFeature(Config config)
+        {
+            Type self = typeof(IdleEntities);
+            Feature feature = new Feature { Name = "IdleEntities" };
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "TickableEntityBucket.TickAll",
+                Required = true,
+                Target = () =>
+                {
+                    Bind();
+                    return Reflect.Method(BucketType, "TickAll");
+                },
+                Prefix = Reflect.Own(self, nameof(TickAllPrefix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "TickableEntityBucket.Add",
+                Required = true,
+                Target = () => Reflect.Method(BucketType, "Add"),
+                Postfix = Reflect.Own(self, nameof(AddPostfix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "TickableEntityBucket.Remove",
+                Required = true,
+                Target = () => Reflect.Method(BucketType, "Remove"),
+                Postfix = Reflect.Own(self, nameof(RemovePostfix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "BaseComponent.EnableComponent",
+                Required = true,
+                Target = () => HarmonyLib.AccessTools.Method(typeof(BaseComponent), "EnableComponent"),
+                Postfix = Reflect.Own(self, nameof(EnabledPostfix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "BaseComponent.DisableComponent",
+                Required = true,
+                Target = () => HarmonyLib.AccessTools.Method(typeof(BaseComponent), "DisableComponent"),
+                Postfix = Reflect.Own(self, nameof(DisabledPostfix))
+            });
+            return feature;
+        }
+
+        internal static void Bind()
+        {
+            if (_entities != null)
+            {
+                return;
+            }
+            Type bucket = Reflect.GameType(BucketType);
+            _entities = Reflect.FieldGetter<SortedList<Guid, TickableEntity>>(bucket, "_tickableEntities");
+            _toRemove = Reflect.FieldGetter<List<TickableEntity>>(bucket, "_entitiesToRemove");
+            _setTicking = Reflect.FieldSetter<bool>(bucket, "_isTicking");
+            _components = Reflect.FieldGetter<object>(typeof(TickableEntity), "_tickableComponents");
+            _inner = Reflect.FieldGetter<object>(typeof(MeteredTickableComponent), "_tickableComponent");
+        }
+
+        public static void Activate()
+        {
+            SceneCreated();
+            _active = true;
+        }
+
+        internal static bool IsActive => _active;
+
+        // A new game or map: the previous scene's buckets and entities are gone.
+        public static void SceneCreated()
+        {
+            Buckets.Clear();
+            Records.Clear();
+            ByComponent.Clear();
+        }
+
+        public static string TakeStatsLine()
+        {
+            if (!_active || _passes == 0)
+            {
+                return null;
+            }
+            double ticks = _passes / 128.0;
+            string line = $"IdleEntities: per tick {_ticked / ticks:0} entities ticked and {_leftOut / ticks:0} passed over because " +
+                          "none of their tick parts was switched on" +
+                          (_resyncs > 0 ? $"; the mirror had to be rebuilt {_resyncs} time(s), which should not happen" : "");
+            _passes = _ticked = _leftOut = _resyncs = 0;
+            return line;
+        }
+
+        // ReSharper disable InconsistentNaming
+        internal static bool TickAllPrefix(object __instance)
+        {
+            if (!_active)
+            {
+                return true;
+            }
+            Bucket bucket;
+            SortedList<Guid, TickableEntity> all;
+            try
+            {
+                all = _entities(__instance);
+                if (!Buckets.TryGetValue(__instance, out bucket))
+                {
+                    if (all.Count == 0)
+                    {
+                        return true;
+                    }
+                    bucket = new Bucket();
+                    Buckets[__instance] = bucket;
+                }
+                if (bucket.Mirror.Count != all.Count || !SameKeys(bucket, all))
+                {
+                    Resync(bucket, all);
+                }
+                _setTicking(__instance, true);
+                bucket.Ticking = true;
+            }
+            catch (Exception exception)
+            {
+                Fail(exception);
+                return true;
+            }
+            SortedList<Guid, Record> mirror = bucket.Mirror;
+            int ticked = 0;
+            try
+            {
+                // The game's loop, index for index; the flag replaces the visit.
+                for (int i = 0; i < all.Count; i++)
+                {
+                    if (mirror.Values[i].Awake)
+                    {
+                        ticked++;
+                        TickEntity(all.Values[i]);
+                    }
+                }
+            }
+            finally
+            {
+                // What the game does at the end of its own pass, on both lists.
+                bucket.Ticking = false;
+                try
+                {
+                    _setTicking(__instance, false);
+                    List<TickableEntity> toRemove = _toRemove(__instance);
+                    for (int i = 0; i < toRemove.Count; i++)
+                    {
+                        Guid id = toRemove[i].EntityId;
+                        all.Remove(id);
+                        mirror.Remove(id);
+                    }
+                    toRemove.Clear();
+                    bucket.LeaveLater.Clear();
+                }
+                catch (Exception exception)
+                {
+                    Fail(exception);
+                }
+            }
+            _passes++;
+            _ticked += ticked;
+            _leftOut += all.Count - ticked;
+            return false;
+        }
+
+        internal static void AddPostfix(object __instance, TickableEntity tickableEntity)
+        {
+            if (!_active)
+            {
+                return;
+            }
+            try
+            {
+                if (!Buckets.TryGetValue(__instance, out Bucket bucket))
+                {
+                    bucket = new Bucket();
+                    Buckets[__instance] = bucket;
+                }
+                Record record = Register(bucket, tickableEntity);
+                // The game's Add inserts at once, even during a pass; so does the mirror, at the same index.
+                bucket.Mirror[tickableEntity.EntityId] = record;
+            }
+            catch (Exception exception)
+            {
+                Fail(exception);
+            }
+        }
+
+        internal static void RemovePostfix(object __instance, TickableEntity tickableEntity)
+        {
+            if (!_active)
+            {
+                return;
+            }
+            try
+            {
+                if (!Buckets.TryGetValue(__instance, out Bucket bucket))
+                {
+                    return;
+                }
+                Forget(tickableEntity);
+                if (!bucket.Ticking)
+                {
+                    bucket.Mirror.Remove(tickableEntity.EntityId);
+                }
+                // During a pass the game defers the removal to the end of TickAll (_entitiesToRemove); the mirror
+                // removes the same keys there.
+            }
+            catch (Exception exception)
+            {
+                Fail(exception);
+            }
+        }
+
+        internal static void EnabledPostfix(BaseComponent __instance)
+        {
+            if (!_active)
+            {
+                return;
+            }
+            try
+            {
+                if (ByComponent.TryGetValue(__instance, out Record record))
+                {
+                    record.Awake = true;
+                }
+            }
+            catch (Exception exception)
+            {
+                Fail(exception);
+            }
+        }
+
+        internal static void DisabledPostfix(BaseComponent __instance)
+        {
+            if (!_active)
+            {
+                return;
+            }
+            try
+            {
+                if (ByComponent.TryGetValue(__instance, out Record record) && record.Awake)
+                {
+                    record.Awake = AnyEnabled(record.Components);
+                }
+            }
+            catch (Exception exception)
+            {
+                Fail(exception);
+            }
+        }
+        // ReSharper restore InconsistentNaming
+
+        private static Record Register(Bucket bucket, TickableEntity entity)
+        {
+            if (Records.TryGetValue(entity, out Record existing))
+            {
+                return existing;
+            }
+            Record record = new Record { Entity = entity, Bucket = bucket, Components = Collect(entity) };
+            record.Awake = AnyEnabled(record.Components);
+            Records[entity] = record;
+            foreach (BaseComponent component in record.Components)
+            {
+                ByComponent[component] = record;
+            }
+            return record;
+        }
+
+        private static void Forget(TickableEntity entity)
+        {
+            if (Records.TryGetValue(entity, out Record record))
+            {
+                Records.Remove(entity);
+                foreach (BaseComponent component in record.Components)
+                {
+                    ByComponent.Remove(component);
+                }
+            }
+        }
+
+        private static bool SameKeys(Bucket bucket, SortedList<Guid, TickableEntity> all)
+        {
+            IList<Guid> mine = bucket.Mirror.Keys;
+            IList<Guid> theirs = all.Keys;
+            for (int i = 0; i < theirs.Count; i++)
+            {
+                if (mine[i] != theirs[i])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Should never be needed: the mirror follows every Add and Remove. If it ever is, it is rebuilt from the
+        // game's list and counted, so the stats line shows it.
+        private static void Resync(Bucket bucket, SortedList<Guid, TickableEntity> all)
+        {
+            bucket.Mirror.Clear();
+            for (int i = 0; i < all.Count; i++)
+            {
+                TickableEntity entity = all.Values[i];
+                Record record = Register(bucket, entity);
+                record.Awake = AnyEnabled(record.Components);
+                bucket.Mirror.Add(entity.EntityId, record);
+            }
+            _resyncs++;
+        }
+
+        private static BaseComponent[] Collect(TickableEntity entity)
+        {
+            List<BaseComponent> components = new List<BaseComponent>();
+            foreach (object metered in (IEnumerable)_components(entity))
+            {
+                components.Add((BaseComponent)_inner(metered));
+            }
+            return components.ToArray();
+        }
+
+        private static bool AnyEnabled(BaseComponent[] components)
+        {
+            for (int i = 0; i < components.Length; i++)
+            {
+                if (components[i].Enabled)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static void Fail(object reason)
+        {
+            _active = false;
+            Log.Warning("IdleEntities failed and turned itself off for this session; the game's own tick loop runs: " + reason);
+        }
+    }
+}

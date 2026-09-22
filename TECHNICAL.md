@@ -499,6 +499,35 @@ no difference that could be told from noise, and a player has no way to judge it
 the per-frame hook it needed. Unity's fixed 3 ms slice from `boot.config` applies, and the `Timing:` line still
 reports it.
 
+### Entities with nothing to tick left out of the tick loop (always on, new in 0.4.21)
+
+Every tree, crop, path, levee and platform is a tickable entity: it carries a tick component that is switched off
+nearly all the time (`DemolitionBlockedStatus` only while marked for demolition, `EntityReachabilityStatus` only
+while selected). The game still visits every one of them on every tick, 128 buckets a tick: a native call to ask
+whether the object is active, a try block and a walk over its components to find each one disabled. In the logged
+354-beaver colony about 10,000 of the 11,500 entity ticks per tick were such visits, and the entity kinds Oak,
+Path, Thorns, Pine, Chestnut, Wheat, Potato, Maple, Birch, Sunflower and Levee together took about 10 ms of the
+28 ms tick in the Performance Log's sampled figures.
+
+The mod keeps, per bucket, the entities that have at least one enabled tick component, in the same order the game
+keeps all of them (by entity id), and its replacement of `TickableEntityBucket.TickAll` ticks only those. A
+component's `Enabled` can only change through `BaseComponent.EnableComponent` and `DisableComponent` (the setter
+is private), so those two are hooked and move the entity in or out; `TickableEntityBucket.Add` and `Remove` add
+and drop entities. An entity whose tick components are all disabled does nothing when ticked, so the result is the
+game's. The game's own list is left untouched; BeaverBuddies reads it for its per-tick hash.
+
+Changes in the middle of a pass follow the game's own index rule: the game walks its list by index, so an entity
+that becomes eligible (or is added) before the entity being ticked shifts it and is not reached this pass, while
+one after it is reached. The mirror adds an entity that wakes up mid-pass at once when its id sorts after the
+entity being ticked, and after the pass when it sorts before. Entities that fall asleep or are removed mid-pass
+leave after the pass (ticking a sleeping entity does nothing), and the game's own deferred removals
+(`_entitiesToRemove`) are applied at the end of the pass as the game does. The harness
+(`tests/IdleEntitiesTests.cs`) replays a scripted history of 300 passes over the game's real bucket, entities
+and metered components, with components switched on and off and entities added and removed both between passes
+and from inside another entity's tick, and requires the sequence of effective ticks to be identical to a model of
+the game's loop. The `IdleEntities:` stats line says how many entities per tick were ticked and how many left out.
+If any bookkeeping throws, the feature switches itself off and the game's loop runs.
+
 ### Terrain path searches resumed instead of restarted (always on, new in 0.4.18)
 
 When no route map answers a path question, the game runs an A* search over the terrain graph on the main thread,

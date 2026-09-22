@@ -29,6 +29,7 @@ namespace LateGamePerformance
         public bool WaterMapCopy => true;
         public bool SoilScans => true;
         public bool TerrainSearch => true;
+        public bool IdleEntities => true;
 
         public bool HaulCache => true;
         // Nothing cached survives a tick: the conservative choice, and the only one ever played.
@@ -147,7 +148,7 @@ namespace LateGamePerformance
         {
             return $"(fixed: HaulCache={HaulCache}, HaulCacheFlushEveryTicks={HaulCacheFlushEveryTicks}, " +
                    $"RouteMaps={RouteMaps}, YielderSearch={YielderSearch}, TerrainMaps={TerrainMaps}, PlantWater={PlantWater}, DistrictCounts={DistrictCounts}, " +
-                   $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}, TerrainSearch={TerrainSearch}) " +
+                   $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}, TerrainSearch={TerrainSearch}, IdleEntities={IdleEntities}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
                    $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
