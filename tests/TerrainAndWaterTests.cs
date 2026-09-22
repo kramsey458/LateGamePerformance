@@ -6,6 +6,8 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using LateGamePerformance;
+using Vector3 = UnityEngine.Vector3;
+using Vector3Int = UnityEngine.Vector3Int;
 
 // Runs the terrain route map rebuild and the plant water check against the installed game's real classes.
 //
@@ -161,6 +163,83 @@ internal static class TerrainAndWaterTests
         }
         check(cleared > 0 && stillWrong == 0, $"terrain hook: after a ground change the {cleared} cleared maps are rebuilt, identical again");
         TerrainMaps.TakeStatsLine();
+
+        // Scanning only after a change (MapChanges, 0.4.25), through the navigation tick hook: flagged, a tick with
+        // nothing marked leaves the cache alone; marked, the next tick builds; the periodic check every 200 ticks
+        // finds what the hooks missed.
+        List<int> cachedStarts = new List<int>(distinct);
+        TerrainMaps.PathfindingServiceCreatedPostfix(service);
+        TerrainMaps.SetRangeForTests(Range);
+        TerrainMaps.ScanOnlyWhenChanged = true;
+        TerrainMaps.NavigationTickedPostfix();                        // marked by the service's creation: scans, nothing to build
+        for (int i = 1; i <= 5; i++) RouteMapsTests.Call(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "Clear");
+        TerrainMaps.NavigationTickedPostfix();
+        int leftAlone = 0;
+        for (int i = 1; i <= 5; i++) if (!(bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) leftAlone++;
+        TerrainMaps.MarkChanged();
+        TerrainMaps.NavigationTickedPostfix();
+        int builtAfterMark = 0;
+        for (int i = 1; i <= 5; i++) if ((bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) builtAfterMark++;
+        check(leftAlone == 5 && builtAfterMark == 5, "terrain scan: with nothing marked a tick leaves the cache alone; marked, the next tick builds");
+        for (int i = 6; i <= 8; i++) RouteMapsTests.Call(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "Clear");
+        for (int tick = 0; tick < 199; tick++) TerrainMaps.NavigationTickedPostfix();
+        int stillUnbuilt = 0;
+        for (int i = 6; i <= 8; i++) if (!(bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) stillUnbuilt++;
+        TerrainMaps.NavigationTickedPostfix();
+        int builtByCheck = 0;
+        for (int i = 6; i <= 8; i++) if ((bool)RouteMapsTests.Get(RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[i]), "IsFilled")) builtByCheck++;
+        string scanStats = TerrainMaps.TakeStatsLine();
+        Console.WriteLine("     " + scanStats);
+        check(stillUnbuilt == 3 && builtByCheck == 3 && scanStats.Contains("3 unbuilt maps were found by the periodic check alone") &&
+              scanStats.Contains("left alone 200 times") && scanStats.Contains($"{distinct.Count + 1} maps cached"),
+            "terrain scan: the periodic check builds what the hooks missed, and the line counts the cache");
+        TerrainMaps.ScanOnlyWhenChanged = false;
+
+        // The reach pre-filter (TerrainReach, 0.4.25): each built map's box, measured with the game's own node ids,
+        // contains every tile of the map, a tile just outside it is certainly not in the map, and a map cleared
+        // since its box was made answers maybe.
+        TerrainReach.Bind();
+        TerrainReach.Activate();
+        Vector3Int[] table = new Vector3Int[width * height];
+        for (int id = 0; id < table.Length; id++) table[id] = new Vector3Int(id / height, id % height, 0);
+        nodeIdService.GetType().GetField("_idToCoordinatesTable", Any).SetValue(nodeIdService, table);
+        MethodInfo gridToWorld = graph.GetType().Assembly.GetType("Timberborn.Navigation.NavigationCoordinateSystem", true)
+            .GetMethod("GridToWorld", BindingFlags.Static | BindingFlags.Public);
+        Func<Vector3Int, Vector3> world = grid => (Vector3)gridToWorld.Invoke(null, new object[] { grid });
+        int measured = 0, insideWrong = 0, outsideWrong = 0, nodesChecked = 0;
+        foreach (int start in cachedStarts)
+        {
+            object field = RouteMapsTests.Call(cache, "GetFlowFieldAtNode", start);
+            TerrainReach.Measure(field, nodeIdService);
+            TerrainReach.Box box = TerrainReach.BoxOf(field);
+            if (box == null)
+            {
+                insideWrong++;
+                continue;
+            }
+            measured++;
+            foreach (int id in (IEnumerable<int>)RouteMapsTests.Call(field, "GetAllNodeIds"))
+            {
+                nodesChecked++;
+                if (!TerrainReach.MayReach(box, world(table[id]))) insideWrong++;
+            }
+            if (TerrainReach.MayReach(box, world(new Vector3Int(box.MinX - 1, box.MinY, 0)))) outsideWrong++;
+            if (TerrainReach.MayReach(box, world(new Vector3Int(box.MaxX + 1, box.MaxY, 0)))) outsideWrong++;
+            if (TerrainReach.MayReach(box, world(new Vector3Int(box.MinX, box.MaxY + 1, 0)))) outsideWrong++;
+            if (TerrainReach.MayReach(box, world(new Vector3Int(box.MinX, box.MinY, 1)))) outsideWrong++;
+        }
+        check(measured == cachedStarts.Count && insideWrong == 0 && nodesChecked > 10000,
+            $"terrain reach: every tile of every built map is inside its box ({nodesChecked} tiles of {measured} maps)");
+        check(outsideWrong == 0, "terrain reach: a tile just outside a box is certainly not in the map");
+        object clearedField = RouteMapsTests.Call(cache, "GetFlowFieldAtNode", cachedStarts[0]);
+        TerrainReach.Box clearedBox = TerrainReach.BoxOf(clearedField);
+        RouteMapsTests.Call(clearedField, "Clear");
+        check(TerrainReach.MayReach(clearedBox, world(new Vector3Int(clearedBox.MaxX + 5, clearedBox.MaxY + 5, 0))),
+            "terrain reach: a map cleared since its box was made answers maybe for everything");
+        string reachStats = TerrainReach.TakeStatsLine();
+        Console.WriteLine("     " + reachStats);
+        check(reachStats.StartsWith($"TerrainReach: {measured} terrain route maps measured after a fill, 0 of them empty"),
+            "terrain reach: the stats line counts the boxes made");
 
         Console.WriteLine($"     timing: {maps} terrain maps one by one {sequentialTimer.Elapsed.TotalMilliseconds:0.0} ms " +
                           $"({sequentialTimer.Elapsed.TotalMilliseconds / maps:0.00} ms each), {workers} workers " +

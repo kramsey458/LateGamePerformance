@@ -108,6 +108,12 @@ namespace LateGamePerformance
 
         private static bool _active;
         private static bool _verify;
+
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set => _verify = value;
+        }
         private static Job _job;
         private static Job _verifyJob;
         private static Job _swappedJob;

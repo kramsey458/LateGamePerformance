@@ -51,7 +51,7 @@
       <ul>
         <li>Noticeably fewer lag spikes in a late-game save of about 350 beavers (played as 0.4.8; 0.4.14 was reported as working well; 0.4.23, the latest release, as working amazingly well).</li>
         <li>On a computer that had memory clean-up freezes of most of a second about once a minute, incremental garbage collection removed them and made the frame rate much steadier at high tick rates.</li>
-        <li>Preview 0.4.24 (not yet played) removes the memory clean-up right after each save that 0.4.17 added; a recorded 0.4.23 session showed it as a freeze of about a second at every save.</li>
+        <li>Preview 0.4.25 (not yet played) is the round built from a recorded 0.4.23 session: fewer tree-search lookups, plant water ticks that stay on the fast path when a plant is planted or cut, the mod&rsquo;s own worker threads, route map caches walked only after a change, no behaviour log strings until a save reads them, far-away animated objects posed less often, more of the save snapshot on worker threads, and 0.4.24&rsquo;s removal of the memory clean-up that froze every save for about a second.</li>
         <li>0.4.21 to 0.4.23 stop visiting the ten thousand trees, crops and paths that have nothing to tick, take most of a save's snapshot on worker threads, and move the plant water levels and the soil change lists to the workers that already hold the data.</li>
         <li>0.4.16 to 0.4.18 are aimed at what a logged 354-beaver session showed: the second of stutter after every autosave and memory clean-up, and the single slow beaver ticks and end-of-day slump from terrain path searches that restarted from the same tile.</li>
       </ul>

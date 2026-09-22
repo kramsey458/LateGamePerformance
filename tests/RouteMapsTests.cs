@@ -230,6 +230,65 @@ internal static class RouteMapsTests
         }
         check(smallBuilt && RouteMaps.FieldsFilledSinceReport == batchesBefore,
             "orchestration: a small batch (5 maps) is built directly on the main thread, identical to the game's");
+
+        // Scanning only after a change (MapChanges, 0.4.25): flagged, a tick with nothing marked leaves the cache
+        // alone; marked, the next tick builds; and the periodic check every 200 ticks finds what the hooks missed.
+        RouteMaps.TakeStatsLine();
+        RouteMaps.ScanOnlyWhenChanged = true;
+        for (int i = 6; i <= 10; i++)
+        {
+            Call(fieldAt[cached[i]], "Clear");
+        }
+        RouteMaps.NavigationTickedPostfix();
+        int leftAlone = 0;
+        for (int i = 6; i <= 10; i++)
+        {
+            if (!(bool)Get(fieldAt[cached[i]], "IsFilled"))
+            {
+                leftAlone++;
+            }
+        }
+        RouteMaps.MarkChanged();
+        RouteMaps.NavigationTickedPostfix();
+        int builtAfterMark = 0;
+        for (int i = 6; i <= 10; i++)
+        {
+            if ((bool)Get(fieldAt[cached[i]], "IsFilled"))
+            {
+                builtAfterMark++;
+            }
+        }
+        check(leftAlone == 5 && builtAfterMark == 5, "orchestration scan: with nothing marked a tick leaves the cache alone; marked, the next tick builds");
+        for (int i = 11; i <= 13; i++)
+        {
+            Call(fieldAt[cached[i]], "Clear");
+        }
+        for (int tick = 0; tick < 199; tick++)
+        {
+            RouteMaps.NavigationTickedPostfix();
+        }
+        int stillUnbuilt = 0;
+        for (int i = 11; i <= 13; i++)
+        {
+            if (!(bool)Get(fieldAt[cached[i]], "IsFilled"))
+            {
+                stillUnbuilt++;
+            }
+        }
+        RouteMaps.NavigationTickedPostfix();
+        int builtByCheck = 0;
+        for (int i = 11; i <= 13; i++)
+        {
+            if ((bool)Get(fieldAt[cached[i]], "IsFilled"))
+            {
+                builtByCheck++;
+            }
+        }
+        string scanStats = RouteMaps.TakeStatsLine();
+        Console.WriteLine("     " + scanStats);
+        check(stillUnbuilt == 3 && builtByCheck == 3 && scanStats.Contains("3 unbuilt maps were found by the periodic check alone") &&
+              scanStats.Contains("left alone 200 times"), "orchestration scan: the periodic check builds what the hooks missed and says so");
+        RouteMaps.ScanOnlyWhenChanged = false;
     }
 
     // Background rebuild: workers fill while this thread plays the game's part, asking for maps in a shuffled

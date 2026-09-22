@@ -349,6 +349,7 @@ namespace LateGamePerformance
         private static void UpdatePrefix(object __instance, out long __state)
         {
             __state = Stopwatch.GetTimestamp();
+            UnityMarkers.Sample();
             _collectionsAtFrameStart = GC.CollectionCount(0);
             _heapAtFrameStart = ReadHeap();
             // This call is the frame boundary: what the per-frame systems took since the last one belongs to

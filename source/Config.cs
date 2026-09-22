@@ -49,6 +49,8 @@ namespace LateGamePerformance
         public bool SoilScansVerify = false;
         public bool TerrainSearchVerify = false;
         public bool HomeSearchVerify = false;
+        // Every verify mode at once, for the one correctness session. Also a box on the settings page.
+        public bool VerifyAll = false;
         // Rendering only, so it may differ between players. A way out, not a setting.
         public bool WaterRendering = true;
         // Not part of the simulation, so it may differ between players. A way out, not a setting.
@@ -58,6 +60,10 @@ namespace LateGamePerformance
         public bool SoundListener = true;
         public bool UiThrottle = true;
         public bool AnimatorCulling = true;
+        // Rendering only: animated objects farther from the camera than this many tiles have their pose written
+        // every second frame, beyond twice it every fourth. 0 or AnimatorLod = false switches it off.
+        public bool AnimatorLod = true;
+        public int AnimatorLodDistance = 80;
         // Saving only: which thread writes the snapshot down, never what is written.
         public bool SaveSnapshot = true;
         public bool SaveSnapshotVerify = false;
@@ -69,6 +75,8 @@ namespace LateGamePerformance
         public int MetricsEveryTicks = 3000;
         public bool GcReport = true;
         public bool Diagnostics = false;
+        // Unity's own profiler counters to sample per frame while Diagnostics is on, separated by ';'.
+        public string UnityMarkers = LateGamePerformance.UnityMarkers.DefaultSpec;
         public int StatsEveryTicks = 1000;
 
         public static Config Load(params string[] directories)
@@ -134,11 +142,14 @@ namespace LateGamePerformance
             SoilScansVerify = Bool(values, nameof(SoilScansVerify), SoilScansVerify);
             TerrainSearchVerify = Bool(values, nameof(TerrainSearchVerify), TerrainSearchVerify);
             HomeSearchVerify = Bool(values, nameof(HomeSearchVerify), HomeSearchVerify);
+            VerifyAll = Bool(values, nameof(VerifyAll), VerifyAll);
             WaterRendering = Bool(values, nameof(WaterRendering), WaterRendering);
             BackgroundSave = Bool(values, nameof(BackgroundSave), BackgroundSave);
             SoundListener = Bool(values, nameof(SoundListener), SoundListener);
             UiThrottle = Bool(values, nameof(UiThrottle), UiThrottle);
             AnimatorCulling = Bool(values, nameof(AnimatorCulling), AnimatorCulling);
+            AnimatorLod = Bool(values, nameof(AnimatorLod), AnimatorLod);
+            AnimatorLodDistance = Math.Max(0, Int(values, nameof(AnimatorLodDistance), AnimatorLodDistance));
             SaveSnapshot = Bool(values, nameof(SaveSnapshot), SaveSnapshot);
             SaveSnapshotVerify = Bool(values, nameof(SaveSnapshotVerify), SaveSnapshotVerify);
             Timing = Bool(values, nameof(Timing), Timing);
@@ -149,6 +160,12 @@ namespace LateGamePerformance
             GcReport = Bool(values, nameof(GcReport), GcReport);
             Diagnostics = Bool(values, nameof(Diagnostics), Diagnostics);
             StatsEveryTicks = Math.Max(0, Int(values, nameof(StatsEveryTicks), StatsEveryTicks));
+            UnityMarkers = Text(values, nameof(UnityMarkers), UnityMarkers);
+            if (VerifyAll)
+            {
+                HaulCacheVerify = YielderSearchVerify = PlantWaterVerify = DistrictCountsVerify = WaterMapCopyVerify = true;
+                SoilScansVerify = TerrainSearchVerify = HomeSearchVerify = SaveSnapshotVerify = true;
+            }
         }
 
         public override string ToString()
@@ -158,8 +175,8 @@ namespace LateGamePerformance
                    $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}, TerrainSearch={TerrainSearch}, IdleEntities={IdleEntities}, HomeSearch={HomeSearch}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
-                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, HomeSearchVerify={HomeSearchVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, SaveSnapshot={SaveSnapshot}, SaveSnapshotVerify={SaveSnapshotVerify}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
-                   $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
+                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, HomeSearchVerify={HomeSearchVerify}, VerifyAll={VerifyAll}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, AnimatorLod={AnimatorLod}, AnimatorLodDistance={AnimatorLodDistance}, SaveSnapshot={SaveSnapshot}, SaveSnapshotVerify={SaveSnapshotVerify}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"GcReport={GcReport}, Diagnostics={Diagnostics}, UnityMarkers={UnityMarkers}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }
 
@@ -170,6 +187,11 @@ namespace LateGamePerformance
                 return parsed;
             }
             return fallback;
+        }
+
+        private static string Text(Dictionary<string, string> values, string key, string fallback)
+        {
+            return values.TryGetValue(key, out string text) && text.Length > 0 ? text : fallback;
         }
 
         private static int Int(Dictionary<string, string> values, string key, int fallback)

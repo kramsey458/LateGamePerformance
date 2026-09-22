@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Reflection;
 using System.Threading;
 using HarmonyLib;
 using Timberborn.EntitySystem;
@@ -37,36 +38,104 @@ namespace LateGamePerformance
         private const string FactoryType = "Timberborn.WorldPersistence.SerializedWorldFactory";
 
         // Persistent components whose Save reads only managed state of their own entity or of stateless
-        // serializers. Read in the game's 1.1.2.4 source; a type not here keeps its entity on the main thread.
-        internal static readonly HashSet<string> Allowed = new HashSet<string>
+        // serializers, each with a hash of its Save method as compiled (the IL bytes). A type is used only while
+        // its Save is still the one that was read: a game or mod update that changes it leaves the type on the main
+        // thread, with a log line, until it is read again and its hash renewed (`dotnet run --project tests --
+        // --hashes` prints the current hashes). Read in the game's 1.1.2.4 source and BeaverBuddies MultiColony
+        // 1.4.0-beta2; a type not here keeps its entity on the main thread.
+        internal static readonly Dictionary<string, string> Allowed = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            "Timberborn.BlockSystem.BlockObject",
-            "Timberborn.BlockSystem.BlockObjectState",
-            "Timberborn.Yielding.Yielder",
-            "Timberborn.Growing.Growable",
-            "Timberborn.NaturalResourcesLifecycle.LivingNaturalResource",
-            "Timberborn.NaturalResources.CoordinatesOffsetter",
-            "Timberborn.NaturalResourcesMoisture.LivingWaterNaturalResource",
-            "Timberborn.NaturalResourcesMoisture.WateredNaturalResource",
-            "Timberborn.NaturalResourcesMoisture.AridNaturalResource",
-            "Timberborn.NaturalResourcesContamination.ContaminatedNaturalResource",
-            "Timberborn.Gathering.GatherableYieldGrower",
-            "Timberborn.Cutting.DeadCuttableYieldRemover",
-            "Timberborn.ConstructionSites.ConstructionSite",
-            "Timberborn.Demolishing.Demolishable",
-            "Timberborn.BuilderPrioritySystem.BuilderPrioritizable",
-            "Timberborn.Pollination.Pollinatee",
-            "Timberborn.BlockObstacles.LayeredBlockObstacle",
-            "Timberborn.DecalSystem.FlippableDecal",
-            "Timberborn.DecalSystem.DecalSupplier",
-            "Timberborn.Hauling.HaulPrioritizable",
-            "Timberborn.Buildings.PausableBuilding",
-            "Timberborn.Emptying.Emptiable",
-            "Timberborn.ActivatorSystem.TimedComponentActivator",
-            "Timberborn.EntityNaming.NamedEntity",
-            "Timberborn.InventorySystem.Inventory",
-            "Timberborn.Ruins.RuinModels",
-            "Timberborn.MapEditorPlacementRandomizing.BlockObjectPlacementRandomizer"
+            { "Timberborn.BlockSystem.BlockObject", "16fee102cd264960" },
+            { "Timberborn.BlockSystem.BlockObjectState", "fe1e48f91b4945a2" },
+            { "Timberborn.Yielding.Yielder", "188abd75358c76fd" },
+            { "Timberborn.Growing.Growable", "41d21bf8ab506e2d" },
+            { "Timberborn.NaturalResourcesLifecycle.LivingNaturalResource", "6acc69bb460d86ad" },
+            { "Timberborn.NaturalResources.CoordinatesOffsetter", "afe4bcf012b3e385" },
+            { "Timberborn.NaturalResourcesMoisture.LivingWaterNaturalResource", "f4c308943aad89f4" },
+            { "Timberborn.NaturalResourcesMoisture.WateredNaturalResource", "2f26b09fcd339bc0" },
+            { "Timberborn.NaturalResourcesMoisture.AridNaturalResource", "fbd582828ac157b8" },
+            { "Timberborn.NaturalResourcesContamination.ContaminatedNaturalResource", "62a9eaf3e8a58848" },
+            { "Timberborn.Gathering.GatherableYieldGrower", "a236fc31b91fb613" },
+            { "Timberborn.Cutting.DeadCuttableYieldRemover", "93b081fd6795c1e3" },
+            { "Timberborn.ConstructionSites.ConstructionSite", "70e77bc05bb87d69" },
+            { "Timberborn.Demolishing.Demolishable", "dad4313d6b8c5a17" },
+            { "Timberborn.BuilderPrioritySystem.BuilderPrioritizable", "b7f2fa7a811d4396" },
+            { "Timberborn.Pollination.Pollinatee", "ddf765d374bf42b8" },
+            { "Timberborn.BlockObstacles.LayeredBlockObstacle", "89fd45a8599be30c" },
+            { "Timberborn.DecalSystem.FlippableDecal", "1520d55c1837ce67" },
+            { "Timberborn.DecalSystem.DecalSupplier", "b3462680948b9ab4" },
+            { "Timberborn.Hauling.HaulPrioritizable", "323b795681906661" },
+            { "Timberborn.Buildings.PausableBuilding", "85dc1d3112a91861" },
+            { "Timberborn.Emptying.Emptiable", "e3f8e685a26b3249" },
+            { "Timberborn.ActivatorSystem.TimedComponentActivator", "36a625d5091538d5" },
+            { "Timberborn.EntityNaming.NamedEntity", "ee684b4cbe8b217f" },
+            { "Timberborn.InventorySystem.Inventory", "8fb3a05c6583d60d" },
+            { "Timberborn.Ruins.RuinModels", "4f18efb4a97a2636" },
+            { "Timberborn.MapEditorPlacementRandomizing.BlockObjectPlacementRandomizer", "af63a74c8601927d" },
+            { "Timberborn.WorkSystem.Workplace", "1e27218d146bc29b" },
+            { "Timberborn.WorkSystem.WorkplacePriority", "8afe37125960913c" },
+            { "Timberborn.WorkSystem.WorkplaceWorkerType", "cac86c6201c9d914" },
+            { "Timberborn.WorkSystem.DistrictDefaultWorkerType", "a0387aa6ac00c1db" },
+            { "Timberborn.Workshops.Manufactory", "388e43956809eba3" },
+            { "Timberborn.Workshops.ProductionResetter", "7f5de7d869e98fa6" },
+            { "Timberborn.Workshops.WorkshopProductivityCounter", "aba9d7066b0db445" },
+            { "Timberborn.GoodConsumingBuildingSystem.GoodConsumingBuilding", "eb68afca78fa562c" },
+            { "Timberborn.Fields.FarmHouse", "1f54f9c879fabb22" },
+            { "Timberborn.Forestry.Forester", "219b20100ebc4ea1" },
+            { "Timberborn.Planting.PlantablePrioritizer", "39e37a50e81d4287" },
+            { "Timberborn.WaterBuildings.Floodgate", "a894b361ae89aa63" },
+            { "Timberborn.WaterBuildings.WaterInput", "d319584ea641c234" },
+            { "Timberborn.WaterBuildings.WaterMover", "45575a4d68bfe789" },
+            { "Timberborn.WaterBuildings.WaterInputPipeCoordinates", "b9a877c3fc3625bd" },
+            { "Timberborn.WaterBuildings.FillValve", "1502f0693d7538d2" },
+            { "Timberborn.WaterBuildings.ThrottlingValve", "530ea69ee5e79f87" },
+            { "Timberborn.WaterBuildings.StreamGauge", "4f2bae3d8974d9cd" },
+            { "Timberborn.WaterSourceSystem.WaterSource", "352937426e27a37f" },
+            { "Timberborn.WaterSourceSystem.WaterDepthStrengthModifier", "496b705beaca9d90" },
+            { "Timberborn.WaterSourceSystem.WaterSourceRegulator", "d3cd339503eee900" },
+            { "Timberborn.Illumination.CustomizableIlluminator", "1f0acb23ef0bcdf9" },
+            { "Timberborn.Buildings.BuildingSoundController", "783026e46c065330" },
+            { "Timberborn.DeteriorationSystem.Deteriorable", "854d352adff7f469" },
+            { "Timberborn.ScienceSystem.ScienceNeedingBuilding", "140482a6f4f1e5c1" },
+            { "Timberborn.AutomationBuildings.Gate", "db671c8220269a36" },
+            { "Timberborn.AutomationBuildings.GateNavMeshBlocker", "5d35f9385ea901b9" },
+            { "Timberborn.AutomationBuildings.DepthSensor", "b0d8310fee58cf83" },
+            { "Timberborn.AutomationBuildings.Chronometer", "5591d59d2fd3a8a7" },
+            { "Timberborn.AutomationBuildings.ContaminationSensor", "d66a63bf03c89ad6" },
+            { "Timberborn.AutomationBuildings.FlowSensor", "5eedec85d12b2fa7" },
+            { "Timberborn.AutomationBuildings.Detonator", "f8ce033c192d791c" },
+            { "Timberborn.AutomationBuildings.Indicator", "cc2b3368603860bd" },
+            { "Timberborn.AutomationBuildings.Lever", "d3fe62ab867752b6" },
+            { "Timberborn.AutomationBuildings.PopulationCounter", "dcdc50e9fee472c9" },
+            { "Timberborn.AutomationBuildings.PowerMeter", "5af08fdbc102e0d8" },
+            { "Timberborn.AutomationBuildings.ResourceCounter", "b9f9fcd8fdb2100f" },
+            { "Timberborn.AutomationBuildings.ScienceCounter", "957d4a3ce9da7b26" },
+            { "Timberborn.AutomationBuildings.Speaker", "53739f49bc97c2ee" },
+            { "Timberborn.AutomationBuildings.WeatherStation", "bc8f6a193cf3a63f" },
+            { "Timberborn.Automation.Automator", "a6136a8b45c586ab" },
+            { "Timberborn.Explosions.Dynamite", "a7d63be6d520d3e6" },
+            { "Timberborn.Explosions.UnstableCore", "b024707ff3f321ab" },
+            { "Timberborn.Wonders.Wonder", "a75134dffdfb5482" },
+            { "Timberborn.Wonders.WonderDeactivationTimer", "2d00cb66e4b9125f" },
+            { "Timberborn.Pollination.Hive", "daae4d53cb8df348" },
+            { "Timberborn.InventorySystem.SingleGoodAllower", "7912d9bfc4413d58" },
+            { "Timberborn.Stockpiles.FixedStockpile", "c0986b14e567a5d7" },
+            { "Timberborn.StockpileVisualization.StockpileVisualizers", "ebb3441fa04c9208" },
+            { "Timberborn.StockpilePrioritySystem.GoodObtainer", "8b24e0f527d56a81" },
+            { "Timberborn.StockpilePrioritySystem.GoodSupplier", "714440aa6dcbaffd" },
+            { "Timberborn.DistributionSystem.DistrictDistributionSetting", "4091226ac5704596" },
+            { "Timberborn.Attractions.AttractionAttender", "87cde2e5d37e0189" },
+            { "Timberborn.Attractions.AttractionLoadRate", "63fb7fb276f27161" },
+            { "Timberborn.GameDistrictsMigration.PopulationDistributor", "685e289f78ad6bb7" },
+            { "Timberborn.ResourceCountingSystem.DistrictGoodsBalance", "b48ad36e66baadbd" },
+            { "Timberborn.PopulationStatisticsSampling.DistrictPopulationBalance", "8115f73709591873" },
+            { "Timberborn.PowerManagement.Clutch", "9b1bebd95b16267f" },
+            { "Timberborn.Reproduction.BreedingPod", "5011f0060936edae" },
+            { "Timberborn.NeedApplication.AreaNeedApplier", "9ddd8168deb416aa" },
+            { "Timberborn.NeedApplication.DemolisherNeedApplier", "b3750869c2b361b8" },
+            { "Timberborn.NeedApplication.YieldRemoverNeedApplier", "53c8d9a9aedee3be" },
+            { "Timberborn.FireworkSystem.FireworkLauncher", "3845e4dd4e324f72" },
+            { "BeaverBuddies.Colonies.ColonyStamp", "ae23955dc80c940f" },
         };
 
         // One entity's share of the snapshot: what the game does per entity in SaveEntities/SaveEntity.
@@ -97,6 +166,60 @@ namespace LateGamePerformance
         private static long _verifyMismatches;
         private static readonly Dictionary<string, int> Unlisted = new Dictionary<string, int>();
         private static bool _unlistedLogged;
+        private static readonly Dictionary<Type, bool> Verdicts = new Dictionary<Type, bool>();
+
+        // Whether this component type may be snapshotted on a worker: on the list, and its Save unchanged since
+        // it was read. Decided once per type per session.
+        internal static bool IsAllowed(Type type)
+        {
+            if (Verdicts.TryGetValue(type, out bool allowed))
+            {
+                return allowed;
+            }
+            allowed = Judge(type);
+            Verdicts[type] = allowed;
+            return allowed;
+        }
+
+        private static bool Judge(Type type)
+        {
+            if (!Allowed.TryGetValue(type.FullName ?? "", out string expected))
+            {
+                return false;
+            }
+            string actual = SaveHash(type);
+            if (actual == expected)
+            {
+                return true;
+            }
+            Log.Warning($"SaveSnapshot: the saving code of {type.FullName} is not the one that was read (it hashes to {actual}, " +
+                        $"the one read to {expected}); its entities stay on the main thread until it is read again.");
+            return false;
+        }
+
+        // A hash (FNV-1a, 64 bits) of the IL bytes of the type's Save(IEntitySaver): what the method does, as compiled.
+        internal static string SaveHash(Type type)
+        {
+            MethodInfo save = type.GetMethod("Save", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                new[] { typeof(IEntitySaver) }, null);
+            byte[] il = save?.GetMethodBody()?.GetILAsByteArray();
+            if (il == null)
+            {
+                return "none";
+            }
+            ulong hash = 14695981039346656037UL;
+            foreach (byte b in il)
+            {
+                hash ^= b;
+                hash *= 1099511628211UL;
+            }
+            return hash.ToString("x16");
+        }
+
+        internal static void ForgetVerdictsForTests()
+        {
+            Verdicts.Clear();
+        }
 
         public static Feature CreateFeature(Config config)
         {
@@ -228,7 +351,8 @@ namespace LateGamePerformance
                     if (component is IPersistentEntity persistent)
                     {
                         parts.Add(persistent);
-                        if (onWorkers && !Allowed.Contains(component.GetType().FullName))
+                        // Every part that is not on the list is noted, so the once-per-session line names all of them.
+                        if (!IsAllowed(component.GetType()))
                         {
                             onWorkers = false;
                             Note(component.GetType().FullName);

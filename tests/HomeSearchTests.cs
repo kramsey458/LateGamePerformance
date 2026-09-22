@@ -68,9 +68,35 @@ internal static class HomeSearchTests
         check(verifiedSame && stats.Contains("60 searches") && stats.Contains("verify mismatches 0"),
             "home search: verify mode agrees with the game's walk on every search");
 
-        // A beaver that is gone leaves the table.
+        // With the list's own change counter readable (0.4.25) the tables are the two lists' companions; otherwise one
+        // entry per beaver, and a beaver that is gone leaves it.
         HomeSearch.DeleteEntityPostfix(world.Components[adults[0]]);
-        check(HomeSearch.TableSize == 359, $"home search: a deleted beaver leaves the table ({HomeSearch.TableSize} left)");
+        check(HomeSearch.UsesListVersions ? HomeSearch.TableSize == 2 : HomeSearch.TableSize == 359,
+            $"home search: {(HomeSearch.UsesListVersions ? "one companion per list" : "a deleted beaver leaves the table")} ({HomeSearch.TableSize})");
+        // The lists change: a beaver dies, two are born. The companions are rebuilt once each, and the next searches
+        // ask the new lists.
+        Bind(world, verify: false);
+        HomeSearch.TakeStatsLine();
+        int lookupsBefore = world.Lookups;
+        adults.RemoveAt(3);
+        adults.Add(MakeBeavers(world, 1)[0]);
+        children.Add(MakeBeavers(world, 1)[0]);
+        world.Looking.Clear();
+        world.MayMoveIn.Clear();
+        world.Assigned.Clear();
+        bool noPick = false;
+        bool ranNobody = HomeSearch.AssignPrefix(dwelling, adultList, childList, ref noPick);
+        Dweller newcomer = world.Components[adults[adults.Count - 1]];
+        world.Looking.Add(newcomer);
+        world.MayMoveIn.Add(newcomer);
+        bool found = false;
+        bool ranFound = HomeSearch.AssignPrefix(dwelling, adultList, childList, ref found);
+        string changedStats = HomeSearch.TakeStatsLine();
+        Console.WriteLine("     " + changedStats);
+        check(!ranNobody && !noPick && !ranFound && found && world.Assigned.Count == 1 && ReferenceEquals(world.Assigned[0], newcomer) &&
+              world.Lookups == lookupsBefore + (HomeSearch.UsesListVersions ? 361 : 2) &&
+              changedStats.Contains(HomeSearch.UsesListVersions ? "rebuilt 2 times" : "rebuilt 0 times"),
+            $"home search: after a beaver left and two were born the next searches see the new lists, rebuilt once each ({world.Lookups - lookupsBefore} lookups)");
 
         // Lists of another kind (another mod's) are walked by the game.
         bool other = false;

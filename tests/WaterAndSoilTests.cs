@@ -718,28 +718,32 @@ internal static class WaterAndSoilTests
         List<WaterObject>[] objects = { new List<WaterObject>(), new List<WaterObject>() };
         List<string>[] events = { new List<string>(), new List<string>() };
         Random tiles = new Random(22);
-        for (int i = 0; i < count; i++)
+        void AddObject(Vector3Int tile)
         {
-            // Mostly on the map, a few beyond its edge, at heights around the water.
-            Vector3Int tile = new Vector3Int(tiles.Next(-1, width + 2), tiles.Next(-1, height + 2), tiles.Next(0, 7));
             for (int w = 0; w < 2; w++)
             {
                 WaterObject waterObject = (WaterObject)RuntimeHelpers.GetUninitializedObject(objectType);
                 mapField.SetValue(waterObject, w == 0 ? world.Game : world.Mod);
                 tileField.SetValue(waterObject, tile);
-                int index = i, which = w;
+                int index = objects[w].Count, which = w;
                 changed.AddEventHandler(waterObject, new EventHandler((sender, _) => events[which].Add(index + "=" + level.GetValue(sender))));
                 services[w].RegisterWaterObject(waterObject);
                 if (w == 1) PlantWater.RegisterPostfix(waterObject);
                 objects[w].Add(waterObject);
             }
         }
+        for (int i = 0; i < count; i++)
+        {
+            // Mostly on the map, a few beyond its edge, at heights around the water.
+            AddObject(new Vector3Int(tiles.Next(-1, width + 2), tiles.Next(-1, height + 2), tiles.Next(0, 7)));
+        }
         PlantWater.TakeStatsLine();
         WaterMapCopy.TakeStatsLine();
 
         string[] rounds =
         {
-            "normal", "normal", "normal", "left", "normal", "layout", "normal", "wrong mirror", "normal", "verify", "verify", "verify"
+            "normal", "normal", "normal", "left", "normal", "layout", "normal", "wrong mirror", "normal", "joined", "flood", "normal",
+            "verify", "verify", "verify"
         };
         bool same = true, handled = true;
         int totalEvents = 0;
@@ -776,10 +780,24 @@ internal static class WaterAndSoilTests
                     queue.GetType().GetMethod("Clear").Invoke(queue, null);
                     break;
                 }
+                case "joined":
+                {
+                    // An object joins both worlds after the snapshot was taken: the worker has no level for it, so
+                    // it is read on the main thread in the tick, beside the worker's levels for the rest.
+                    AddObject(new Vector3Int(5, 5, 1));
+                    break;
+                }
+                case "flood":
+                {
+                    // More than a quarter of the list joins after the snapshot: read on the main thread, and the
+                    // mirror is rebuilt from the game's list as a precaution.
+                    for (int k = 0; k < 1000; k++) AddObject(new Vector3Int(tiles.Next(0, width), tiles.Next(0, height), tiles.Next(0, 7)));
+                    break;
+                }
                 case "wrong mirror":
                 {
-                    // An object leaves without the mod's hook seeing it: the mirror is now wrong and says nothing
-                    // changed. The tick must notice, rebuild it and read the levels itself.
+                    // An object leaves without the mod's hook seeing it: the mirror still holds it, and so does the
+                    // next snapshot. The tick matches the game's list against the snapshot and passes it over.
                     int victim = random.Next(objects[0].Count);
                     services[0].UnregisterWaterObject(objects[0][victim]);
                     services[1].UnregisterWaterObject(objects[1][victim]);
@@ -802,14 +820,16 @@ internal static class WaterAndSoilTests
         string stats = PlantWater.TakeStatsLine();
         Console.WriteLine("     " + stats);
         Console.WriteLine("     " + WaterMapCopy.TakeStatsLine());
-        check(totalEvents > 300, $"plant water on the worker: the test water actually moves ({totalEvents} level changes over 12 ticks)");
+        check(totalEvents > 300, $"plant water on the worker: the test water actually moves ({totalEvents} level changes over 15 ticks)");
         check(same && handled, "plant water on the worker: the same levels and events as the game's own loop over the real water map, " +
-                               "through ordinary ticks, an object leaving, a layout change, a wrong mirror and verify mode");
-        check(stats.StartsWith("PlantWater: 12 passes over") && stats.Contains("; 9 used levels computed on the water worker") &&
-              stats.Contains(", 3 read them inside the tick") && stats.Contains("1 had no copy to use") &&
+                               "through ordinary ticks, an object leaving, a layout change, a wrong mirror, objects joining and verify mode");
+        check(stats.StartsWith("PlantWater: 15 passes over") && stats.Contains("; 14 used the water worker's levels") &&
+              stats.Contains("1001 that joined the list after the snapshot were read on the main thread") &&
+              stats.Contains(", 1 read every level inside the tick") && stats.Contains("1 had no copy to use") &&
               stats.Contains("the list changed in 2 ticks, the mirror was rebuilt 1 times") && stats.Contains("verify mismatches 0") &&
               PlantWater.IsActive,
-            "plant water on the worker: nine ticks used the worker's levels, three fell back for the right reasons, verify agreed");
+            "plant water on the worker: fourteen ticks used the worker's levels (objects leaving, seen or unseen by the hook, are matched " +
+            "around), one fell back for the layout change, joiners were read on the main thread, verify agreed");
         PlantWater.SetVerifyForTests(false);
         WaterMapCopy.SceneCreated();
         PlantWater.SceneCreated();

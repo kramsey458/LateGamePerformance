@@ -4,8 +4,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
 using Timberborn.MapIndexSystem;
 using Timberborn.TerrainSystem;
 using Timberborn.WaterObjects;
@@ -24,22 +22,13 @@ namespace LateGamePerformance
         public static Exception Read<T>(IList<T> items, int count, int[] results, Func<T, int> read, int workers)
         {
             workers = Math.Max(1, Math.Min(workers, count));
-            Exception failure = null;
-            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+            return TickWorkers.Run(workers, (worker, sharing) =>
             {
-                try
+                for (int i = worker; i < count; i += sharing)
                 {
-                    for (int i = worker; i < count; i += workers)
-                    {
-                        results[i] = read(items[i]);
-                    }
-                }
-                catch (Exception exception)
-                {
-                    Interlocked.CompareExchange(ref failure, exception, null);
+                    results[i] = read(items[i]);
                 }
             });
-            return failure;
         }
     }
 
@@ -56,20 +45,25 @@ namespace LateGamePerformance
     // already there, and the main thread only goes through them in the game's own order and, for each object
     // whose level changed, does exactly what the game does: stores the new level and raises
     // WaterAboveBaseChanged. Those handlers (a plant starting to drown, a building flooding) run on the main
-    // thread, in the same order, with the same values as without the mod. Before 0.4.23 the reads were spread
-    // over worker threads started inside the tick, which cost 0.4 ms per tick in starting and joining them;
-    // that path is still the fallback whenever the copy is not the one in use.
+    // thread, in the same order, with the same values as without the mod.
+    //
+    // The worker computes the levels for a snapshot of the game's list taken before the water tasks start. By the
+    // time the tick reads them, objects may have left the list (a tree cut) or joined it (a crop planted), which
+    // happens in about a third of the ticks in a large colony. The list only ever changes by adding at the end and
+    // removing one object, so the objects that stayed keep their order: the tick walks the game's list and the
+    // snapshot side by side, takes the worker's level for every object found in the snapshot, and reads the few
+    // that were not (the new ones) with the game's own method on the main thread. Exact: every object's level is
+    // either precomputed from the very copy the tick reads, or read now. (0.4.23 fell back to reading everything
+    // inside the tick whenever the list had changed.)
     //
     // Why reading first gives the same values: a handler cannot change the water map (only its tick does) or an
     // object's tile, and it cannot add or remove an object from the list, because the game walks that list with
     // foreach and would throw if one did. So what object N reads does not depend on what happened for objects
     // before it. The result is the same on every computer whatever the thread count.
     //
-    // The levels from the worker are only used when three things hold, all checked on the main thread in the
-    // tick: the map's current arrays are exactly the copy they were computed from (WaterMapCopy swapped it in
-    // and nothing has rewritten it since), the game's list of objects is the one they were computed for (a mirror
-    // of the list, kept by the register and unregister hooks, is compared with the game's list object for object),
-    // and the worker finished. Otherwise the tick reads the levels itself, as before.
+    // The levels from the worker are used only while the map's current arrays are exactly the copy they were
+    // computed from (WaterMapCopy swapped it in and nothing has rewritten it since) and the worker finished;
+    // otherwise the tick reads the levels itself on this mod's worker threads, as 0.4.12 did.
     //
     // PlantWaterVerify reads everything again on the main thread with the game's own method and compares. If
     // anything throws, the feature switches itself off and the game's own loop runs; nothing has been changed at
@@ -103,6 +97,7 @@ namespace LateGamePerformance
         }
 
         private static Func<object, List<WaterObject>> _objectsOf;
+        private static Func<object, WaterObject[]> _itemsOf;
         private static Func<WaterObject, int> _currentLevel;
         private static Action<WaterObject, int> _setLevel;
         private static Func<object, Vector3Int> _tileOf;
@@ -126,14 +121,24 @@ namespace LateGamePerformance
         private static long _objects;
         private static long _changes;
         private static long _fromWorker;
+        private static long _fromWorkerObjects;
+        private static long _directObjects;
         private static long _inTick;
         private static long _noCopy;
         private static long _listChanged;
         private static long _resyncs;
         private static long _workerStopwatchTicks;
         private static long _readStopwatchTicks;
+        private static long _matchStopwatchTicks;
+        private static long _applyStopwatchTicks;
         private static long _mainStopwatchTicks;
         private static long _verifyMismatches;
+
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set => _verify = value;
+        }
 
         public static Feature CreateFeature(Config config)
         {
@@ -154,8 +159,8 @@ namespace LateGamePerformance
                 },
                 Prefix = Reflect.Own(self, nameof(TickPrefix))
             });
-            // The mirror's hooks. Without them the mirror never matches the game's list, which the tick notices
-            // object for object, so the levels from the worker are simply never used.
+            // The mirror's hooks. Without them the snapshot never matches the game's list, and every object is read
+            // on the main thread; the tick notices that and rebuilds the mirror, so the result is still the game's.
             feature.Patches.Add(new PatchSpec
             {
                 Name = "WaterObjectService.RegisterWaterObject",
@@ -247,6 +252,16 @@ namespace LateGamePerformance
             ParameterExpression level = Expression.Parameter(typeof(int), "level");
             _setLevel = Expression.Lambda<Action<WaterObject, int>>(Expression.Call(o, setLevel, level), o, level).Compile();
             _tileOf = Reflect.FieldGetter<Vector3Int>(waterObject, "_baseCoordinates");
+            // The list's own array, read once per tick instead of through the indexer per object. Optional: a
+            // runtime whose List<T> has no such field goes through the indexer.
+            try
+            {
+                _itemsOf = Reflect.FieldGetter<WaterObject[]>(typeof(List<WaterObject>), "_items");
+            }
+            catch (Exception)
+            {
+                _itemsOf = null;
+            }
         }
 
         public static string TakeStatsLine()
@@ -257,17 +272,20 @@ namespace LateGamePerformance
             }
             double ms = 1000.0 / Stopwatch.Frequency;
             string line = string.Format(CultureInfo.InvariantCulture,
-                "PlantWater: {0} passes over {1} objects; {2} used levels computed on the water worker ({3:0.000} ms there " +
-                "per pass), {4} read them inside the tick on {5} workers ({6:0.000} ms per pass), {7} had no copy to use; " +
-                "the list changed in {8} ticks, the mirror was rebuilt {9} times; {10} level changes applied; main thread " +
-                "{11:0.000} ms per pass{12}",
+                "PlantWater: {0} passes over {1} objects; {2} used the water worker's levels ({3:0.000} ms there per pass; " +
+                "{4} objects matched, {5} that joined the list after the snapshot were read on the main thread; matching " +
+                "{6:0.000} ms per pass), {7} read every level inside the tick on {8} workers ({9:0.000} ms per pass), {10} had " +
+                "no copy to use; the list changed in {11} ticks, the mirror was rebuilt {12} times; {13} level changes applied " +
+                "({14:0.000} ms per pass); main thread {15:0.000} ms per pass{16}",
                 _passes, _passes > 0 ? _objects / _passes : 0, _fromWorker,
-                _fromWorker > 0 ? _workerStopwatchTicks * ms / _fromWorker : 0, _inTick, _workers,
+                _fromWorker > 0 ? _workerStopwatchTicks * ms / _fromWorker : 0, _fromWorkerObjects, _directObjects,
+                _fromWorker > 0 ? _matchStopwatchTicks * ms / _fromWorker : 0, _inTick, _workers,
                 _inTick > 0 ? _readStopwatchTicks * ms / _inTick : 0, _noCopy, _listChanged, _resyncs, _changes,
-                _passes > 0 ? _mainStopwatchTicks * ms / _passes : 0,
+                _passes > 0 ? _applyStopwatchTicks * ms / _passes : 0, _passes > 0 ? _mainStopwatchTicks * ms / _passes : 0,
                 _verify ? $"; verify mismatches {_verifyMismatches}" : "");
-            _passes = _objects = _changes = _fromWorker = _inTick = _noCopy = _listChanged = _resyncs = 0;
-            _workerStopwatchTicks = _readStopwatchTicks = _mainStopwatchTicks = 0;
+            _passes = _objects = _changes = _fromWorker = _fromWorkerObjects = _directObjects = _inTick = _noCopy = 0;
+            _listChanged = _resyncs = _workerStopwatchTicks = _readStopwatchTicks = _matchStopwatchTicks = 0;
+            _applyStopwatchTicks = _mainStopwatchTicks = 0;
             return line;
         }
 
@@ -366,27 +384,35 @@ namespace LateGamePerformance
                     return true;
                 }
                 long started = Stopwatch.GetTimestamp();
-                int[] levels;
-                Batch batch = _usingCopy ? ReadyBatch(objects) : null;
+                if (_levels.Length < count)
+                {
+                    _levels = new int[count + count / 4];
+                }
+                int[] levels = _levels;
+                WaterObject[] items = _itemsOf != null ? _itemsOf(objects) : null;
+                Batch batch = _usingCopy ? ReadyBatch() : null;
                 if (batch != null)
                 {
-                    levels = batch.Levels;
+                    Match(batch, objects, items, count, levels);
                     _fromWorker++;
                 }
                 else
                 {
-                    if (_levels.Length < count)
-                    {
-                        _levels = new int[count + count / 4];
-                    }
-                    Exception failure = OrderedParallel.Read(objects, count, _levels, _currentLevel, _workers);
+                    Exception failure = OrderedParallel.Read(objects, count, levels, _currentLevel, _workers);
                     if (failure != null)
                     {
                         throw failure;
                     }
-                    levels = _levels;
                     _inTick++;
-                    _readStopwatchTicks += Stopwatch.GetTimestamp() - started;
+                }
+                long read = Stopwatch.GetTimestamp();
+                if (batch != null)
+                {
+                    _matchStopwatchTicks += read - started;
+                }
+                else
+                {
+                    _readStopwatchTicks += read - started;
                 }
                 if (_verify)
                 {
@@ -394,16 +420,18 @@ namespace LateGamePerformance
                 }
                 for (int i = 0; i < count && i < objects.Count; i++)
                 {
-                    WaterObject waterObject = objects[i];
+                    WaterObject waterObject = items != null ? items[i] : objects[i];
                     if (levels[i] != waterObject.WaterAboveBase)
                     {
                         _setLevel(waterObject, levels[i]);
                         _changes++;
                     }
                 }
+                long applied = Stopwatch.GetTimestamp();
+                _applyStopwatchTicks += applied - read;
+                _mainStopwatchTicks += applied - started;
                 _passes++;
                 _objects += count;
-                _mainStopwatchTicks += Stopwatch.GetTimestamp() - started;
                 return false;
             }
             catch (Exception exception)
@@ -475,8 +503,8 @@ namespace LateGamePerformance
             batch.Done = true;
         }
 
-        // The batch whose copy is the map's current arrays and whose list is the game's, or null.
-        private static Batch ReadyBatch(List<WaterObject> objects)
+        // The batch whose copy is the map's current arrays, or null.
+        private static Batch ReadyBatch()
         {
             WaterMapCopy.Job job = WaterMapCopy.SwappedJob;
             if (job == null)
@@ -493,30 +521,54 @@ namespace LateGamePerformance
                 _noCopy++;
                 return null;
             }
-            Snapshot snapshot = batch.Snapshot;
-            if (batch.Version != snapshot.Version || batch.Version != _mirrorVersion)
+            if (batch.Version != batch.Snapshot.Version)
             {
-                _listChanged++;
+                // The snapshot buffer was rewritten under it (cannot happen within the ring's depth; checked anyway).
+                _noCopy++;
                 return null;
             }
             _workerStopwatchTicks += job.ExtraStopwatchTicks;
-            // The mirror says the list is the one the levels were computed for; the game's list is the judge of
-            // that, object for object (a few microseconds), so a hook that ever missed a change is noticed here
-            // and the mirror rebuilt, never used.
-            if (snapshot.Count != objects.Count)
+            return batch;
+        }
+
+        // The game's list and the snapshot side by side. Objects that stayed keep their order, so one index over
+        // each suffices: an object found in the snapshot takes the worker's level, one that is not (it joined the
+        // list after the snapshot, or the mirror missed something) is read now with the game's own method.
+        private static void Match(Batch batch, List<WaterObject> objects, WaterObject[] items, int count, int[] levels)
+        {
+            WaterObject[] snapshot = batch.Snapshot.Objects;
+            int[] known = batch.Levels;
+            int end = batch.Count;
+            int j = 0;
+            int direct = 0;
+            for (int i = 0; i < count; i++)
             {
-                Resync(objects);
-                return null;
-            }
-            for (int i = 0; i < snapshot.Count; i++)
-            {
-                if (!ReferenceEquals(snapshot.Objects[i], objects[i]))
+                WaterObject waterObject = items != null ? items[i] : objects[i];
+                while (j < end && !ReferenceEquals(snapshot[j], waterObject))
                 {
-                    Resync(objects);
-                    return null;
+                    j++;
+                }
+                if (j < end)
+                {
+                    levels[i] = known[j++];
+                }
+                else
+                {
+                    levels[i] = _currentLevel(waterObject);
+                    direct++;
                 }
             }
-            return batch;
+            _fromWorkerObjects += count - direct;
+            _directObjects += direct;
+            if (direct > 0)
+            {
+                _listChanged++;
+            }
+            if (direct > count / 4)
+            {
+                // Far more than a tick's registrations: the mirror is out of step with the game's list.
+                Resync(objects);
+            }
         }
 
         private static void Resync(List<WaterObject> objects)
@@ -530,7 +582,6 @@ namespace LateGamePerformance
             }
             _mirrorVersion++;
             _resyncs++;
-            _listChanged++;
         }
 
         private static void Verify(List<WaterObject> objects, int count, int[] levels)

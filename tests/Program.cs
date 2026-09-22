@@ -7,18 +7,23 @@ using LateGamePerformance;
 
 // Applies every patch against the installed game's real assemblies (without running the game) and checks
 // that each one landed. Usage: dotnet run --project tests -- "<GameDir>\Timberborn_Data\Managed"
+// With --hashes as the first argument it prints the current hash of every listed snapshot component's Save
+// method instead, ready to paste into SaveSnapshot.Allowed after a game or fork update.
 internal static class Program
 {
     private const string ModSettingsDirectory =
         @"C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3283831040\version-1.1\Scripts";
+    // The owner's BeaverBuddies MultiColony fork, under Documents; its ColonyStamp is on the snapshot list.
+    private const string BeaverBuddiesDll = @"Timberborn\Mods\BeaverBuddies-MultiColony\version-1.1\BeaverBuddies.dll";
 
     private static int _failures;
     private static string _managed;
 
     private static int Main(string[] args)
     {
-        string managed = args.Length > 0
-            ? args[0]
+        bool hashes = args.Length > 0 && args[0] == "--hashes";
+        string managed = args.Length > (hashes ? 1 : 0)
+            ? args[hashes ? 1 : 0]
             : @"C:\Program Files (x86)\Steam\steamapps\common\Timberborn\Timberborn_Data\Managed";
         _managed = managed;
         AppDomain.CurrentDomain.AssemblyResolve += (_, e) =>
@@ -48,13 +53,83 @@ internal static class Program
                      "Timberborn.EntityPanelSystem", "Timberborn.TimbermeshAnimations", "Timberborn.BaseComponentSystem",
                      "Timberborn.EntitySystem", "Timberborn.TemplateSystem", "Timberborn.Versioning", "Timberborn.TopBarSystem",
                      "Timberborn.BuildingsReachability", "Timberborn.DwellingSystem", "Timberborn.Beavers", "Timberborn.GameDistricts",
-                     "Timberborn.SimulationSystem", "Timberborn.Common", "Timberborn.Multithreading" })
+                     "Timberborn.SimulationSystem", "Timberborn.Common", "Timberborn.Multithreading", "Timberborn.BehaviorSystem",
+                     "Timberborn.TimeSystem", "Timberborn.EnterableSystem", "Timberborn.CharacterMovementSystem" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
 
         // Kept out of Main so the mod's types are only touched once the resolver above is in place.
-        return Run();
+        return hashes ? PrintHashes() : Run();
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static int PrintHashes()
+    {
+        LoadEveryGameAssembly();
+        int missing = 0;
+        Console.WriteLine("        // dotnet run --project tests -c Release -- --hashes");
+        foreach (KeyValuePair<string, string> entry in SaveSnapshot.Allowed)
+        {
+            Type type = FindType(entry.Key);
+            if (type == null)
+            {
+                Console.WriteLine($"            // NOT FOUND: {entry.Key}");
+                missing++;
+                continue;
+            }
+            Console.WriteLine($"            {{ \"{entry.Key}\", \"{SaveSnapshot.SaveHash(type)}\" }},");
+        }
+        return missing == 0 ? 0 : 1;
+    }
+
+    // Every game assembly, and the fork when it is installed, so that any listed type can be found.
+    internal static void LoadEveryGameAssembly()
+    {
+        foreach (string path in Directory.GetFiles(_managed, "Timberborn.*.dll"))
+        {
+            try
+            {
+                Assembly.LoadFrom(path);
+            }
+            catch (Exception)
+            {
+                // Not a managed assembly this runtime can load; nothing on the list lives there.
+            }
+        }
+        string fork = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), BeaverBuddiesDll);
+        if (File.Exists(fork))
+        {
+            try
+            {
+                Assembly.LoadFrom(fork);
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine("     the BeaverBuddies fork could not be loaded: " + exception.Message);
+            }
+        }
+    }
+
+    internal static Type FindType(string fullName)
+    {
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            Type type = null;
+            try
+            {
+                type = assembly.GetType(fullName, false);
+            }
+            catch (Exception)
+            {
+                // An assembly whose references cannot be resolved here.
+            }
+            if (type != null)
+            {
+                return type;
+            }
+        }
+        return null;
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -73,6 +148,7 @@ internal static class Program
         TestGarbageCollection();
         TestCatchUp();
         TestSoundAndUi();
+        FeatureTests.Run(Check);
 
         // The Workshop Harmony build only runs under Mono, so patches are validated here, not applied.
         Feature[] features =
@@ -86,6 +162,7 @@ internal static class Program
             MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), CatchUp.CreateFeature(),
             SoundListenerSkip.CreateFeature(), UiThrottle.CreateFeature(), AnimatorCulling.CreateFeature(),
+            TerrainReach.CreateFeature(), MapChanges.CreateFeature(), BehaviorLog.CreateFeature(), WalkerMove.CreateFeature(),
             Plugin.CreateTickFeature()
         };
         int patchCount = 0;
@@ -101,7 +178,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 105, $"105 patches declared (found {patchCount})");
+        Check(patchCount == 119, $"119 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -115,7 +192,8 @@ internal static class Program
         string[] expectedWarnings =
         {
             "CatchUp failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
-            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed", "HomeSearch failed"
+            "BackgroundSave: SAVE FAILED", "BackgroundSave failed while preparing", "DistrictCounts failed",
+            "SaveSnapshot: the saving code of", "HomeSearch failed"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
         for (int i = 0; asExpected && i < expectedWarnings.Length; i++)
@@ -256,6 +334,18 @@ internal static class Program
         Check(!config.RecordTimings, "config: per-component timings are off unless asked for");
         config.Apply(Config.Parse(new[] { "routemapsworkers=5 # trailing", "YielderSearchVerify = true", "RecordTimings = true" }));
         Check(config.RouteMapsWorkers == 5 && config.YielderSearchVerify && config.RecordTimings, "config: key case-insensitive, trailing comment, testing switches still work");
+        Config all = new Config();
+        all.Apply(Config.Parse(new[] { "VerifyAll = true", "AnimatorLodDistance = -5", "UnityMarkers = Camera.Render; Culling ;; Culling" }));
+        Check(all.VerifyAll && all.HaulCacheVerify && all.YielderSearchVerify && all.PlantWaterVerify && all.DistrictCountsVerify &&
+              all.WaterMapCopyVerify && all.SoilScansVerify && all.TerrainSearchVerify && all.HomeSearchVerify && all.SaveSnapshotVerify &&
+              !new Config().VerifyAll, "config: VerifyAll switches on every verify mode, off by default");
+        Check(all.AnimatorLod && all.AnimatorLodDistance == 0 && new Config().AnimatorLodDistance == 80,
+            "config: the animator distance is clamped at 0 and 80 tiles by default");
+        Check(all.UnityMarkers == "Camera.Render; Culling ;; Culling" &&
+              UnityMarkers.Parse(all.UnityMarkers).SequenceEqual(new[] { "Camera.Render", "Culling" }) &&
+              UnityMarkers.Parse(UnityMarkers.DefaultSpec).Length == 18 && UnityMarkers.Parse(null).Length == 0 &&
+              new Config().UnityMarkers == UnityMarkers.DefaultSpec,
+            "config: the Unity marker list is kept as written and parsed into trimmed, distinct names");
         // No public field or settable property may carry one of the fixed names, or a later change could quietly
         // make it a setting again.
         foreach (string key in Config.FixedKeys)
@@ -286,9 +376,12 @@ internal static class Program
                 settings++;
             }
         }
-        Check(settings == 4 && page.GetProperty("IncrementalGc") != null && page.GetProperty("DiagnosticsTimers") != null &&
-              page.GetProperty("VerifyTerrainSearches") != null && page.GetProperty("VerifySaveSnapshots") != null,
-            "settings page: four settings: incremental garbage collection, diagnostics timers, verify terrain searches, verify save snapshots");
+        Check(settings == 7 && page.GetProperty("IncrementalGc") != null && page.GetProperty("DiagnosticsTimers") != null &&
+              page.GetProperty("VerifyTerrainSearches") != null && page.GetProperty("VerifySaveSnapshots") != null &&
+              page.GetProperty("VerifyEverything") != null && page.GetProperty("MeasureLiveMemory") != null &&
+              page.GetProperty("WriteMemorySnapshot") != null,
+            "settings page: seven settings: incremental garbage collection, diagnostics timers, verify terrain searches, verify " +
+            "save snapshots, verify everything, and the two memory measurements");
         // The main menu notice is built by the game's container: it needs one public constructor whose
         // parameters are things the main menu binds, and the game calls it through this interface.
         Type notice = typeof(GcNotice);
@@ -541,7 +634,7 @@ internal static class Program
     private static void TestYielderSearch()
     {
         Random random = new Random(12345);
-        int cases = 0, differences = 0; long lookupsSaved = 0, firstNotLookedUp = 0;
+        int cases = 0, differences = 0; long lookupsSaved = 0, deadSkipped = 0;
         for (int round = 0; round < 4000; round++)
         {
             int count = random.Next(0, 40);
@@ -557,22 +650,56 @@ internal static class Program
                     Good = random.Next(3) == 0 ? "Pine" : "Log", Distance = random.Next(1, 12)   // ties on purpose
                 });
             }
-            int firstLookedUp = -1, position = 0;
             var counters = new YielderSearch.Counters();
+            int lookedUpDead = 0;
             Func<Plant, Plant> lookUp = plant => plant.Reachable ? plant : null;
             string games = GamesAnswer(plants.Select(lookUp));
             string mods = GamesAnswer(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding,
-                plant => plant.Alive, plant => { if (firstLookedUp < 0) firstLookedUp = position; return lookUp(plant); },
-                reached => reached != null, counters).Select(reached => { position++; return reached; }));
+                plant => plant.Alive, plant => { if (plant.Exists && !plant.Yielding && !plant.Alive) lookedUpDead++; return lookUp(plant); },
+                reached => reached != null, counters));
             cases++;
             if (games != mods) differences++;
-            if (count > 0 && counters.Lookups == 0) firstNotLookedUp++;
+            if (lookedUpDead > 0) differences++;
             lookupsSaved += counters.Candidates - counters.Lookups;
+            deadSkipped += counters.DeadSkipped;
             if (counters.Candidates != count) differences++;
         }
         Check(differences == 0, $"yielder search: same answer as the game's search in {cases} random forests ({differences} differences)");
-        Check(firstNotLookedUp == 0, "yielder search: the first candidate is always looked up, so the route map is filled on the same tick");
+        Check(deadSkipped > 5000, $"yielder search: a plant neither yielding nor alive is never looked up ({deadSkipped} left out)");
         Check(lookupsSaved > 10000, $"yielder search: lookups are actually left out ({lookupsSaved})");
+        // The reach pre-filter (0.4.25): an oracle that is only ever wrong on the safe side (it never says "no" about a
+        // plant the lookup would reach) leaves the result the game's, whatever it says about the unreachable ones.
+        int reachDifferences = 0; long outOfReach = 0, reachLookups = 0, plainLookups = 0;
+        for (int round = 0; round < 4000; round++)
+        {
+            int count = random.Next(0, 40);
+            double yielding = random.NextDouble(), alive = random.NextDouble(), reachable = round % 5 == 0 ? 0.1 : random.NextDouble();
+            List<Plant> plants = new List<Plant>();
+            for (int i = 0; i < count; i++)
+            {
+                plants.Add(new Plant
+                {
+                    Exists = random.NextDouble() > 0.03, Yielding = random.NextDouble() < yielding, Alive = random.NextDouble() < alive,
+                    Reachable = random.NextDouble() < reachable, Good = random.Next(3) == 0 ? "Pine" : "Log", Distance = random.Next(1, 12), Order = i
+                });
+            }
+            Func<Plant, Plant> lookUp = plant => plant.Reachable ? plant : null;
+            Func<Plant, bool> mayReach = plant => plant.Reachable || random.Next(2) == 0;
+            var with = new YielderSearch.Counters();
+            var without = new YielderSearch.Counters();
+            string games = GamesResult(plants.Select(lookUp), good => true);
+            string mods = GamesResult(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding, plant => plant.Alive,
+                lookUp, reached => reached != null, with, plant => true, mayReach), good => true);
+            GamesResult(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding, plant => plant.Alive,
+                lookUp, reached => reached != null, without, plant => true), good => true);
+            if (games != mods) reachDifferences++;
+            outOfReach += with.OutOfReach;
+            reachLookups += with.Lookups;
+            plainLookups += without.Lookups;
+        }
+        Check(reachDifferences == 0, $"yielder search: the reach pre-filter leaves the result the game's in 4000 random forests ({reachDifferences} differences)");
+        Check(outOfReach > 5000 && reachLookups + outOfReach == plainLookups,
+            $"yielder search: every candidate the pre-filter rules out is one lookup fewer ({outOfReach} ruled out)");
 
         // With the building's room for each good taken into account (0.4.11): the answer, not just the candidates
         // fed to the search, must be the game's, whatever there is room for.

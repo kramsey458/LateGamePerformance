@@ -76,11 +76,25 @@ namespace LateGamePerformance
         private static MethodInfo _generatorLoad;
         private static FillCall _fill;
 
+        private static Func<object, int> _numberOfNodes;
+
         private static bool _active;
         private static int _minFields;
         private static int _workerCount;
         private static object _pathfindingService;
         private static object[] _workerGenerators;
+        // Scanning the cache only after something could have changed (MapChanges), with a full scan every so many
+        // ticks that reports anything the hooks missed.
+        internal static bool ScanOnlyWhenChanged;
+        private const int SelfCheckEveryTicks = 200;
+        private static bool _changed = true;
+        private static int _ticksSinceScan;
+        private static long _scans;
+        private static long _scansSkipped;
+        private static long _missedByHooks;
+        private static int _cachedMaps;
+        private static int _largestMapNodes;
+        private static int _lastFound;
 
         private static long _batches;
         private static long _fieldsFilled;
@@ -92,6 +106,11 @@ namespace LateGamePerformance
         public static bool IsActive => _active;
 
         public static long FieldsFilledSinceReport => _fieldsFilled;
+
+        internal static void MarkChanged()
+        {
+            _changed = true;
+        }
 
         public static Feature CreateFeature(Config config)
         {
@@ -140,7 +159,10 @@ namespace LateGamePerformance
                 return null;
             }
             double msPerTick = 1000.0 / Stopwatch.Frequency;
-            string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}";
+            string left = $"; {_builtDirectly} more built directly on the main thread in batches of fewer than {_minFields}; " +
+                          $"{_cachedMaps} maps cached, the largest {_largestMapNodes} tiles; the cache was scanned {_scans} times and " +
+                          $"left alone {_scansSkipped} times because nothing had changed, {_missedByHooks} unbuilt maps were found by " +
+                          "the periodic check alone";
             string line = _background
                 ? $"RouteMaps: {_batches} background rebuilds of {_fieldsFilled} route maps; main thread spent " +
                   $"{_mainStopwatchTicks * msPerTick:0.0} ms on them, longest single pause " +
@@ -151,6 +173,7 @@ namespace LateGamePerformance
             _batches = _fieldsFilled = _builtDirectly = _wallStopwatchTicks = 0;
             _mainStopwatchTicks = _backgroundStopwatchTicks = _builtOnMain = _waitedOnMain = 0;
             _longestPauseStopwatchTicks = 0;
+            _scans = _scansSkipped = _missedByHooks = 0;
             return line;
         }
 
@@ -174,6 +197,7 @@ namespace LateGamePerformance
             _innerCacheOf = Reflect.FieldGetter<object>(roadFlowFieldCache, "_flowFields");
             _entriesOf = Reflect.FieldGetter<object>(flowFieldCache, "_flowFields");
             _isFilled = Reflect.PropertyGetter<bool>(accessFlowField, "IsFilled");
+            _numberOfNodes = Reflect.PropertyGetter<int>(accessFlowField, "NumberOfNodes");
             _districtFieldAt = Reflect.InstanceCall<Func<object, int, object>>(
                 AccessTools.Method(districtMap, "GetDistrictRoadFlowFieldByRoadNodeId"));
             _fill = Reflect.InstanceCall<FillCall>(AccessTools.Method(generator, "FillFlowField"));
@@ -205,24 +229,15 @@ namespace LateGamePerformance
         public static Exception FillParallel(object graph, IReadOnlyList<Work> work, object[] workerGenerators)
         {
             int workers = Math.Min(workerGenerators.Length, work.Count);
-            Exception failure = null;
-            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+            // This mod's own worker threads; strided split: no shared counters, one generator per worker.
+            return TickWorkers.Run(workers, (worker, sharing) =>
             {
-                try
+                object generator = workerGenerators[worker];
+                for (int i = worker; i < work.Count; i += sharing)
                 {
-                    object generator = workerGenerators[worker];
-                    // Strided split: no shared counters, and which worker takes which map is fixed.
-                    for (int i = worker; i < work.Count; i += workers)
-                    {
-                        Fill(generator, graph, work[i]);
-                    }
-                }
-                catch (Exception exception)
-                {
-                    Interlocked.CompareExchange(ref failure, exception, null);
+                    Fill(generator, graph, work[i]);
                 }
             });
-            return failure;
         }
 
         public static object[] CreateWorkerGenerators(object binaryHeapFactory, int count)
@@ -241,6 +256,7 @@ namespace LateGamePerformance
         {
             // A new game scene: forget everything tied to the previous one.
             Land();
+            _changed = true;
             _pathfindingService = __instance;
             _workerGenerators = null;
         }
@@ -251,9 +267,27 @@ namespace LateGamePerformance
             {
                 return;
             }
+            bool selfCheck = false;
+            if (ScanOnlyWhenChanged && !_changed)
+            {
+                if (++_ticksSinceScan < SelfCheckEveryTicks)
+                {
+                    _scansSkipped++;
+                    return;
+                }
+                selfCheck = true;
+            }
+            _changed = false;
+            _ticksSinceScan = 0;
+            _lastFound = 0;
             try
             {
                 BuildUnbuiltMaps();
+                _scans++;
+                if (selfCheck)
+                {
+                    _missedByHooks += _lastFound;
+                }
             }
             catch (Exception exception)
             {
@@ -279,11 +313,18 @@ namespace LateGamePerformance
             object entries = _entriesOf(_innerCacheOf(roadCache));
             IEnumerator<int> keys = ((IEnumerable<int>)_entryKeys.GetValue(entries)).GetEnumerator();
             IEnumerator values = ((IEnumerable)_entryValues.GetValue(entries)).GetEnumerator();
+            int cached = 0, largest = 0;
             while (keys.MoveNext() && values.MoveNext())
             {
                 object field = _fieldOfEntry(values.Current);
+                cached++;
                 if (_isFilled(field))
                 {
+                    int nodes = _numberOfNodes(field);
+                    if (nodes > largest)
+                    {
+                        largest = nodes;
+                    }
                     continue;
                 }
                 int nodeId = keys.Current;
@@ -297,6 +338,9 @@ namespace LateGamePerformance
                     WorkScratch.Add(new Work { Field = field, LimitingField = limitingField, StartNodeId = nodeId });
                 }
             }
+            _cachedMaps = cached;
+            _largestMapNodes = largest;
+            _lastFound = WorkScratch.Count;
             if (WorkScratch.Count == 0)
             {
                 return;

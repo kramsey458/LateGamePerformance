@@ -39,6 +39,8 @@ namespace LateGamePerformance
 
         private static readonly Timer NeedPicks = new Timer();
         private static readonly Timer WalkerPaths = new Timer();
+        private static readonly Timer CitizenAssigns = new Timer();
+        private static readonly Timer CutOffChecks = new Timer();
         private static readonly SearchTimer RoadSearches = new SearchTimer();
         private static readonly SearchTimer TerrainSearches = new SearchTimer();
 
@@ -157,6 +159,22 @@ namespace LateGamePerformance
                     Postfix = Reflect.Own(self, nameof(TerrainSearchPostfix))
                 });
             }
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "DistrictCitizenAssigner.AssignToClosestDistrict",
+                Required = false,
+                Target = () => Reflect.Method("Timberborn.GameDistricts.DistrictCitizenAssigner", "AssignToClosestDistrict"),
+                Prefix = Reflect.Own(self, nameof(StampPrefix)),
+                Postfix = Reflect.Own(self, nameof(CitizenAssignPostfix))
+            });
+            feature.Patches.Add(new PatchSpec
+            {
+                Name = "DistrictCitizenAssigner.UnassignCharactersCutOffFromTheirDistricts",
+                Required = false,
+                Target = () => Reflect.Method("Timberborn.GameDistricts.DistrictCitizenAssigner", "UnassignCharactersCutOffFromTheirDistricts"),
+                Prefix = Reflect.Own(self, nameof(StampPrefix)),
+                Postfix = Reflect.Own(self, nameof(CutOffPostfix))
+            });
             return feature;
         }
 
@@ -180,10 +198,19 @@ namespace LateGamePerformance
                 NeedPicks.Text("need picks") + "; " +
                 WalkerPaths.Text("walker paths") + "; " +
                 RoadSearches.Text("road A*") + "; " +
-                TerrainSearches.Text("terrain A*");
+                TerrainSearches.Text("terrain A*") + "; " +
+                CitizenAssigns.Text("citizens without a district looked for one") + "; " +
+                CutOffChecks.Text("checks of every citizen for a cut-off district");
+            string markers = UnityMarkers.TakeStatsText();
+            if (markers != null)
+            {
+                line += "; " + markers;
+            }
             _fills = _fillNodes = _fillStopwatchTicks = 0;
             NeedPicks.Reset();
             WalkerPaths.Reset();
+            CitizenAssigns.Reset();
+            CutOffChecks.Reset();
             RoadSearches.Reset();
             TerrainSearches.Reset();
             return line;
@@ -238,6 +265,22 @@ namespace LateGamePerformance
             if (__state != 0)
             {
                 WalkerPaths.Add(Stopwatch.GetTimestamp() - __state);
+            }
+        }
+
+        private static void CitizenAssignPostfix(long __state)
+        {
+            if (__state != 0)
+            {
+                CitizenAssigns.Add(Stopwatch.GetTimestamp() - __state);
+            }
+        }
+
+        private static void CutOffPostfix(long __state)
+        {
+            if (__state != 0)
+            {
+                CutOffChecks.Add(Stopwatch.GetTimestamp() - __state);
             }
         }
 

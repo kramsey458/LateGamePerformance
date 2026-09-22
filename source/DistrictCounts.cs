@@ -123,6 +123,12 @@ namespace LateGamePerformance
 
         private static bool _active;
         private static bool _checkedForeignPatches;
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set => _verify = value;
+        }
+
         private static bool _verify;
         private static int _workers;
 
@@ -432,7 +438,7 @@ namespace LateGamePerformance
             }
 
             int workers = Math.Max(1, Math.Min(_workers, parallel));
-            Exception failure = CountParallel(_parallel, parallel, workers);
+            Exception failure = CountParallel(_parallel, parallel, workers, out int used);
             if (failure != null)
             {
                 throw failure;
@@ -455,7 +461,7 @@ namespace LateGamePerformance
             inputOutputStock.Clear();
             outputCapacity.Clear();
             inputOutputCapacity.Clear();
-            for (int worker = -1; worker < workers; worker++)
+            for (int worker = -1; worker < used; worker++)
             {
                 Tally tally = worker < 0 ? MainTally : _tallies[worker];
                 Tally.AddAll(outputStock, tally.OutputStock);
@@ -467,9 +473,10 @@ namespace LateGamePerformance
             _directInventories += direct;
         }
 
-        // Worker w counts items w, w + workers, w + 2 * workers... into its own tally. Returns the first exception
-        // a worker hit, or null; it never throws.
-        internal static Exception CountParallel(Inventory[] items, int count, int workers)
+        // Worker w counts items w, w + workers, w + 2 * workers... into its own tally, on this mod's own worker
+        // threads (TickWorkers). `used` is how many workers shared the count. Returns the first exception a worker
+        // hit, or null; it never throws.
+        internal static Exception CountParallel(Inventory[] items, int count, int workers, out int used)
         {
             if (_tallies.Length < workers)
             {
@@ -481,23 +488,21 @@ namespace LateGamePerformance
                 _tallies = tallies;
             }
             Tally[] current = _tallies;
-            Exception failure = null;
-            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+            int shared = 1;
+            Exception failure = TickWorkers.Run(workers, (worker, sharing) =>
             {
-                try
+                if (worker == 0)
                 {
-                    Tally tally = current[worker];
-                    tally.Clear();
-                    for (int i = worker; i < count; i += workers)
-                    {
-                        tally.Count(items[i]);
-                    }
+                    shared = sharing;
                 }
-                catch (Exception exception)
+                Tally tally = current[worker];
+                tally.Clear();
+                for (int i = worker; i < count; i += sharing)
                 {
-                    Interlocked.CompareExchange(ref failure, exception, null);
+                    tally.Count(items[i]);
                 }
             });
+            used = shared;
             return failure;
         }
 

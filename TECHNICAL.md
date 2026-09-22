@@ -59,8 +59,28 @@ further 4000 random forests with full and part-full buildings. The stats line no
 `outcomes: 12 found work, 5188 found nothing the building has room for or the worker can take, 0 found nothing
 in range`.
 
-- The first candidate of a search is always looked up, because that lookup is also what refills the building's
-  terrain route map after a terrain change, and that has to happen on the same tick as without the mod.
+**Dead plants and the reach box (new in 0.4.25).** The 0.4.23 session's stats showed the search still at 1.2 ms per
+tick, with 153 lookups per search before the first reachable candidate and 88% of searches ending with nothing the
+building could take. Two more kinds of lookup are left out. A plant that is neither yielding nor alive (a dead tree
+still on the list) can neither be the answer nor set "found something", whatever its distance: the game's search
+reads its distance and then does nothing with it, so it is never looked up. And a plant outside the bounding box of
+the building's terrain route map cannot be one of the map's tiles, so the game's lookup would answer "unreachable"
+and the search would drop it: the box is measured once, right after a map is filled (`TerrainReach`, a postfix on the
+generator's fill on whichever thread fills, the game's on-demand fill or this mod's batch), and trusted only while
+the map is still filled; a cleared map answers "maybe" until it is rebuilt, and a map never filled has no box, so
+those candidates are looked up as before. A building with no unblocked access gets "unreachable" from the game for
+every candidate (`Accessible.FindTerrainPath` returns false without one), so nothing is looked up for it. The
+result is the game's: the tests run the model on a further 4000 random forests with a reach oracle that is only
+ever wrong on the safe side and require the same answer, and they measure the boxes of 89 real terrain maps with the
+game's own node ids: every tile of every map is inside its box, a tile just outside is refused, a cleared map
+answers maybe. The stats line now says how many were left out for each reason (`of which 12000 dead plants and
+300000 plants outside the route map's reach`).
+
+- Up to 0.4.24 the first candidate of a search was always looked up, so that the lookup refilled the building's
+  terrain route map on the same tick as without the mod. Since 0.4.12 every cached terrain map is built at the end
+  of each navigation tick anyway, and in the game's code the only reader of a terrain map's filled state is the
+  fill itself (`TerrainFlowFieldGenerator.FillFlowFieldUpToDistance`, which returns at once when the map is
+  filled), so when a map gets filled cannot change any result. The guarantee is dropped in 0.4.25.
 - `YielderSearchVerify = true` runs the game's own search as well, compares, logs any difference and uses the
   game's result. It is slower than no mod and only for testing.
 - If anything throws, the feature switches itself off for the session and the game's own code runs.
@@ -89,10 +109,15 @@ arrays are exactly the copy they were computed from (the water map copy swapped 
 it since; whenever the game copied for itself, they are not), the worker finished, and the game's list of
 objects is the one they were computed for. For the last, the mod keeps a mirror of the list through the game's
 register and unregister methods and takes a numbered snapshot of it whenever it changed; in the tick the
-snapshot is compared with the game's list object for object (a few microseconds), so a change the hooks missed
-is noticed, the mirror rebuilt from the game's list and that tick read the old way. From 0.4.12 to 0.4.22 the
-reads were spread over worker threads started inside the tick, 0.4 ms per tick of starting and joining in the
-logged colony; that is now the fallback for a tick with no usable copy.
+snapshot and the game's list are walked side by side (0.4.25): an object found in the snapshot takes the worker's
+level, an object the snapshot does not hold (it joined the list after the snapshot, or the mirror missed it) is
+read on the main thread with the game's own method, and an object that left since is passed over. Objects that
+stay keep their order, because the game's list only appends and removes, so one index over each suffices; only
+when more than a quarter of the list is unmatched is the mirror rebuilt from the game's list. Up to 0.4.24 any
+difference between the two made the tick read every level again: 35 to 49% of passes in the 0.4.23 session,
+because a plant is planted or cut in most ticks of a large colony. From 0.4.12 to 0.4.22 the reads were spread
+over thread-pool workers started inside the tick, 0.4 ms per tick of starting and joining in the logged colony;
+that is now the fallback for a tick with no usable copy, on this mod's own worker threads (see Worker threads).
 
 Reading first gives the same values because a handler cannot change the water map or an object's tile, and it
 cannot add or remove an object from the list: the game walks that list with `foreach` and would throw if one
@@ -103,10 +128,11 @@ did. The result does not depend on the number of threads, so it is the same on e
   same stored levels and the same events in the same order with the same values, for six ticks (4316 level
   changes). A second test puts 3000 real `WaterObject`s over the two real `ThreadSafeWaterMap`s of the water map
   copy's test world, one set ticked by the game's own `WaterObjectService` over the map that only runs the game's
-  code, the other by the mod over the map that goes through the copy and the swap: twelve ticks, nine of which
-  use the worker's levels, one falls back because the water layout changed, one because an object left the list
-  after the snapshot, one because an object left without the hook seeing it (the mirror is rebuilt), and three
-  in verify mode; levels and events identical throughout, verify mismatches 0.
+  code, the other by the mod over the map that goes through the copy and the swap: fifteen ticks, fourteen of
+  which use the worker's levels, among them the tick an object left the list after the snapshot, the tick one left
+  without the hook seeing it, the tick one joined after the snapshot (read on the main thread beside the worker's
+  levels) and the tick a thousand joined (the mirror is rebuilt); one falls back because the water layout changed;
+  three run in verify mode; levels and events identical throughout, verify mismatches 0.
 - Below 512 objects the game's own loop runs; starting workers would cost more than it saves.
 - `PlantWaterVerify = true` reads everything again on the main thread with the game's own method and compares,
   which also checks the worker's lookup against the game's map. For testing.
@@ -144,6 +170,12 @@ The same behaviour difference as the road maps: maps are built before the first 
 few code paths that use a terrain map only "if it is already filled" find it filled. Every player on the same
 version gets the same.
 
+**0.4.25.** The batch runs on this mod's own worker threads (see Worker threads) instead of the thread pool, and the
+cache is walked for unbuilt maps only on a tick after something could have changed (see Route map caches scanned
+only after a change), with a full walk every 200 ticks as a safety net. The stats line now also counts the maps in
+the cache, the largest map, the walks made and skipped, and any unbuilt map the safety net found that the hooks had
+missed.
+
 ### District resource counts on worker threads (always on, new in 0.4.13)
 
 Every tick each district adds up, for every good, what all its storage holds and how much room it has
@@ -179,6 +211,10 @@ adds the workers' tables into the game's tables. The two steps that go through i
   moving in between. In the harness one count takes the game 1.9 ms and the mod 0.5 ms.
 - `DistrictCountsVerify = true` lets the game count as well and compares. If anything throws, the feature
   switches itself off; the game's count starts by clearing every table, so nothing of the failed one is left.
+
+**0.4.25.** The count runs on this mod's own worker threads (see Worker threads) instead of `Parallel.For`. In the
+0.4.23 session a count of 233 inventories took 0.67 ms, nearly all of it waking and joining thread-pool threads that
+had gone to sleep between ticks; the work itself is a few tens of microseconds.
 
 ### Water map copy on a worker thread (always on, new in 0.4.14)
 
@@ -377,6 +413,22 @@ game would have searched again. That is why route maps are not a setting: every 
 
 In the test harness, 420 maps on a 22,600-tile road network took about 1.8 s one by one and about 0.23 s on
 7 workers.
+
+**Scanned only after a change (0.4.25).** Walking every cached map on every navigation tick to find the unbuilt
+ones cost 0.27 ms per tick in the logged colony, on ticks where nothing had changed. `MapChanges` hooks the events
+after which a map can be unbuilt or newly buildable: a new cache entry (`FlowFieldCache.StartCachingAtNode`, a
+building finished), a nav-mesh update on the road or terrain cache (which clears the maps it touches), and a
+district centre added or removed, an obstacle changed or the district map's own nav-mesh update (which decide
+whether a road map has a district map to be limited by). Each hook sets a flag; the walk itself is unchanged and
+runs on the next navigation tick after a flag, and on every 200th tick regardless, counting any unbuilt map it
+finds then as missed by the hooks (`... 0 unbuilt maps were found by the periodic check alone` on the stats line).
+A missed event costs at most 200 ticks of delay before a map is built ahead of its first use, never a wrong map,
+and the game builds on demand in between as it always did. Every peer runs the same hooks on the same events, so
+the walks happen on the same ticks everywhere. If any hook cannot be installed, both features walk every tick as
+before. The harness drives both features through their navigation tick hooks: flagged, a tick with nothing marked
+leaves cleared maps alone, a marked one builds them, and the 200th tick builds three maps cleared behind the
+hooks' back and says so. The batch that is not in the background runs on this mod's own worker threads (see
+Worker threads).
 
 #### Background rebuild (on by default, new in 0.3.0)
 
@@ -631,15 +683,20 @@ through a LINQ concatenation of the two lists: 0.3 ms per tick in the logged col
 
 The mod asks exactly the same questions of exactly the same beavers in exactly the same order, with the game's
 own methods, and stops at the same first hit. What it leaves out is the LINQ enumerators and the per-beaver
-component lookup, which it does once per beaver and keeps, because the components of an entity are fixed for its
-life (a deleted beaver leaves the table). The two lists are the game's own `ReadOnlyList<Beaver>`s, read by
-index; a list of any other kind (another mod's) is left to the game's own walk. The result cannot differ, so it
-is the same on every computer.
+component lookup, because the components of an entity are fixed for its life. Since 0.4.25 the lookups are kept
+beside each of the game's two lists (the district's adults and children): an array of their `Dweller` components
+in the same order, rebuilt whenever the list's own change counter (`List<T>._version`, which the runtime bumps on
+every addition, removal and replacement) or count moved, so a search is one array walk with one predicate call per
+beaver and no per-beaver table lookup (0.17 ms per search in the 0.4.23 session, 480 ns per beaver, most of it the
+dictionary). On a runtime whose list has no such counter the 0.4.23 table, one entry per beaver, is used instead.
+The two lists are the game's own `ReadOnlyList<Beaver>`s, read by index; a list of any other kind (another mod's)
+is left to the game's own walk. The result cannot differ, so it is the same on every computer.
 
 - The tests script the two predicates per beaver (the game's own need a live entity) and compare the pick with
   the game's walk as decompiled over 560 searches of 300 adults and 60 children in both orders: the same beaver
   moves in or nobody does, 360 component lookups in total, verify mode agrees, a list of another kind is handed
-  back, a throwing lookup switches the feature off and hands the search to the game.
+  back, a throwing lookup switches the feature off and hands the search to the game; and after a beaver leaves a
+  list and two are born, the next searches see the new lists, each rebuilt once.
 - `HomeSearchVerify = true` runs the game's walk as well, with fresh lookups, and compares the beaver picked;
   a mismatch is logged and the game's pick is used.
 - The stalest-dwelling walk that precedes the search (`StaleAssignableDwellingService.GetStalest`, a linked list
@@ -659,15 +716,28 @@ entities in the game's own order and lets the game's own code save the singleton
 would have written; only the thread that wrote part of it down differs.
 
 - An entity goes to a worker only if every persistent component on it is on the list in `SaveSnapshot.cs`, which
-  is exactly the set whose `Save` this mod has read in the game's 1.1.2.4 source: `BlockObject`,
-  `BlockObjectState`, `Yielder`, `Growable`, `LivingNaturalResource`, `CoordinatesOffsetter`,
-  `LivingWaterNaturalResource`, `WateredNaturalResource`, `AridNaturalResource`, `ContaminatedNaturalResource`,
-  `GatherableYieldGrower`, `DeadCuttableYieldRemover`, `ConstructionSite`, `Demolishable`, `BuilderPrioritizable`,
-  `Pollinatee`, `LayeredBlockObstacle`, `FlippableDecal`, `DecalSupplier`, `HaulPrioritizable`, `PausableBuilding`,
-  `Emptiable`, `TimedComponentActivator`, `NamedEntity`, `Inventory`, `RuinModels` and
-  `BlockObjectPlacementRandomizer`. Beavers (`Character` reads a transform, `MovementAnimator` reads Unity's
-  time), workplaces and anything with a component from another mod stay on the main thread. Template names, a
-  Unity name lookup, are read on the main thread for every entity first.
+  is exactly the set whose `Save` this mod has read: in 0.4.22 the 27 components of trees, crops, paths, levees and
+  platforms (`BlockObject`, `BlockObjectState`, `Yielder`, `Growable`, `LivingNaturalResource`,
+  `CoordinatesOffsetter`, `LivingWaterNaturalResource`, `WateredNaturalResource`, `AridNaturalResource`,
+  `ContaminatedNaturalResource`, `GatherableYieldGrower`, `DeadCuttableYieldRemover`, `ConstructionSite`,
+  `Demolishable`, `BuilderPrioritizable`, `Pollinatee`, `LayeredBlockObstacle`, `FlippableDecal`, `DecalSupplier`,
+  `HaulPrioritizable`, `PausableBuilding`, `Emptiable`, `TimedComponentActivator`, `NamedEntity`, `Inventory`,
+  `RuinModels`, `BlockObjectPlacementRandomizer`); since 0.4.25 also 63 parts of buildings whose `Save` was read the
+  same way, all reading fields of their own entity or a stateless serializer (`Workplace`, `WorkplacePriority`,
+  `Manufactory`, `GoodConsumingBuilding`, `FarmHouse`, `Forester`, `Floodgate`, `WaterInput`, `WaterMover`, the
+  valves, gauges and sensors, the automation buildings, `Deteriorable`, `Wonder`, `Hive`, `FixedStockpile`,
+  `GoodObtainer`, `GoodSupplier`, `DistrictDistributionSetting`, `PopulationDistributor`, `BreedingPod`, the need
+  appliers and more; the file lists them all), and the `ColonyStamp` of the owner's BeaverBuddies MultiColony fork
+  (a slot number from a field). In the 0.4.23 session 2,975 entities were kept on the main thread by that stamp
+  alone. Beavers stay on the main thread (`Character` reads a transform, `MovementAnimator` reads Unity's time,
+  `BehaviorManager` and everything else using the reference serializer), as does anything with a component the
+  list does not name. Template names, a Unity name lookup, are read on the main thread for every entity first.
+- **Guarded by a hash (0.4.25).** Beside each name the list holds a hash (FNV-1a, 64 bits) of the IL bytes of that
+  type's `Save(IEntitySaver)` as compiled, what the method does. A type is used on a worker only while its `Save`
+  still hashes to what was read; after a game or fork update that changes one, that type keeps its entities on the
+  main thread, with one log line naming it, until the method is read again and the hash renewed with
+  `dotnet run --project tests -c Release -- --hashes`, which prints the list ready to paste. The harness checks
+  every listed type against the installed game and fork on each run.
 - Why those are safe: the simulation is not running during a save (the tick was finished first), the main thread
   is inside `Create` until the workers have joined, every worker writes only into its own entities' dictionaries,
   and the shared helpers they call (`PrimitiveTypeSerialization`, `SaveConversions`, `GoodAmountSerializer`,
@@ -676,7 +746,8 @@ would have written; only the thread that wrote part of it down differs.
 - If a worker throws for any reason, the results are discarded, the game's own `Create` runs, and the feature is
   off for the session. The `SaveSnapshot:` stats line counts entities on workers and on the main thread and the
   main thread's time per snapshot; once per session a second line names the components that kept entities on the
-  main thread, by how many entities carry them, so the list can be extended.
+  main thread, by how many entities carry them, so the list can be extended (since 0.4.25 every unlisted part of
+  an entity is counted, not only the first found).
 - `SaveSnapshotVerify = true`, or the **Verify save snapshots** box on the settings page, takes the game's own
   entity snapshot as well at every save and compares every entity value by value (the game's own
   `SerializedEntity.Equals` compares lists by reference, so this mod has its own deep comparison). The mod's
@@ -748,6 +819,16 @@ the game never updates a finished animation again (0.4.20). The `AnimatorCulling
 out. Rendering only: the simulation reads animator time (the wonder, the clutch, particle
 triggers, the character model), never a node transform or a material.
 
+**By distance (new in 0.4.25).** Seen from the usual height nearly every animator in a big colony is on screen,
+so the culling above had little to leave out (`AnimatorRegistry` was still 1.29 ms per frame in the 0.4.23
+session, the largest per-frame item of the game). `AnimatorLod = true` (the default) writes the pose of an animator
+farther from the camera than `AnimatorLodDistance` tiles (80) every second frame and beyond twice that distance
+every fourth, spread over the frames by a hash of the object so no frame writes them all; time still advances
+every frame, so the pose written is the one the game would write on that frame, a frame or three old at a size
+where that is not visible. Anything closer is written every frame as before. The camera position is read once per
+frame and each object's once per 60 frames. The stats line counts the pose writes left out. Rendering only, like
+the rest of this feature.
+
 ### Catch-up limit (on by default, new in 0.4.16)
 
 The game turns each frame's `Time.deltaTime` into simulation buckets, and Unity caps that delta at a third of a
@@ -766,6 +847,61 @@ stats when it did something: how many frames were limited, how much game time wa
 and the ordinary frame time it measured. It is hooked into `Ticker.Update`, which BeaverBuddies leaves to the game
 (its own patch there only marks that ticking is in progress).
 
+### Worker threads of the mod's own (always on, new in 0.4.25)
+
+The district counts, the plant water levels when they had to be read inside the tick, and the terrain and road
+map batches ran on `Parallel.For`, on thread-pool threads that sleep between ticks: waking and joining them cost
+about half a millisecond per use in the logged colony (a district count of 233 inventories took 0.67 ms), more
+than the work itself. `TickWorkers` keeps a few threads of its own (`RouteMapsWorkers`, or up to 7 by default;
+they are also the route map builders' count) that spin briefly after a job in case the next one follows at once
+and then block on a signal each; the calling thread takes part as worker 0, and a job started from inside a job,
+or while one runs, simply runs alone on the calling thread. A job is told how many workers share it and leaves
+its results in slots no two workers share, so how the work is split is never simulation state. The `TickWorkers:`
+stats line counts jobs shared, threads, wakes while still spinning and from sleep, and jobs run alone. The
+harness runs strided sums over four workers, a throwing worker, a job started inside a job, more workers than the
+maximum and a maximum below one.
+
+### Route map caches scanned only after a change (always on, new in 0.4.25)
+
+See *Scanned only after a change* under the parallel route map rebuild: `MapChanges` hooks the events after which
+a cached road or terrain map can be unbuilt or newly buildable and sets a flag; the two features walk their caches
+on the next navigation tick after a flag and on every 200th tick regardless.
+
+### Behaviour log lines written only when read (always on, new in 0.4.25)
+
+Every time a beaver changes behaviour, `BehaviorManager.SetRunningBehavior` formats the behaviour's name and the
+day into a string and keeps it in a ring of the last ten. The ring is read in two places only: it is saved with
+the beaver, and the debug fragment of the entity panel shows it. At a few thousand changes a second in a large
+colony those strings are a steady stream of garbage nothing reads until the next save (the `BehaviorManager` tick
+was 5.7 ms and 267 KB/s of garbage in the 0.4.23 session). The mod keeps the name and the day as they are, a
+reference and a float, in a ring of its own per beaver, and writes them into the game's ring with the game's own
+format only when the game is about to read it: before `Save`, and before the panel reads the log. The strings are
+identical, the same format applied to the same name and the same float with the same culture, and the game's ring
+ends up holding exactly what it would have after the same sequence of additions (the last ten, in order), so the
+save file is byte for byte the same. `Behavior` is a plain class, so the game's `!=` is a reference comparison and
+so is the mod's. The harness feeds the game's real `CyclicBuffer<string>` directly and through the mod's ring with
+the same changes, flushed at different points, and requires the same contents, and checks the format on awkward
+day numbers. If anything throws, the feature switches itself off and the game's method runs; lines already noted
+are still written out before the next read.
+
+### Walker moves without a delegate per tick (always on, new in 0.4.25)
+
+`WalkerMover.Move` passes the speed manager's `GetWalkerSpeedAtCurrentPosition` as a method group to the path
+follower, which allocates a delegate for every walking beaver on every tick (part of the 118 KB/s the `WalkerMover`
+tick produced in the 0.4.23 session). The mod's prefix makes the same calls with the same arguments, with one
+delegate per mover made on first use and kept; what the game's method does is done call for call, so what it
+would throw is thrown. If the components cannot be read, the game's method runs and the feature is off.
+
+### Memory tools (settings page, new in 0.4.25)
+
+Two boxes on the settings page that untick themselves. **Measure live memory now** forces one full collection
+(which freezes the game for about a second on a 3 GB heap; that is why it is a box and not automatic) and logs a
+`Memory:` line with the managed heap in use afterwards, the heap reserved and the process working set, so the
+heap's live size can be told from its garbage. **Write a memory snapshot file** asks the engine for a memory
+snapshot (`Unity.Profiling.Memory.MemoryProfiler.TakeSnapshot`, managed and native objects) into
+`Documents\Timberborn\LateGamePerformance\heap-<time>.snap`, which opens in Unity's Memory Profiler package and
+names every object by type; the log says whether this build of the engine wrote one. Measurement only.
+
 ### Diagnostics (off by default)
 
 `Diagnostics = true`, or the **Diagnostics timers** box on the settings page (0.4.19), times code this mod does not
@@ -779,7 +915,13 @@ total time and the longest single call; for the A* searches also how many calls 
 answers out of the previous search from the same node), how many nodes they explored, and how many explored
 everything reachable. It adds overhead to hot code, so switch it off again after collecting numbers. Since 0.4.19
 the hooks are installed whether or not the timers are on, so that the box works without a restart; off, each hooked
-call costs one boolean check.
+call costs one boolean check. Since 0.4.25 the line also times `DistrictCitizenAssigner.AssignToClosestDistrict`
+(citizens without a district looking for one) and `UnassignCharactersCutOffFromTheirDistricts` (every citizen
+checked for a cut-off district), the singleton the 0.4.23 session could not attribute, and samples the engine's
+own profiler counters named in `UnityMarkers` once per frame (`Camera.Render`, `Culling`, `Shadows.Draw`, draw and
+SetPass call counts, `GC.Collect` and the rest of the default list) with `ProfilerRecorder`, reporting each as time
+per frame and the longest frame or as a count; the first session with the timers on writes `unity-markers.txt`
+beside the metrics reports with every counter this build of the engine offers, so the list can be changed.
 
 ### Stats
 
@@ -858,6 +1000,17 @@ allocation, and this mod's part of it at about 0.3%.)
 
 "longest single pause" is the figure to watch for hitching.
 
+Lines added in 0.4.25 (illustrations again):
+
+```
+[LateGamePerformance] Last 1000 ticks. TerrainReach: 12 terrain route maps measured after a fill, 0 of them empty
+[LateGamePerformance] Last 1000 ticks. BehaviorLog: 41200 behaviour changes noted without a string; 310 lines
+written into the game's logs before 42 reads (saves and the entity panel's debug view)
+[LateGamePerformance] Last 1000 ticks. WalkerMove: 212000 moves through the mod, 360 speed delegates made in total
+[LateGamePerformance] Last 1000 ticks. TickWorkers: 1030 jobs shared with 6 worker threads (woken while still
+spinning 5900 times, from sleep 280 times); 2 jobs ran on the calling thread alone
+```
+
 ## Settings
 
 `version-1.1/LateGamePerformance.cfg`, plain `key = value`. Restart after editing.
@@ -897,15 +1050,21 @@ features, disable the mod.
 | `AnimatorCulling` | `true` | Leave out the pose update of animated objects with no renderer on screen; their time keeps running. Rendering only; may differ between peers. |
 | `UiThrottle` | `true` | Status alert lists every fourth frame, the selected entity's panel every second frame. Interface only; may differ between peers. |
 | `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
+| `VerifyAll` | `false` | Every verify mode above at once, for one correctness session. Measurement only; slower. Also a box on the settings page. |
+| `AnimatorLod` | `true` | Animated objects far from the camera have their pose written every second or fourth frame; their time keeps running. Rendering only; may differ between peers. |
+| `AnimatorLodDistance` | `80` | Tiles from the camera beyond which the above applies (twice it: every fourth frame). `0` switches it off. |
+| `UnityMarkers` | the list above | The engine's profiler counters sampled per frame while `Diagnostics` is on, separated by `;`. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
-Four settings are on the in-game settings page (**Mods > Late Game Performance**): **Incremental garbage
+Seven settings are on the in-game settings page (**Mods > Late Game Performance**): **Incremental garbage
 collection**, described above, which is there because it is the one decision that is the player's to make (it
-edits a file in the game's folder); and, since 0.4.19, **Diagnostics timers** and **Verify terrain path searches**,
-plus **Verify save snapshots** since 0.4.22, the measurements a tester is asked to switch on for a session. Those
-mirror the `Diagnostics`, `TerrainSearchVerify` and `SaveSnapshotVerify` keys in this file: a box starts from the file's value and then remembers what was last chosen
-on the page, so the page wins once it has been used. Both can be switched while a game is running. Nothing on the
-page affects the simulation. Up to 0.4.9 the page had other boxes; from 0.4.10 per-component timings are
+edits a file in the game's folder); since 0.4.19, **Diagnostics timers** and **Verify terrain path searches**,
+plus **Verify save snapshots** since 0.4.22 and **Verify every feature** since 0.4.25, the measurements a tester is
+asked to switch on for a session; and since 0.4.25 the two memory measurements, **Measure live memory now** and
+**Write a memory snapshot file**, which act once when ticked and untick themselves. The boxes mirror the
+`Diagnostics`, `TerrainSearchVerify`, `SaveSnapshotVerify` and `VerifyAll` keys in this file: a box starts from the
+file's value and then remembers what was last chosen on the page, so the page wins once it has been used. All can
+be switched while a game is running. Nothing on the page affects the simulation. Up to 0.4.9 the page had other boxes; from 0.4.10 per-component timings are
 `RecordTimings` in this file, the warning asks once and needs no setting, and adaptive pacing is removed.
 
 ## Suggested first test
@@ -914,6 +1073,8 @@ page affects the simulation. Up to 0.4.9 the page had other boxes; from 0.4.10 p
    `verify mismatches 0` in the stats lines. Any mismatch line is a bug worth reporting.
 2. Set `HaulCacheVerify = false` and compare how the game feels at speed 3, and read the stats lines.
 3. Optionally set `Diagnostics = true` for one session and keep the `Diagnostics:` lines.
+4. For one session tick **Verify every feature** on the settings page (or set `VerifyAll = true`), play a few
+   in-game days, and look for `verify mismatches 0` on every stats line that has one. It is slower; untick it after.
 
 ## Not in this version, and why
 
@@ -945,6 +1106,10 @@ network with the game's own navigation classes and check that parallel route map
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
 contained. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers
 are busy: every map must be complete and correct at the moment it is asked for. They do not run the game.
+
+`dotnet run --project tests -c Release -- --hashes` prints the current hash of every listed snapshot component's
+`Save` (game and, when installed, the BeaverBuddies MultiColony fork), ready to paste into `SaveSnapshot.Allowed`
+after an update; the ordinary run checks every listed hash against what is installed.
 
 `tools/benchmark-timberborn.ps1` runs the game's built-in benchmark on a save with per-component tick timings
 (`-metrics`), for before/after comparisons.

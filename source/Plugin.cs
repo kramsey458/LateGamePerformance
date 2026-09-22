@@ -55,6 +55,10 @@ namespace LateGamePerformance
         internal static void Start(Config config)
         {
             _config = config;
+            TickWorkers.Configure(config.RouteMapsWorkers > 0
+                ? Math.Min(config.RouteMapsWorkers, 32)
+                : Math.Max(1, Math.Min(7, Environment.ProcessorCount / 2 - 1)));
+            UnityMarkers.Configure(config.UnityMarkers);
             bool haulCache = config.HaulCache && HaulCache.CreateFeature(config).Apply(HarmonyId);
             if (haulCache)
             {
@@ -125,6 +129,24 @@ namespace LateGamePerformance
             {
                 PlantWater.UseWaterMapCopy();
             }
+            // Exact replacements that cannot give a different result (the same calls with the same arguments): not
+            // settings, and not in the startup line, because a peer running the game's own code computes the same.
+            if (TerrainReach.CreateFeature().Apply(HarmonyId))
+            {
+                TerrainReach.Activate();
+            }
+            if (BehaviorLog.CreateFeature().Apply(HarmonyId))
+            {
+                BehaviorLog.Activate();
+            }
+            if (WalkerMove.CreateFeature().Apply(HarmonyId))
+            {
+                WalkerMove.Activate();
+            }
+            if ((routeMaps || terrainMaps) && MapChanges.CreateFeature().Apply(HarmonyId))
+            {
+                MapChanges.Activate();
+            }
             Log.Info(SimulationFeaturesLine(haulCache, routeMaps, yielderSearch, terrainMaps, plantWater, districtCounts,
                 waterMapCopy, soilScans, terrainSearch, idleEntities, homeSearch));
             if (config.WaterRendering)
@@ -157,6 +179,7 @@ namespace LateGamePerformance
             if (config.AnimatorCulling && AnimatorCulling.CreateFeature().Apply(HarmonyId))
             {
                 AnimatorCulling.Activate();
+                AnimatorCulling.ConfigureLod(config.AnimatorLod, config.AnimatorLodDistance);
             }
             if (config.Timing && Timing.CreateFeature().Apply(HarmonyId))
             {
@@ -205,6 +228,21 @@ namespace LateGamePerformance
                 ? line + " These are the same for every player on this version."
                 : line + " One or more could not start (see the warnings above), so this computer runs the game's " +
                   "own code for it. In multiplayer, check that the other players' logs show the same line.";
+        }
+
+        // The settings page's "verify every feature" box: on, every verify mode; off, each back to its .cfg value.
+        internal static void SetVerifyAll(bool on)
+        {
+            Config cfg = _config;
+            HaulCache.VerifyEnabled = on || cfg.HaulCacheVerify;
+            YielderSearch.VerifyEnabled = on || cfg.YielderSearchVerify;
+            PlantWater.VerifyEnabled = on || cfg.PlantWaterVerify;
+            DistrictCounts.VerifyEnabled = on || cfg.DistrictCountsVerify;
+            WaterMapCopy.VerifyEnabled = on || cfg.WaterMapCopyVerify;
+            SoilScans.VerifyEnabled = on || cfg.SoilScansVerify;
+            HomeSearch.VerifyEnabled = on || cfg.HomeSearchVerify;
+            TerrainSearch.VerifyEnabled = on || cfg.TerrainSearchVerify;
+            SaveSnapshot.VerifyEnabled = on || cfg.SaveSnapshotVerify;
         }
 
         internal static Feature CreateTickFeature()
@@ -272,7 +310,8 @@ namespace LateGamePerformance
                              WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine(),
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
                              TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), HomeSearch.TakeStatsLine(),
-                             SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine()
+                             TerrainReach.TakeStatsLine(), BehaviorLog.TakeStatsLine(), WalkerMove.TakeStatsLine(),
+                             TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine()
                          })
                 {
                     if (line != null)

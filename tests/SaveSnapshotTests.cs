@@ -125,8 +125,39 @@ internal static class SaveSnapshotTests
         check(failure == null && Equal(single, sequential), "save snapshot: one worker gives the same result");
         SerializedEntity[] many = SaveSnapshot.Build(items, 64, out failure, out _);
         check(failure == null && Equal(many, sequential), "save snapshot: more workers than a machine has still give the same result");
-        check(SaveSnapshot.Allowed.Contains("Timberborn.BlockSystem.BlockObject") && SaveSnapshot.Allowed.Count >= 25,
+        check(SaveSnapshot.Allowed.ContainsKey("Timberborn.BlockSystem.BlockObject") && SaveSnapshot.Allowed.Count >= 90,
             "save snapshot: the allowed list holds the audited components");
+        // The hash guard (0.4.25): a listed type is used only while its Save is the one that was read.
+        Program.LoadEveryGameAssembly();
+        int listed = 0, found = 0, allowed = 0;
+        foreach (KeyValuePair<string, string> entry in SaveSnapshot.Allowed)
+        {
+            listed++;
+            Type type = Program.FindType(entry.Key);
+            if (type == null)
+            {
+                Console.WriteLine("     not installed here: " + entry.Key);
+                continue;
+            }
+            found++;
+            if (SaveSnapshot.IsAllowed(type)) allowed++;
+        }
+        check(found == listed && allowed == found, $"save snapshot: every listed component's saving code is still the one that was read ({allowed} of {listed})");
+        string hash = SaveSnapshot.SaveHash(typeof(Part));
+        check(hash.Length == 16 && hash == SaveSnapshot.SaveHash(typeof(Part)) && SaveSnapshot.SaveHash(typeof(string)) == "none" &&
+              hash != SaveSnapshot.SaveHash(Program.FindType("Timberborn.BlockSystem.BlockObject")),
+            "save snapshot: a Save method hashes to 16 hex digits, the same every time, and a type without one to none");
+        check(!SaveSnapshot.IsAllowed(typeof(string)) && !SaveSnapshot.IsAllowed(typeof(Part)), "save snapshot: a type not on the list stays on the main thread");
+        SaveSnapshot.Allowed[typeof(Part).FullName] = "0000000000000000";
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool refused = !SaveSnapshot.IsAllowed(typeof(Part));
+        SaveSnapshot.Allowed[typeof(Part).FullName] = hash;
+        bool stillRefused = !SaveSnapshot.IsAllowed(typeof(Part));   // the verdict is kept for the session
+        SaveSnapshot.ForgetVerdictsForTests();
+        bool allowedNow = SaveSnapshot.IsAllowed(typeof(Part));
+        SaveSnapshot.Allowed.Remove(typeof(Part).FullName);
+        SaveSnapshot.ForgetVerdictsForTests();
+        check(refused && stillRefused && allowedNow, "save snapshot: a listed type whose Save changed is refused once per session, with a log line, and allowed again once its hash is renewed");
         // The deep comparison tells a changed value apart, which the game's reference comparison of lists cannot.
         SerializedEntity x = new SerializedEntity(Guid.Empty, "t"), y = new SerializedEntity(Guid.Empty, "t");
         new Part(7, "s").Save(new EntitySaver(x));

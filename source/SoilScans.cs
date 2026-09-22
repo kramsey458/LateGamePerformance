@@ -158,6 +158,20 @@ namespace LateGamePerformance
         private static bool _listsActive;
         private static bool _verify;
 
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set
+            {
+                _verify = value;
+                if (value)
+                {
+                    Moisture.Visited = Moisture.Visited ?? new List<int>();
+                    Contamination.Visited = Contamination.Visited ?? new List<int>();
+                }
+            }
+        }
+
         private static long _passes;
         private static long _listPasses;
         private static long _scanPasses;

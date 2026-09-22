@@ -6,25 +6,36 @@ namespace LateGamePerformance
 {
     // Every frame the game advances every Timbermesh animator in the colony and writes its pose: node animators
     // move child transforms, vertex animators set a material time. That is done whether or not the object is on
-    // screen, about 1.1 ms per frame in a 354-beaver colony and twice that in the working day when every beaver is
-    // out walking. For an animator none of whose renderers is visible (Unity counts shadow casters as visible),
-    // this keeps the game's own time-keeping (Time, RepeatedTime, PlayingFinished, the AnimationChanged event, the
-    // wonder's saved animation time) exactly as it is and leaves out only the pose writes. When the object comes
-    // back into view its pose is written again from the time it would have had anyway; on the single frame in
-    // which it first reappears it can still show the pose it had when it left the screen, because Unity decides
-    // visibility after the update. An animation that plays once and finishes off screen gets its final pose
-    // written at that moment, since the game never updates a finished animation again.
+    // screen, and however small it is on screen: 1.3 ms per frame in a 360-beaver colony seen from above, the
+    // largest per-frame system of the game. For an animator none of whose renderers is visible (Unity counts
+    // shadow casters as visible), this keeps the game's own time-keeping (Time, RepeatedTime, PlayingFinished,
+    // the AnimationChanged event, the wonder's saved animation time) exactly as it is and leaves out only the
+    // pose writes. When the object comes back into view its pose is written again from the time it would have
+    // had anyway; on the single frame in which it first reappears it can still show the pose it had when it left
+    // the screen, because Unity decides visibility after the update. An animation that plays once and finishes
+    // off screen gets its final pose written at that moment, since the game never updates a finished animation
+    // again.
+    //
+    // Since 0.4.25 the same is done by distance (AnimatorLod): an animator farther from the camera than
+    // AnimatorLodDistance has its pose written every second frame, and beyond twice that distance every fourth,
+    // spread over the frames so no frame writes them all. Time still advances every frame, so the pose written is
+    // the one the game would write on that frame; at that size on screen a pose a frame or three old is not
+    // visible. Anything close to the camera is written every frame as before.
     //
     // Rendering only. The simulation reads animator time, never a node transform or a material.
     internal static class AnimatorCulling
     {
         private const string AnimatorType = "Timberborn.TimbermeshAnimations.TimbermeshAnimator";
         private const int RefreshRenderersEveryFrames = 600;
+        private const int RefreshPositionEveryFrames = 60;
 
         private sealed class Entry
         {
             public Renderer[] Renderers;
             public int RefreshFrame;
+            public Vector3 Position;
+            public int PositionFrame = -1;
+            public int Hash;
         }
 
         private static Func<object, bool> _enabled;
@@ -39,8 +50,14 @@ namespace LateGamePerformance
         internal static Func<int> FrameCount = () => Time.frameCount;
 
         private static bool _active;
+        private static bool _lod;
+        private static float _lodDistance = 80f;
+        private static int _cameraFrame = -1;
+        private static bool _hasCamera;
+        private static Vector3 _cameraPosition;
         private static long _updated;
         private static long _skipped;
+        private static long _skippedFar;
 
         public static Feature CreateFeature()
         {
@@ -70,15 +87,39 @@ namespace LateGamePerformance
             _active = true;
         }
 
+        public static void ConfigureLod(bool enabled, float distance)
+        {
+            _lod = enabled && distance > 0;
+            _lodDistance = Math.Max(1f, distance);
+        }
+
+        // How many frames apart the pose of an object at this distance is written: every frame up to the distance,
+        // every second frame beyond it, every fourth beyond twice it.
+        internal static int PoseInterval(float distance, float lodDistance)
+        {
+            if (distance < lodDistance)
+            {
+                return 1;
+            }
+            return distance < 2f * lodDistance ? 2 : 4;
+        }
+
+        // Whether this frame is one of the object's own. The hash spreads objects over the frames.
+        internal static bool PoseDue(int frame, int hash, int interval)
+        {
+            return interval <= 1 || (frame + (hash & 0x7fffffff)) % interval == 0;
+        }
+
         public static string TakeStatsLine()
         {
-            if (!_active || _updated + _skipped == 0)
+            if (!_active || _updated + _skipped + _skippedFar == 0)
             {
                 return null;
             }
-            string line = $"AnimatorCulling: {_skipped} of {_updated + _skipped} animator updates left out because no part of " +
-                          "the object was on screen; their time kept running";
-            _updated = _skipped = 0;
+            string line = $"AnimatorCulling: {_skipped} of {_updated + _skipped + _skippedFar} animator updates left out because no " +
+                          $"part of the object was on screen, and {_skippedFar} pose writes left out for objects far from the " +
+                          "camera; their time kept running";
+            _updated = _skipped = _skippedFar = 0;
             return line;
         }
 
@@ -97,20 +138,22 @@ namespace LateGamePerformance
                 {
                     return true;
                 }
-                if (AnyRendererVisible(__instance))
+                int frame = FrameCount();
+                Entry entry = Entries.GetValue(__instance, _ => new Entry { Hash = RuntimeHelpers.GetHashCode(_) });
+                if (!AnyRendererVisible(__instance, entry, frame))
                 {
-                    _updated++;
-                    return true;
+                    SkipPose(__instance, deltaTime);
+                    _skipped++;
+                    return false;
                 }
-                _updateTime(__instance, deltaTime);
-                if (_playingFinished(__instance))
+                if (_lod && !PoseDueByDistance(__instance, entry, frame))
                 {
-                    // Played once and just finished: the game will not touch it again, so its last pose is written
-                    // now (the wonder, the working-hours bell).
-                    _writePose(__instance);
+                    SkipPose(__instance, deltaTime);
+                    _skippedFar++;
+                    return false;
                 }
-                _skipped++;
-                return false;
+                _updated++;
+                return true;
             }
             catch (Exception exception)
             {
@@ -121,10 +164,45 @@ namespace LateGamePerformance
         }
         // ReSharper restore InconsistentNaming
 
-        private static bool AnyRendererVisible(object animator)
+        // The game's time-keeping without the pose, plus the final pose of an animation that just finished.
+        private static void SkipPose(object animator, float deltaTime)
         {
-            int frame = FrameCount();
-            Entry entry = Entries.GetValue(animator, _ => new Entry());
+            _updateTime(animator, deltaTime);
+            if (_playingFinished(animator))
+            {
+                // Played once and just finished: the game will not touch it again, so its last pose is written
+                // now (the wonder, the working-hours bell).
+                _writePose(animator);
+            }
+        }
+
+        private static bool PoseDueByDistance(object animator, Entry entry, int frame)
+        {
+            if (frame != _cameraFrame)
+            {
+                _cameraFrame = frame;
+                Camera camera = Camera.main;
+                _hasCamera = camera != null;
+                if (_hasCamera)
+                {
+                    _cameraPosition = camera.transform.position;
+                }
+            }
+            if (!_hasCamera)
+            {
+                return true;
+            }
+            if (entry.PositionFrame < 0 || frame - entry.PositionFrame >= RefreshPositionEveryFrames)
+            {
+                entry.Position = ((Component)animator).transform.position;
+                entry.PositionFrame = frame;
+            }
+            float distance = Vector3.Distance(entry.Position, _cameraPosition);
+            return PoseDue(frame, entry.Hash, PoseInterval(distance, _lodDistance));
+        }
+
+        private static bool AnyRendererVisible(object animator, Entry entry, int frame)
+        {
             Renderer[] renderers = entry.Renderers;
             if (renderers == null || frame >= entry.RefreshFrame || AnyDestroyed(renderers))
             {

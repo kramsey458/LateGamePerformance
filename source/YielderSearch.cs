@@ -5,9 +5,11 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using Timberborn.InventorySystem;
+using Timberborn.NaturalResourcesLifecycle;
 using Timberborn.Navigation;
 using Timberborn.YielderFinding;
 using Timberborn.Yielding;
+using UnityEngine;
 
 namespace LateGamePerformance
 {
@@ -51,30 +53,51 @@ namespace LateGamePerformance
         {
             public long Candidates;
             public long Lookups;
+            public long DeadSkipped;
+            public long OutOfReach;
         }
 
-        // The rule, free of game types so the tests can check it against a model of the game's search.
+        // The rule, free of game types so the tests can check it against a model of the game's search. A plant that
+        // is neither yielding nor alive can neither be the answer nor set "found something", whatever its distance,
+        // so it is never looked up (0.4.25); one that may be reached is told by mayReach, a pre-filter that only ever
+        // says "no" when the game's lookup would say "unreachable" (TerrainReach), so the lookup is skipped for it.
         internal static IEnumerable<TReached> LazyCandidates<TPlant, TReached>(IEnumerable<TPlant> plants,
             Func<TPlant, bool> exists, Func<TPlant, bool> isYielding, Func<TPlant, bool> isAlive,
             Func<TPlant, TReached> lookUp, Func<TReached, bool> wasReached, Counters counters,
-            Func<TPlant, bool> canBeTaken = null)
+            Func<TPlant, bool> canBeTaken = null, Func<TPlant, bool> mayReach = null)
         {
             bool foundSomething = false;
             foreach (TPlant plant in plants)
             {
                 counters.Candidates++;
                 // A destroyed plant goes through the game's own path, whatever that does with it.
-                bool known = exists(plant);
-                bool yielding = known && isYielding(plant);
-                // Only asked about yielding plants, and only once it can make a difference.
-                if (known && foundSomething && !(yielding && (canBeTaken == null || canBeTaken(plant))))
+                if (!exists(plant))
                 {
+                    counters.Lookups++;
+                    yield return lookUp(plant);
+                    continue;
+                }
+                bool yielding = isYielding(plant);
+                if (!yielding && !isAlive(plant))
+                {
+                    counters.DeadSkipped++;
+                    continue;
+                }
+                // Only asked about yielding plants, and only once it can make a difference.
+                if (foundSomething && !(yielding && (canBeTaken == null || canBeTaken(plant))))
+                {
+                    continue;
+                }
+                if (mayReach != null && !mayReach(plant))
+                {
+                    counters.OutOfReach++;
                     continue;
                 }
                 counters.Lookups++;
                 TReached reached = lookUp(plant);
-                if (known && !foundSomething && wasReached(reached) && (yielding || isAlive(plant)))
+                if (!foundSomething && wasReached(reached))
                 {
+                    // Yielding or alive, as established above.
                     foundSomething = true;
                 }
                 yield return reached;
@@ -89,7 +112,22 @@ namespace LateGamePerformance
         private static Func<object, object> _carryCalculatorOf;
         // Room for a good in the building of the current search. Main thread only, emptied per search.
         private static readonly Dictionary<string, bool> RoomForGood = new Dictionary<string, bool>();
+        // The reach pre-filter (TerrainReach): the building's terrain route map and its box, for one search.
+        private static Func<object, object> _nodeIdServiceOf;
+        private static Func<object, Vector3, int> _worldToId;
+        private static Func<object, object> _terrainCacheOf;
+        private static Func<object, int, object> _fieldAt;
+        private static bool _reachBound;
+        private static TerrainReach.Box _reachBox;
+        private static readonly Func<Yielder, bool> InReach = plant => TerrainReach.MayReach(_reachBox, plant.CenterPosition);
+        private static readonly Func<Yielder, bool> NoReach = _ => false;
         private static bool _active;
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set => _verify = value;
+        }
+
         private static bool _verify;
         private static long _searches;
         private static long _stopwatchTicks;
@@ -112,6 +150,7 @@ namespace LateGamePerformance
                     _finderScratchOf = Reflect.FieldGetter<object>(typeof(ClosestYielderFinder), "_yielders");
                     _finderOrderedScratchOf = Reflect.FieldGetter<object>(typeof(ClosestYielderFinder), "_orderedYielders");
                     _carryCalculatorOf = Reflect.FieldGetter<object>(typeof(ClosestYielderFinder), "_carryAmountCalculator");
+                    BindReach();
                     return HarmonyLib.AccessTools.Method(typeof(YielderFinder), "FindLivingYielderWithoutAccessible");
                 },
                 Prefix = Reflect.Own(typeof(YielderSearch), nameof(FindPrefix))
@@ -124,6 +163,59 @@ namespace LateGamePerformance
             _active = true;
         }
 
+        // The navigation members the reach pre-filter needs; without them every candidate is looked up as before.
+        private static void BindReach()
+        {
+            try
+            {
+                Type pathfinding = Reflect.GameType("Timberborn.Navigation.PathfindingService");
+                Type nodeIds = Reflect.GameType("Timberborn.Navigation.NodeIdService");
+                Type cache = Reflect.GameType("Timberborn.Navigation.TerrainFlowFieldCache");
+                _nodeIdServiceOf = Reflect.FieldGetter<object>(pathfinding, "_nodeIdService");
+                _terrainCacheOf = Reflect.FieldGetter<object>(pathfinding, "_terrainFlowFieldCache");
+                _worldToId = Reflect.InstanceCall<Func<object, Vector3, int>>(HarmonyLib.AccessTools.Method(nodeIds, "WorldToId"));
+                _fieldAt = Reflect.InstanceCall<Func<object, int, object>>(HarmonyLib.AccessTools.Method(cache, "GetFlowFieldAtNode"));
+                _reachBound = true;
+            }
+            catch (Exception exception)
+            {
+                _reachBound = false;
+                Log.Info("YielderSearch: the reach pre-filter is not available, every candidate is looked up: " + exception.Message);
+            }
+        }
+
+        // The pre-filter for one search: the box of the building's terrain route map, or nothing to go by.
+        private static Func<Yielder, bool> ReachFilter(Accessible start)
+        {
+            if (!_reachBound || !TerrainReach.IsActive)
+            {
+                return null;
+            }
+            Vector3? access = start.UnblockedSingleAccess;
+            if (!access.HasValue)
+            {
+                // The game's lookup answers "unreachable" for every candidate of a building with no access.
+                return NoReach;
+            }
+            object pathfinding = TerrainMaps.PathfindingServiceInstance;
+            if (pathfinding == null)
+            {
+                return null;
+            }
+            object field;
+            try
+            {
+                field = _fieldAt(_terrainCacheOf(pathfinding), _worldToId(_nodeIdServiceOf(pathfinding), access.Value));
+            }
+            catch (Exception)
+            {
+                // No cached map at the access: the game's own lookup runs, and throws as the game would.
+                return null;
+            }
+            _reachBox = TerrainReach.BoxOf(field);
+            return _reachBox == null ? null : InReach;
+        }
+
         public static string TakeStatsLine()
         {
             if (!_active && _searches == 0)
@@ -133,15 +225,17 @@ namespace LateGamePerformance
             long skipped = Totals.Candidates - Totals.Lookups;
             string line = string.Format(CultureInfo.InvariantCulture,
                 "YielderSearch: {0} searches for trees and plants over {1} candidates; {2} distance lookups, {3} left " +
-                "out ({4:0}%); {5:0.0} ms in total ({6:0.000} ms each); outcomes: {8} found work, {9} found nothing the " +
-                "building has room for or the worker can take, {10} found nothing in range{7}",
+                "out ({4:0}%), of which {11} dead plants and {12} plants outside the route map's reach; {5:0.0} ms in total " +
+                "({6:0.000} ms each); outcomes: {8} found work, {9} found nothing the building has room for or the worker " +
+                "can take, {10} found nothing in range{7}",
                 _searches, Totals.Candidates, Totals.Lookups, skipped,
                 Totals.Candidates > 0 ? 100.0 * skipped / Totals.Candidates : 0,
                 _stopwatchTicks * 1000.0 / Stopwatch.Frequency,
                 _searches > 0 ? _stopwatchTicks * 1000.0 / Stopwatch.Frequency / _searches : 0,
-                _verify ? $"; verify mismatches {_verifyMismatches}" : "", _found, _nothingToTake, _nothingInRange);
+                _verify ? $"; verify mismatches {_verifyMismatches}" : "", _found, _nothingToTake, _nothingInRange,
+                Totals.DeadSkipped, Totals.OutOfReach);
             _searches = _stopwatchTicks = _found = _nothingToTake = _nothingInRange = 0;
-            Totals.Candidates = Totals.Lookups = 0;
+            Totals.Candidates = Totals.Lookups = Totals.DeadSkipped = Totals.OutOfReach = 0;
             return line;
         }
 
@@ -160,9 +254,10 @@ namespace LateGamePerformance
                 finder = (ClosestYielderFinder)_closestFinderOf(__instance);
                 var calculator = (Timberborn.Carrying.CarryAmountCalculator)_carryCalculatorOf(finder);
                 RoomForGood.Clear();
+                Func<Yielder, bool> mayReach = ReachFilter(start);
                 YielderSearchResult result = finder.FindLivingYielder(receivingInventory, liftingCapacity,
                     LazyCandidates(yielders, Exists, IsYielding, IsAlive, plant => LookUp(start, plant), WasReached, Totals,
-                        plant => CanBeTaken(calculator, liftingCapacity, receivingInventory, plant)));
+                        plant => CanBeTaken(calculator, liftingCapacity, receivingInventory, plant), mayReach));
                 _searches++;
                 _stopwatchTicks += Stopwatch.GetTimestamp() - started;
                 if (result.HasYielder) _found++;
@@ -203,9 +298,11 @@ namespace LateGamePerformance
             return plant.IsYielding;
         }
 
+        // The game's IsAlive (!GetComponent<LivingNaturalResource>().IsDead); a plant without the component, which the
+        // game would trip over, counts as alive here and is looked up as before.
         private static bool IsAlive(Yielder plant)
         {
-            return plant.IsAlive();
+            return !plant.TryGetComponent(out LivingNaturalResource living) || !living.IsDead;
         }
 
         // The game's own question, asked with this plant's own yield: would the finder's last step accept this good?

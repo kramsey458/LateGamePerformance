@@ -59,6 +59,12 @@ namespace LateGamePerformance
 
         private static Func<object, HashSet<HaulCandidate>> _haulCandidatesOf;
         private static bool _active;
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set => _verify = value;
+        }
+
         private static bool _verify;
         private static int _flushEveryTicks;
         private static int _epoch;
@@ -69,6 +75,7 @@ namespace LateGamePerformance
         private static long _candidatesRecomputed;
         private static long _candidatesReused;
         private static long _rebuildStopwatchTicks;
+        private static long _verifyStopwatchTicks;
         private static long _verifyMismatches;
 
         public static Feature CreateFeature(Config config)
@@ -165,8 +172,12 @@ namespace LateGamePerformance
             string line =
                 $"HaulCache: {_requests} hauler list requests built in {buildMs:0.0} ms ({perRequestMs:0.000} ms each); " +
                 $"buildings reused {_candidatesReused}/{served}, recomputed {_candidatesRecomputed}" +
-                (_verify ? $"; verify mismatches {_verifyMismatches}" : "");
-            _requests = _candidatesRecomputed = _candidatesReused = _rebuildStopwatchTicks = 0;
+                (_verify
+                    ? $"; verify mismatches {_verifyMismatches}; the game's own build alongside took " +
+                      $"{_verifyStopwatchTicks * 1000.0 / Stopwatch.Frequency:0.0} ms " +
+                      $"({(_requests > 0 ? _verifyStopwatchTicks * 1000.0 / Stopwatch.Frequency / _requests : 0):0.000} ms each)"
+                    : "");
+            _requests = _candidatesRecomputed = _candidatesReused = _rebuildStopwatchTicks = _verifyStopwatchTicks = 0;
             return line;
         }
 
@@ -194,7 +205,10 @@ namespace LateGamePerformance
                 Build(__instance);
                 if (_verify)
                 {
+                    // The game's own build alongside, timed, so the two can be compared from the stats line.
+                    long verifying = Stopwatch.GetTimestamp();
                     Verify(__instance);
+                    _verifyStopwatchTicks += Stopwatch.GetTimestamp() - verifying;
                 }
                 for (int i = 0; i < Ordered.Count; i++)
                 {

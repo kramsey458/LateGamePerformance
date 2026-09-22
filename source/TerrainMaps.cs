@@ -70,12 +70,25 @@ namespace LateGamePerformance
         private static MethodInfo _generatorLoad;
         private static FillCall _fill;
 
+        private static Func<object, int> _numberOfNodes;
+
         private static bool _active;
         private static int _workerCount;
         private static object _pathfindingService;
         private static object[] _workerGenerators;
         private static object _mainGenerator;
         private static float _maxDistance;
+        // Scanning the cache only after something could have changed (MapChanges), with a full scan every so many
+        // ticks that reports anything the hooks missed.
+        internal static bool ScanOnlyWhenChanged;
+        private const int SelfCheckEveryTicks = 200;
+        private static bool _changed = true;
+        private static int _ticksSinceScan;
+        private static long _scans;
+        private static long _scansSkipped;
+        private static long _missedByHooks;
+        private static int _cachedMaps;
+        private static int _largestMapNodes;
 
         private static long _batches;
         private static long _mapsBuilt;
@@ -84,6 +97,18 @@ namespace LateGamePerformance
         private static long _longestStopwatchTicks;
 
         public static bool IsActive => _active;
+
+        internal static object PathfindingServiceInstance => _pathfindingService;
+
+        internal static void MarkChanged()
+        {
+            _changed = true;
+        }
+
+        internal static void SetRangeForTests(float range)
+        {
+            _maxDistance = range;
+        }
 
         public static Feature CreateFeature(Config config)
         {
@@ -134,10 +159,13 @@ namespace LateGamePerformance
             double msPerTick = 1000.0 / Stopwatch.Frequency;
             string line = string.Format(CultureInfo.InvariantCulture,
                 "TerrainMaps: {0} rebuilds of {1} terrain route maps on {2} workers; the main thread waited {3:0.0} ms " +
-                "in total, longest {4:0.0} ms; {5} more built directly in batches of fewer than {6}",
+                "in total, longest {4:0.0} ms; {5} more built directly in batches of fewer than {6}; {7} maps cached, the " +
+                "largest {8} tiles; the cache was scanned {9} times and left alone {10} times because nothing had changed, " +
+                "{11} unbuilt maps were found by the periodic check alone",
                 _batches, _mapsBuilt, _workerCount, _stopwatchTicks * msPerTick, _longestStopwatchTicks * msPerTick,
-                _builtDirectly, MinMapsForWorkers);
+                _builtDirectly, MinMapsForWorkers, _cachedMaps, _largestMapNodes, _scans, _scansSkipped, _missedByHooks);
             _batches = _mapsBuilt = _builtDirectly = _stopwatchTicks = _longestStopwatchTicks = 0;
+            _scans = _scansSkipped = _missedByHooks = 0;
             return line;
         }
 
@@ -164,6 +192,7 @@ namespace LateGamePerformance
             _navigationDistanceOf = Reflect.FieldGetter<object>(navigationService, "_navigationDistance");
             _resourceBuildingsOf = Reflect.PropertyGetter<float>(navigationDistance, "ResourceBuildings");
             _isFilled = Reflect.PropertyGetter<bool>(accessFlowField, "IsFilled");
+            _numberOfNodes = Reflect.PropertyGetter<int>(accessFlowField, "NumberOfNodes");
             _isOnNavMesh = Reflect.InstanceCall<Func<object, int, bool>>(AccessTools.Method(graph, "IsOnNavMesh"));
             _fill = Reflect.InstanceCall<FillCall>(AccessTools.Method(generator, "FillFlowFieldUpToDistance"));
 
@@ -192,24 +221,15 @@ namespace LateGamePerformance
         public static Exception FillParallel(object graph, IReadOnlyList<Work> work, object[] workerGenerators, float maxDistance)
         {
             int workers = Math.Min(workerGenerators.Length, work.Count);
-            Exception failure = null;
-            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+            // This mod's own worker threads; strided split: no shared counters, one generator per worker.
+            return TickWorkers.Run(workers, (worker, sharing) =>
             {
-                try
+                object generator = workerGenerators[worker];
+                for (int i = worker; i < work.Count; i += sharing)
                 {
-                    object generator = workerGenerators[worker];
-                    // Strided split: no shared counters, and which worker takes which map is fixed.
-                    for (int i = worker; i < work.Count; i += workers)
-                    {
-                        _fill(generator, graph, work[i].Field, maxDistance, work[i].StartNodeId);
-                    }
-                }
-                catch (Exception exception)
-                {
-                    Interlocked.CompareExchange(ref failure, exception, null);
+                    _fill(generator, graph, work[i].Field, maxDistance, work[i].StartNodeId);
                 }
             });
-            return failure;
         }
 
         public static object[] CreateWorkerGenerators(object binaryHeapFactory, object navMeshGroupService, int count)
@@ -227,6 +247,7 @@ namespace LateGamePerformance
         internal static void PathfindingServiceCreatedPostfix(object __instance)
         {
             // A new game scene: forget everything tied to the previous one.
+            _changed = true;
             _pathfindingService = __instance;
             _workerGenerators = null;
             _mainGenerator = null;
@@ -252,9 +273,26 @@ namespace LateGamePerformance
             {
                 return;
             }
+            bool selfCheck = false;
+            if (ScanOnlyWhenChanged && !_changed)
+            {
+                if (++_ticksSinceScan < SelfCheckEveryTicks)
+                {
+                    _scansSkipped++;
+                    return;
+                }
+                selfCheck = true;
+            }
+            _changed = false;
+            _ticksSinceScan = 0;
             try
             {
-                BuildUnbuiltMaps(_pathfindingService, _maxDistance);
+                int found = BuildUnbuiltMaps(_pathfindingService, _maxDistance);
+                _scans++;
+                if (selfCheck)
+                {
+                    _missedByHooks += found;
+                }
             }
             catch (Exception exception)
             {
@@ -268,7 +306,7 @@ namespace LateGamePerformance
         // ReSharper restore InconsistentNaming
 
         // Internal so the test harness can drive it with a stand-in for the pathfinding service.
-        internal static void BuildUnbuiltMaps(object pathfindingService, float maxDistance)
+        internal static int BuildUnbuiltMaps(object pathfindingService, float maxDistance)
         {
             object graph = _graphOf(pathfindingService);
 
@@ -278,19 +316,33 @@ namespace LateGamePerformance
             object entries = _entriesOf(_innerCacheOf(_cacheOf(pathfindingService)));
             IEnumerator<int> keys = ((IEnumerable<int>)_entryKeys.GetValue(entries)).GetEnumerator();
             IEnumerator values = ((IEnumerable)_entryValues.GetValue(entries)).GetEnumerator();
+            int cached = 0, largest = 0;
             while (keys.MoveNext() && values.MoveNext())
             {
                 object field = _fieldOfEntry(values.Current);
+                cached++;
+                if (_isFilled(field))
+                {
+                    int nodes = _numberOfNodes(field);
+                    if (nodes > largest)
+                    {
+                        largest = nodes;
+                    }
+                    continue;
+                }
                 // The game's generator leaves a map unbuilt when its start tile is not on the terrain graph, so
                 // such a map is not retried on every tick here either.
-                if (!_isFilled(field) && _isOnNavMesh(graph, keys.Current))
+                if (_isOnNavMesh(graph, keys.Current))
                 {
                     WorkScratch.Add(new Work { Field = field, StartNodeId = keys.Current });
                 }
             }
-            if (WorkScratch.Count == 0)
+            _cachedMaps = cached;
+            _largestMapNodes = largest;
+            int found = WorkScratch.Count;
+            if (found == 0)
             {
-                return;
+                return 0;
             }
             if (_workerGenerators == null)
             {
@@ -325,6 +377,7 @@ namespace LateGamePerformance
             long elapsed = Stopwatch.GetTimestamp() - started;
             _stopwatchTicks += elapsed;
             _longestStopwatchTicks = Math.Max(_longestStopwatchTicks, elapsed);
+            return found;
         }
 
         private static Type RequireType(string name)

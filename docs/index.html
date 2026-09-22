@@ -312,7 +312,7 @@
       <div class="notice" style="margin:0">
         <p><strong>Not yet verified</strong></p>
         <ul class="checks no">
-          <li>Preview <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.24">0.4.24</a> (pre-release, not yet played) removes the memory clean-up right after each save that 0.4.17 added: the recorded 0.4.23 session showed it as a 0.9 to 1.3 s freeze at every save on a 3 GB heap.</li>
+          <li>Preview <a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.25">0.4.25</a> (pre-release, not yet played) is the round built from the recorded 0.4.23 session: fewer tree-search lookups (dead plants and plants a route map cannot reach), plant water ticks that no longer fall back when a plant is planted or cut, the mod&rsquo;s own worker threads, route map caches walked only after a change, behaviour log strings formatted only when read, far-away animated objects posed every second or fourth frame, 64 more component types in the worker-thread save snapshot guarded by hashes of their saving code, and the 0.4.24 removal of the clean-up that froze every save. 335 checks pass, including 119 patch targets, but it has not been played.</li>
           <li>The stats lines of one 0.4.23 session have been read, but no feature has been measured before and after in the same save; the improvement is reported from play.</li>
           <li>The verify settings, which run the game's own code alongside the mod's and compare, have not been run inside the game; every comparison so far is in the harness against the game's real classes.</li>
           <li>The tree search against the game's own search inside a running game (the model comes from reading the game's code).</li>

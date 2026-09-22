@@ -5,9 +5,10 @@ using Timberborn.SettingsSystem;
 
 namespace LateGamePerformance
 {
-    // The in-game settings page (Mod Settings mod). Four boxes: the one decision that is the player's to make,
-    // because it edits a file in the game's folder, and the three measurements a tester is asked to switch on for
-    // a session. Nothing that affects the simulation is here (see Config); the other .cfg keys are for tracking a
+    // The in-game settings page (Mod Settings mod). Seven boxes: the one decision that is the player's to make,
+    // because it edits a file in the game's folder; the measurements a tester is asked to switch on for a session
+    // (the diagnostics timers, the terrain search check, the save snapshot check, every check at once); and two
+    // one-off memory measurements that untick themselves. Nothing that affects the simulation is here (see Config); the other .cfg keys are for tracking a
     // problem down and a player never needs to see them. The two measurement boxes start from the .cfg value and
     // remember what the player last chose.
     //
@@ -44,6 +45,27 @@ namespace LateGamePerformance
                             "compare every entity, and use the game's. Counted in the SaveSnapshot: line. Never " +
                             "changes what is saved; makes saves slower. For one test session. Does not affect the " +
                             "simulation, so multiplayer peers may differ."));
+
+        public ModSetting<bool> VerifyEverything { get; } = new ModSetting<bool>(Plugin.Current.VerifyAll,
+            ModSettingDescriptor.Create("Verify every feature (one test session)")
+                .SetTooltip("Run the game's own code alongside every one of this mod's replacements (hauling lists, " +
+                            "tree search, plant water, district counts, water map copy, soil scans, home search, terrain " +
+                            "searches, save snapshots) and count every difference in the stats lines. Never changes what " +
+                            "the game is told; noticeably slower. Untick after the session. Does not affect the simulation, " +
+                            "so multiplayer peers may differ."));
+
+        public ModSetting<bool> MeasureLiveMemory { get; } = new ModSetting<bool>(false,
+            ModSettingDescriptor.Create("Measure live memory now (freezes the game for a moment)")
+                .SetTooltip("Ticking this forces one full memory clean-up, which can take a second on a large colony, and " +
+                            "logs how much of the managed heap is still in use afterwards (a Memory: line in Player.log). " +
+                            "The box unticks itself. Measurement only."));
+
+        public ModSetting<bool> WriteMemorySnapshot { get; } = new ModSetting<bool>(false,
+            ModSettingDescriptor.Create("Write a memory snapshot file (slow, large)")
+                .SetTooltip("Ticking this asks the engine for a memory snapshot in Documents/Timberborn/LateGamePerformance, " +
+                            "which names every object in memory by type and opens in Unity's Memory Profiler. It can take " +
+                            "a while and hundreds of megabytes; the log says whether this build wrote one. The box unticks " +
+                            "itself. Measurement only."));
 
         public PerformanceSettings(ISettings settings, ModSettingsOwnerRegistry modSettingsOwnerRegistry,
             ModRepository modRepository) : base(settings, modSettingsOwnerRegistry, modRepository)
@@ -85,6 +107,45 @@ namespace LateGamePerformance
             VerifyTerrainSearches.ValueChanged += (_, value) => TerrainSearch.VerifyEnabled = value;
             SaveSnapshot.VerifyEnabled = VerifySaveSnapshots.Value;
             VerifySaveSnapshots.ValueChanged += (_, value) => SaveSnapshot.VerifyEnabled = value;
+            if (VerifyEverything.Value)
+            {
+                Plugin.SetVerifyAll(true);
+            }
+            VerifyEverything.ValueChanged += (_, value) =>
+            {
+                Plugin.SetVerifyAll(value);
+                if (!value)
+                {
+                    // The two single boxes keep their own say.
+                    TerrainSearch.VerifyEnabled = VerifyTerrainSearches.Value;
+                    SaveSnapshot.VerifyEnabled = VerifySaveSnapshots.Value;
+                }
+            };
+            // One-off actions behind boxes that untick themselves.
+            MeasureLiveMemory.ValueChanged += (_, value) =>
+            {
+                if (value)
+                {
+                    MemoryTools.MeasureLive();
+                    MeasureLiveMemory.SetValue(false);
+                }
+            };
+            WriteMemorySnapshot.ValueChanged += (_, value) =>
+            {
+                if (value)
+                {
+                    MemoryTools.WriteSnapshot();
+                    WriteMemorySnapshot.SetValue(false);
+                }
+            };
+            if (MeasureLiveMemory.Value)
+            {
+                MeasureLiveMemory.SetValue(false);
+            }
+            if (WriteMemorySnapshot.Value)
+            {
+                WriteMemorySnapshot.SetValue(false);
+            }
         }
     }
 

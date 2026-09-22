@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Linq.Expressions;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using Timberborn.Beavers;
@@ -21,22 +23,32 @@ namespace LateGamePerformance
     // The mod asks exactly the same questions of exactly the same beavers in exactly the same order, with the
     // game's own methods (Dweller.IsLookingForBetterHome, AutoAssignableDwelling.CanAssignDweller, and its
     // AssignDweller for the one that moves in), and stops at the same first hit. What it leaves out: the LINQ
-    // enumerators, and the per-beaver component lookup, which it does once per beaver and keeps, because the
-    // components of an entity are fixed for its life. The two lists are the game's own lists, read by index. The
-    // result cannot differ, so it is the same on every computer.
+    // enumerators, and the per-beaver component lookup, which it does once per list and keeps, because the
+    // components of an entity are fixed for its life: beside each of the game's two lists (the district's adults
+    // and children) it keeps an array of their Dweller components in the same order, rebuilt whenever the list's
+    // own change counter moved. A search is then one array walk with one predicate call per beaver. The result
+    // cannot differ, so it is the same on every computer.
     //
-    // HomeSearchVerify runs the game's walk as well (the same lookups, from scratch, through the same
-    // concatenation) and compares the beaver picked; a mismatch is logged and the game's pick is used.
+    // HomeSearchVerify runs the game's walk as well (fresh lookups, through the same concatenation) and compares
+    // the beaver picked; a mismatch is logged and the game's pick is used.
     internal static class HomeSearch
     {
         private const string AssignerType = "Timberborn.DwellingSystem.DwellerHomeAssigner";
         private const string DwellingType = "Timberborn.DwellingSystem.AutoAssignableDwelling";
 
-        private sealed class ReferenceComparer : IEqualityComparer<Beaver>
+        // The dwellers beside one of the game's lists, valid for one value of the list's change counter.
+        private sealed class Beside
         {
-            public bool Equals(Beaver x, Beaver y) => ReferenceEquals(x, y);
+            public Dweller[] Dwellers = new Dweller[0];
+            public int Count;
+            public int Version = -1;
+        }
 
-            public int GetHashCode(Beaver beaver) => RuntimeHelpers.GetHashCode(beaver);
+        private sealed class ReferenceComparer<T> : IEqualityComparer<T> where T : class
+        {
+            public bool Equals(T x, T y) => ReferenceEquals(x, y);
+
+            public int GetHashCode(T item) => RuntimeHelpers.GetHashCode(item);
         }
 
         // The game's own methods; swappable for the test harness, where no entity can be built.
@@ -45,7 +57,13 @@ namespace LateGamePerformance
         internal static Func<object, Dweller, bool> CanAssign;
         internal static Action<object, Dweller> Assign;
 
-        private static readonly Dictionary<Beaver, Dweller> Dwellers = new Dictionary<Beaver, Dweller>(new ReferenceComparer());
+        private static Func<ReadOnlyList<Beaver>, List<Beaver>> _listOf;
+        private static Func<object, int> _versionOf;
+        private static Func<object, Beaver[]> _itemsOf;
+        private static readonly Dictionary<List<Beaver>, Beside> Besides =
+            new Dictionary<List<Beaver>, Beside>(new ReferenceComparer<List<Beaver>>());
+        // The fallback when the list's change counter cannot be read: one lookup per beaver, kept for its life.
+        private static readonly Dictionary<Beaver, Dweller> Dwellers = new Dictionary<Beaver, Dweller>(new ReferenceComparer<Beaver>());
 
         private static bool _active;
         private static bool _verify;
@@ -53,9 +71,16 @@ namespace LateGamePerformance
         private static long _searches;
         private static long _looked;
         private static long _movedIn;
+        private static long _rebuilds;
         private static long _otherLists;
         private static long _stopwatchTicks;
         private static long _verifyMismatches;
+
+        internal static bool VerifyEnabled
+        {
+            get => _verify;
+            set => _verify = value;
+        }
 
         public static Feature CreateFeature(Config config)
         {
@@ -73,8 +98,8 @@ namespace LateGamePerformance
                 },
                 Prefix = Reflect.Own(self, nameof(AssignPrefix))
             });
-            // Memory only: a beaver that is gone leaves the table. Without it the table keeps a few bytes per
-            // beaver that ever lived; the lookups stay right, because a key is a live object.
+            // Memory only, for the fallback table: a beaver that is gone leaves it. The lookups stay right without
+            // it, because a key is a live object.
             feature.Patches.Add(new PatchSpec
             {
                 Name = "Dweller.DeleteEntity",
@@ -87,7 +112,7 @@ namespace LateGamePerformance
 
         public static void Activate()
         {
-            Dwellers.Clear();
+            SceneCreated();
             _active = true;
         }
 
@@ -95,10 +120,13 @@ namespace LateGamePerformance
 
         public static void SceneCreated()
         {
+            Besides.Clear();
             Dwellers.Clear();
         }
 
-        internal static int TableSize => Dwellers.Count;
+        internal static int TableSize => Dwellers.Count + Besides.Count;
+
+        internal static bool UsesListVersions => _versionOf != null;
 
         // Resolves everything this feature touches; throws if the game no longer matches.
         public static void BindAccessors()
@@ -110,6 +138,22 @@ namespace LateGamePerformance
             }
             CanAssign = Reflect.InstanceCall<Func<object, Dweller, bool>>(AccessTools.Method(dwelling, "CanAssignDweller"));
             Assign = Reflect.InstanceCall<Action<object, Dweller>>(AccessTools.Method(dwelling, "AssignDweller"));
+            // The list behind the game's read-only view, and the list's own change counter and array. The names are
+            // those of the runtime's List<T>; a runtime without them gets the fallback table.
+            try
+            {
+                FieldInfo list = AccessTools.Field(typeof(ReadOnlyList<Beaver>), "_list");
+                ParameterExpression view = Expression.Parameter(typeof(ReadOnlyList<Beaver>), "view");
+                _listOf = Expression.Lambda<Func<ReadOnlyList<Beaver>, List<Beaver>>>(Expression.Field(view, list), view).Compile();
+                _versionOf = Reflect.FieldGetter<int>(typeof(List<Beaver>), "_version");
+                _itemsOf = Reflect.FieldGetter<Beaver[]>(typeof(List<Beaver>), "_items");
+            }
+            catch (Exception)
+            {
+                _listOf = null;
+                _versionOf = null;
+                _itemsOf = null;
+            }
         }
 
         public static string TakeStatsLine()
@@ -121,10 +165,11 @@ namespace LateGamePerformance
             double ms = _stopwatchTicks * 1000.0 / Stopwatch.Frequency;
             string line = string.Format(CultureInfo.InvariantCulture,
                 "HomeSearch: {0} searches for a beaver to move into a home asked {1} beavers in {2:0.0} ms ({3:0.000} ms " +
-                "each); {4} moved in; {5} beavers in the table; {6} searches over lists of another kind were left to the game{7}",
-                _searches, _looked, ms, _searches > 0 ? ms / _searches : 0, _movedIn, Dwellers.Count, _otherLists,
+                "each); {4} moved in; the dweller lists beside the game's were rebuilt {5} times; {6} searches over lists of " +
+                "another kind were left to the game{7}",
+                _searches, _looked, ms, _searches > 0 ? ms / _searches : 0, _movedIn, _rebuilds, _otherLists,
                 _verify ? $"; verify mismatches {_verifyMismatches}" : "");
-            _searches = _looked = _movedIn = _otherLists = _stopwatchTicks = 0;
+            _searches = _looked = _movedIn = _rebuilds = _otherLists = _stopwatchTicks = 0;
             return line;
         }
 
@@ -207,6 +252,22 @@ namespace LateGamePerformance
         private static Dweller Scan(object dwelling, ReadOnlyList<Beaver> beavers)
         {
             int count = beavers.Count;
+            if (_versionOf != null)
+            {
+                List<Beaver> list = _listOf(beavers);
+                Beside beside = BesideOf(list, count);
+                Dweller[] dwellers = beside.Dwellers;
+                for (int i = 0; i < count; i++)
+                {
+                    Dweller dweller = dwellers[i];
+                    _looked++;
+                    if (IsLooking(dweller) && CanAssign(dwelling, dweller))
+                    {
+                        return dweller;
+                    }
+                }
+                return null;
+            }
             for (int i = 0; i < count; i++)
             {
                 Beaver beaver = beavers[i];
@@ -222,6 +283,38 @@ namespace LateGamePerformance
                 }
             }
             return null;
+        }
+
+        // The dwellers beside a list, rebuilt when the list changed since (its change counter moves on every
+        // addition, removal and replacement).
+        private static Beside BesideOf(List<Beaver> list, int count)
+        {
+            if (!Besides.TryGetValue(list, out Beside beside))
+            {
+                beside = new Beside();
+                Besides[list] = beside;
+            }
+            int version = _versionOf(list);
+            if (beside.Version != version || beside.Count != count)
+            {
+                if (beside.Dwellers.Length < count)
+                {
+                    beside.Dwellers = new Dweller[count + count / 4 + 4];
+                }
+                Beaver[] items = _itemsOf(list);
+                for (int i = 0; i < count; i++)
+                {
+                    beside.Dwellers[i] = DwellerOf(items[i]);
+                }
+                for (int i = count; i < beside.Dwellers.Length; i++)
+                {
+                    beside.Dwellers[i] = null;
+                }
+                beside.Count = count;
+                beside.Version = version;
+                _rebuilds++;
+            }
+            return beside;
         }
 
         // The game's walk, as decompiled, with fresh lookups.
