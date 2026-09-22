@@ -78,6 +78,39 @@ game's own node ids: every tile of every map is inside its box, a tile just outs
 answers maybe. The stats line now says how many were left out for each reason (`of which 12000 dead plants and
 300000 plants outside the route map's reach`).
 
+**A full building stops at the first plant found (new in 0.4.28).** Leaving lookups out did not stop the walk: every
+remaining candidate was still fetched through the game's `!Reserved` filter (and BeaverBuddies' colony filter) and
+asked about. In the 0.4.23 session a regression over 71 stats blocks gave about 390 ns per candidate walked against
+480 ns per lookup, so the walk was about 84% of the search late in the session (about 1,100 candidates per search),
+and 17 of the 21 lumberjack flags in the save were full. When the building's inventory is fully reserved
+(`Inventory.IsFullyReserved`: stock plus reserved capacity at or above capacity), the game's `UnreservedCapacity` is
+0 for every good (its second bound, capacity minus stock minus reserved capacity, is 0 or below, and the result is
+at least 0), so `CarryAmountCalculator.AmountToCarry` is 0 for every plant and the finder's last step answers
+"nothing to take" whatever it was handed, once its "found something" flag is set. That flag is set by the very
+candidate that sets the mod's own, which has already gone to the finder when the walk stops, on the finder's next
+request. So the walk ends there: same answer, and the rest of the list is never fetched. If nothing is found, the
+walk goes to the end as before ("nothing in range"). What the rest of the walk did was reads only, and its lookups
+were already left out (no good has room). The inventory is asked once, before the walk; nothing in a search writes
+an inventory. It covers full farmhouses and gatherers too. The stop stands down for the session, with one log line,
+if another mod patches `Inventory.IsFullyReserved`, `TotalAmountInStock`, `UnreservedCapacity(string)` or
+`CarryAmountCalculator.AmountToCarry(int, GoodAmount, IAmountProvider)`; that is decided at the first search. Also,
+once something is found a plant that is not yielding is passed over before its `LivingNaturalResource` is looked up
+(it was passed over after it before). The tests run the model on a further 4000 random forests with full buildings
+and require the game's answer, that no plant is fetched after the one that found something, and that the list is let
+go of; they also check, on 3000 random inventories of the game's own `Inventory` class with real disallowers and the
+game's `CarryAmountCalculator`, that a fully reserved inventory gives 0 room and a 0 carry amount for every good, and
+that another mod's patch on any of the four methods stands the stop down. The stats line adds `; 3400 searches
+stopped at the first plant found because the building had no room left (620000 candidates walked in them)`, and says
+so when the stop stood down.
+
+**No garbage per search (0.4.28).** Each search used to make an iterator, two closures and two delegates (about
+20-40 KB/s). The walk is now one object kept for every search (`YielderSearch.Walk`, the same steps as the iterator,
+including a fresh walk if it is enumerated twice), and the delegates are made once and read the search's inventory,
+access and lifting capacity from fields that are set for the length of the search and emptied after it. Searches
+run on the main thread and never inside one another; should one ever start inside another, it is left to the game's
+own code. The harness checks that a walk reused 1000 times allocates nothing and that the feature has no
+compiler-made closure or iterator class left.
+
 - The first lookup of a search is still made, whatever the plant: it is also what fills the building's terrain
   route map, and the game reads whether a cached map is filled without filling it when a walker asks for a path
   (`PathfindingService.FindTerrainPathIfCached`, through `AccessFlowField.FoundPath`), so a map filled a tick
@@ -689,6 +722,29 @@ found on the 128th. An `Add` and a `Remove` whose game methods were skipped, lea
 found on the next pass, as is another list object put in the bucket's field. It also replays a 400-pass history that
 changes the game's list behind the hooks as well as through them, once with the skip and once with the walk on every
 pass, and requires the same ticks and the same rebuilds.
+
+**Ranged effect buildings with nothing to do (new in 0.4.28).** About 110 entities of the logged colony (roofs,
+lanterns, shrubs) were ticked for one switched-on component only, `RangedEffectBuilding`, whose whole `Tick` is
+`if ((bool)_mechanicalBuilding) { ToggleActiveState(); _rangedEffectApplier.UpdateEfficiency(...); }`. The field is
+private and written in one place, `Awake`, from `GetComponent<MechanicalBuilding>()`, and `BaseComponent`'s bool
+operator is false for null: for a building without a mechanical part the tick does nothing, however often it runs.
+Such a component now counts as switched off for the flag (its `Enabled` stays what the game set), so an entity whose
+switched-on tick parts are all of that kind is passed over; an entity with any other part switched on is ticked
+through the game's own `Tick`, which ticks this one too. The field is read whenever an entity's flag is worked out
+(an add, a rebuild, a component switched on or off), never remembered; the one write, in `Awake`, is followed by
+`Awake`'s own `DisableComponent`, whose postfix works the flag out again. The rule is off for the session, with one
+log line, if the class's code is not the code that was read (`IdleEntities.RangedEffectHash`, over the IL of every
+method it declares and of `BaseComponent`'s bool operator; the harness checks it against the installed game), and
+for a game scene if another mod patches any of the class's methods. A derived class is never treated this way. With
+the game's metrics switched on (`RecordTimings`) the game's own timing of `RangedEffectBuilding` shows fewer calls;
+nothing else changes. The harness runs the game's own `Tick` on such a component with every other field empty (it
+returns without touching anything, and goes on when a mechanical part is set), replays a 300-pass history mixing
+these with mechanical ones and other parts, switched on and off one by one between passes and from inside ticks, and
+requires the game loop's effective ticks with the rule on and with it stood down (with it on, the only visits that
+do nothing left are those of entities removed mid-pass, which the game's loop still reaches), and covers a component
+switched on before its `Awake` has run. The `IdleEntities:` line now reads `... passed
+over because none of their tick parts was switched on or would do anything (110 of them only had ranged effect
+buildings with no mechanical part switched on)`, or says why the rule is off.
 
 ### Terrain path searches resumed instead of restarted (always on, new in 0.4.18)
 

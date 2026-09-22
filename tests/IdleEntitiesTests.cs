@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using LateGamePerformance;
 using Timberborn.BaseComponentSystem;
 using Timberborn.EntitySystem;
+using Timberborn.MechanicalSystem;
+using Timberborn.RangedEffectSystem;
 using Timberborn.TickSystem;
 
 // The idle-entity mirror against the game's real TickableEntityBucket, TickableEntity and MeteredTickableComponent.
@@ -27,13 +29,23 @@ internal static class IdleEntitiesTests
     {
         public Guid Id;
         public TickableEntity Entity;
-        public Part[] Parts;
-        public bool Awake => Array.Exists(Parts, part => part.Enabled);
+        public TickableComponent[] Parts;
+        // Whether ticking the entity does anything: a part switched on that does something when ticked (every part
+        // but a ranged effect building without a mechanical part, whose tick does nothing).
+        public bool Awake => Array.Exists(Parts, part => part.Enabled && !DoesNothing(part));
+    }
+
+    private static readonly FieldInfo MechanicalField = typeof(RangedEffectBuilding).GetField("_mechanicalBuilding", Any);
+
+    private static bool DoesNothing(TickableComponent part)
+    {
+        return part is RangedEffectBuilding && MechanicalField.GetValue(part) == null;
     }
 
     // What an entity does when it is ticked in a given pass: a change to some other entity. The Direct ones change the
     // game's list behind the mod's hooks, through the list's own methods; only the key-walk history uses them.
-    private enum Op { None, Enable, Disable, Add, Remove, DirectSwap, DirectAdd, DirectRemove }
+    // EnableLast and DisableFirst switch one part of an entity with several; only the ranged effect history uses them.
+    private enum Op { None, Enable, Disable, Add, Remove, DirectSwap, DirectAdd, DirectRemove, EnableLast, DisableFirst }
 
     private struct Action
     {
@@ -97,7 +109,7 @@ internal static class IdleEntitiesTests
         }
 
         List<string> reference = Reference(ents, initiallyIn, between, during, passes);
-        List<string> mirrored = Mirrored(ents, initiallyIn, between, during, passes, bucketType, add, remove, listField, check);
+        List<string> mirrored = Mirrored(ents, initiallyIn, between, during, passes, bucketType, add, remove, listField, check, out _);
         int firstDifference = -1;
         for (int i = 0; i < Math.Max(reference.Count, mirrored.Count); i++)
         {
@@ -116,7 +128,202 @@ internal static class IdleEntitiesTests
         RemovedThenEnabled(bucketType, add, remove, listField, check);
         KeyWalks(bucketType, add, remove, listField, check);
         SkipEqualsWalk(bucketType, add, remove, listField, check);
+        RangedEffects(bucketType, add, remove, listField, check);
         KeyWalkTiming(bucketType, add, listField);
+    }
+
+    // Ranged effect buildings without a mechanical part (roofs, lanterns, shrubs; 0.4.28): switched on, but their tick
+    // does nothing, so an entity whose switched-on parts are all of that kind is passed over. The game's own Tick is run
+    // on them to show it does nothing; a scripted history mixes them with mechanical ones and other parts, switched on
+    // and off one by one, between passes and from inside ticks, and the effective ticks must be the game loop's, with
+    // the rule on and with it stood down by another mod's patch.
+    private static void RangedEffects(Type bucketType, MethodInfo add, MethodInfo remove, FieldInfo listField, Action<bool, string> check)
+    {
+        // The game's own Tick, on a component whose every field is null: without a mechanical part it returns without
+        // touching anything; with one it goes on (and here trips over the empty component, which shows it went on).
+        RangedEffectBuilding bare = NewRangedEffect(false);
+        bool bareDoesNothing = true;
+        try
+        {
+            bare.Tick();
+        }
+        catch (Exception)
+        {
+            bareDoesNothing = false;
+        }
+        bool mechanicalGoesOn = false;
+        try
+        {
+            NewRangedEffect(true).Tick();
+        }
+        catch (NullReferenceException)
+        {
+            mechanicalGoesOn = true;
+        }
+        check(bareDoesNothing && mechanicalGoesOn,
+            "idle entities: the game's RangedEffectBuilding.Tick does nothing without a mechanical part and goes on with one");
+        string now = IdleEntities.RangedEffectHashNow();
+        check(now == IdleEntities.RangedEffectHash,
+            $"idle entities: the game's RangedEffectBuilding is the code that was read (hash {now}, read {IdleEntities.RangedEffectHash}; " +
+            "if the game changed, read Tick and Awake again before updating IdleEntities.RangedEffectHash)");
+
+        Func<MethodBase, IEnumerable<(string Owner, string Patch)>> previous = IdleEntities.PatchesOn;
+        try
+        {
+            Random random = new Random(1618);
+            const int passes = 300, pool = 90;
+            Ent[] ents = new Ent[pool];
+            for (int i = 0; i < pool; i++)
+            {
+                ents[i] = MakeMixedEntity(random, 500 + i);
+            }
+            bool[] initiallyIn = new bool[pool];
+            for (int i = 0; i < pool; i++) initiallyIn[i] = i < 60;
+            Op[] ops = { Op.Enable, Op.Disable, Op.Add, Op.Remove, Op.EnableLast, Op.DisableFirst };
+            List<(int pass, Op op, int target)> between = new List<(int, Op, int)>();
+            Dictionary<(int, int), Action> during = new Dictionary<(int, int), Action>();
+            for (int pass = 0; pass < passes; pass++)
+            {
+                int n = random.Next(4);
+                for (int k = 0; k < n; k++) between.Add((pass, ops[random.Next(ops.Length)], random.Next(pool)));
+                int m = random.Next(3);
+                for (int k = 0; k < m; k++) during[(pass, random.Next(pool))] = new Action { Op = ops[random.Next(ops.Length)], Target = random.Next(pool) };
+            }
+            bool[][] initial = Snapshot(ents);
+            List<string> reference = Reference(ents, initiallyIn, between, during, passes);
+
+            IdleEntities.PatchesOn = _ => null;
+            IdleEntities.SceneCreated();
+            IdleEntities.TakeStatsLine();
+            List<string> on = Mirrored(ents, initiallyIn, between, during, passes, bucketType, add, remove, listField, check, out int onIdle);
+            string onLine = IdleEntities.TakeStatsLine();
+            IdleEntities.SceneCreated();
+            Restore(ents, initial);
+
+            // Another mod patches RangedEffectBuilding.Tick: the rule stands down for the game scene, and every such
+            // entity is ticked through the game's own Tick again, where that patch runs.
+            IdleEntities.PatchesOn = method => method.Name == "Tick" ? new[] { ("some.other.mod", "Other.Mod.RangedTick.Prefix") } : null;
+            List<string> off = Mirrored(ents, initiallyIn, between, during, passes, bucketType, add, remove, listField, check, out int offIdle);
+            string offLine = IdleEntities.TakeStatsLine();
+            IdleEntities.SceneCreated();
+            Restore(ents, initial);
+
+            int firstOn = FirstDifference(reference, on), firstOff = FirstDifference(reference, off);
+            check(firstOn < 0 && firstOff < 0,
+                $"idle entities: {on.Count} effective ticks over {passes} passes with ranged effect buildings, mechanical and not, " +
+                "in the same order as the game's own loop, with the rule on and stood down" +
+                (firstOn < 0 ? "" : $" (on: first difference at {firstOn}: {At(reference, firstOn)} vs {At(on, firstOn)})") +
+                (firstOff < 0 ? "" : $" (off: first difference at {firstOff}: {At(reference, firstOff)} vs {At(off, firstOff)})"));
+            Console.WriteLine("     " + onLine);
+            Console.WriteLine("     " + offLine);
+            check(offIdle > 1000 && onIdle * 20 < offIdle && onLine != null && onLine.Contains("only had ranged effect buildings with no mechanical part switched on") &&
+                  !onLine.Contains("(0 of them") && offLine != null && offLine.Contains("ranged effect buildings are ticked as before: another mod patches RangedEffectBuilding.Tick"),
+                $"idle entities: entities whose switched-on parts are only ranged effect buildings without a mechanical part are passed " +
+                $"over ({onIdle} visits that did nothing, against {offIdle} with the rule stood down by another mod's patch), and " +
+                "the stats line says how many");
+
+            // A component switched on before its Awake has found the mechanical part (the field still null): passed over.
+            // Awake then sets the field and switches the component off; switched on again, the entity is ticked.
+            IdleEntities.PatchesOn = _ => null;
+            object bucket = Activator.CreateInstance(bucketType, true);
+            IdleEntities.Activate();
+            RangedEffectBuilding early = NewRangedEffect(false);
+            EnabledField.SetValue(early, true);
+            Ent ent = WithParts(700, early);
+            add.Invoke(bucket, new object[] { ent.Entity });
+            IdleEntities.AddPostfix(bucket, ent.Entity);
+            string visits = "";
+            int round = 0;
+            IdleEntities.TickEntity = entity => visits += round;
+            round = 1;
+            IdleEntities.TickAllPrefix(bucket);
+            MechanicalField.SetValue(early, RuntimeHelpers.GetUninitializedObject(typeof(MechanicalBuilding)));
+            EnabledField.SetValue(early, false);
+            IdleEntities.DisabledPostfix(early);
+            round = 2;
+            IdleEntities.TickAllPrefix(bucket);
+            EnabledField.SetValue(early, true);
+            IdleEntities.EnabledPostfix(early);
+            round = 3;
+            IdleEntities.TickAllPrefix(bucket);
+            IdleEntities.TickEntity = entity => entity.Tick();
+            check(visits == "3" && IdleEntities.IsActive,
+                "idle entities: a ranged effect building switched on before its Awake is passed over until Awake finds a " +
+                $"mechanical part, switches it off and it is switched on again (ticked in passes '{visits}', expected '3')");
+            IdleEntities.TakeStatsLine();
+            IdleEntities.SceneCreated();
+        }
+        finally
+        {
+            IdleEntities.PatchesOn = previous;
+            IdleEntities.TickEntity = entity => entity.Tick();
+        }
+    }
+
+    private static int FirstDifference(List<string> expected, List<string> got)
+    {
+        for (int i = 0; i < Math.Max(expected.Count, got.Count); i++)
+        {
+            if (i >= expected.Count || i >= got.Count || expected[i] != got[i])
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // The game's RangedEffectBuilding with every field empty, and, if asked, a mechanical part.
+    private static RangedEffectBuilding NewRangedEffect(bool mechanical)
+    {
+        RangedEffectBuilding building = (RangedEffectBuilding)RuntimeHelpers.GetUninitializedObject(typeof(RangedEffectBuilding));
+        if (mechanical)
+        {
+            MechanicalField.SetValue(building, RuntimeHelpers.GetUninitializedObject(typeof(MechanicalBuilding)));
+        }
+        return building;
+    }
+
+    private static Ent WithParts(int index, params TickableComponent[] parts)
+    {
+        EntityComponent component = (EntityComponent)RuntimeHelpers.GetUninitializedObject(typeof(EntityComponent));
+        Guid id = new Guid(index + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        EntityIdField.SetValue(component, id);
+        List<MeteredTickableComponent> metered = new List<MeteredTickableComponent>();
+        foreach (TickableComponent part in parts)
+        {
+            metered.Add(new MeteredTickableComponent(part, null, false));
+        }
+        return new Ent { Id = id, Entity = new TickableEntity(component, metered, "entity " + index), Parts = parts };
+    }
+
+    // A roof or lantern (a ranged effect building alone), one with another tick part as well (either order), a
+    // mechanical one, or an entity without any. Ranged effect buildings are mostly switched on, as finished ones are.
+    private static Ent MakeMixedEntity(Random random, int index)
+    {
+        TickableComponent[] parts;
+        switch (random.Next(5))
+        {
+            case 0:
+                parts = new TickableComponent[] { NewRangedEffect(false) };
+                break;
+            case 1:
+                parts = new TickableComponent[] { NewRangedEffect(false), new Part() };
+                break;
+            case 2:
+                parts = new TickableComponent[] { NewRangedEffect(true) };
+                break;
+            case 3:
+                parts = new TickableComponent[] { new Part(), NewRangedEffect(false) };
+                break;
+            default:
+                parts = new TickableComponent[] { new Part() };
+                break;
+        }
+        foreach (TickableComponent part in parts)
+        {
+            EnabledField.SetValue(part, part is RangedEffectBuilding ? random.Next(4) != 0 : random.Next(4) == 0);
+        }
+        return WithParts(index, parts);
     }
 
     // A case the scripted history does not reach: A removes C during a pass (the game defers that to the end of the
@@ -438,7 +645,7 @@ internal static class IdleEntitiesTests
                         IdleEntities.EnabledPostfix(ent.Parts[0]);
                         break;
                     case Op.Disable:
-                        foreach (Part part in ent.Parts)
+                        foreach (TickableComponent part in ent.Parts)
                         {
                             EnabledField.SetValue(part, false);
                             IdleEntities.DisabledPostfix(part);
@@ -648,7 +855,6 @@ internal static class IdleEntitiesTests
         foreach (Ent ent in ents)
         {
             byEntity[ent.Entity] = ent;
-            foreach (Part part in ent.Parts) EnabledField.SetValue(part, ((Part)part).Enabled);
         }
         // Snapshot the initial enabled flags so the mirrored run can start from the same state.
         bool[][] initial = Snapshot(ents);
@@ -667,7 +873,13 @@ internal static class IdleEntitiesTests
                     EnabledField.SetValue(ent.Parts[0], true);
                     break;
                 case Op.Disable:
-                    foreach (Part part in ent.Parts) EnabledField.SetValue(part, false);
+                    foreach (TickableComponent part in ent.Parts) EnabledField.SetValue(part, false);
+                    break;
+                case Op.EnableLast:
+                    EnabledField.SetValue(ent.Parts[ent.Parts.Length - 1], true);
+                    break;
+                case Op.DisableFirst:
+                    EnabledField.SetValue(ent.Parts[0], false);
                     break;
                 case Op.Add:
                     if (!list.ContainsKey(ent.Id)) list.Add(ent.Id, ent.Entity);
@@ -705,11 +917,13 @@ internal static class IdleEntitiesTests
         return ticks;
     }
 
-    // The mirror-driven loop over the game's real bucket, driven through the mod's patch bodies.
+    // The mirror-driven loop over the game's real bucket, driven through the mod's patch bodies. idleVisits counts the
+    // entities the mod ticked although ticking them did nothing.
     private static List<string> Mirrored(Ent[] ents, bool[] initiallyIn, List<(int pass, Op op, int target)> between,
         Dictionary<(int, int), Action> during, int passes, Type bucketType, MethodInfo add, MethodInfo remove, FieldInfo listField,
-        Action<bool, string> check)
+        Action<bool, string> check, out int idleVisits)
     {
+        int idle = 0;
         List<string> ticks = new List<string>();
         object bucket = Activator.CreateInstance(bucketType, true);
         SortedList<Guid, TickableEntity> gameList = (SortedList<Guid, TickableEntity>)listField.GetValue(bucket);
@@ -739,11 +953,19 @@ internal static class IdleEntitiesTests
                     IdleEntities.EnabledPostfix(ent.Parts[0]);
                     break;
                 case Op.Disable:
-                    foreach (Part part in ent.Parts)
+                    foreach (TickableComponent part in ent.Parts)
                     {
                         EnabledField.SetValue(part, false);
                         IdleEntities.DisabledPostfix(part);
                     }
+                    break;
+                case Op.EnableLast:
+                    EnabledField.SetValue(ent.Parts[ent.Parts.Length - 1], true);
+                    IdleEntities.EnabledPostfix(ent.Parts[ent.Parts.Length - 1]);
+                    break;
+                case Op.DisableFirst:
+                    EnabledField.SetValue(ent.Parts[0], false);
+                    IdleEntities.DisabledPostfix(ent.Parts[0]);
                     break;
                 case Op.Add:
                     GameAdd(ent);
@@ -761,8 +983,18 @@ internal static class IdleEntitiesTests
         IdleEntities.TickEntity = entity =>
         {
             Ent ent = byEntity[entity];
-            // The game's Tick does nothing for an entity whose components are all disabled.
-            if (!ent.Awake) return;
+            // The game's own RangedEffectBuilding.Tick, on each switched-on one without a mechanical part: it must do
+            // nothing (every other field of these is null, so touching anything would throw).
+            foreach (TickableComponent part in ent.Parts)
+            {
+                if (part.Enabled && DoesNothing(part)) part.Tick();
+            }
+            // The game's Tick does nothing for an entity whose switched-on components all do nothing.
+            if (!ent.Awake)
+            {
+                idle++;
+                return;
+            }
             ticks.Add(pass + ":" + ent.Id.ToString().Substring(0, 8));
             if (during.TryGetValue((pass, Array.IndexOf(ents, ent)), out Action action)) Apply(action.Op, action.Target);
         };
@@ -777,6 +1009,7 @@ internal static class IdleEntitiesTests
         }
         check(gameLoops == 0, "idle entities: every pass was taken over by the mirror");
         IdleEntities.TickEntity = entity => entity.Tick();
+        idleVisits = idle;
         return ticks;
     }
 

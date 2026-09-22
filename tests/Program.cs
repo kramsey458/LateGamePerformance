@@ -1007,6 +1007,119 @@ internal static class Program
         GamesAnswer(YielderSearch.LazyCandidates(forest, plant => plant.Exists, plant => plant.Yielding, plant => plant.Alive,
             plant => plant.Reachable ? plant : null, reached => reached != null, blocked));
         Check(blocked.Lookups == 2000, "yielder search: with nothing reachable nothing can be left out");
+
+        TestFullBuildingStop(random);
+        YielderSearchTests.Run(Check);
+    }
+
+    // The plants of a search, counting how many the walk asked for and whether it let go of them.
+    private sealed class CountedPlants : IEnumerable<Plant>
+    {
+        private readonly List<Plant> _plants;
+        public int Pulled;
+        public int Disposed;
+
+        public CountedPlants(List<Plant> plants)
+        {
+            _plants = plants;
+        }
+
+        public IEnumerator<Plant> GetEnumerator()
+        {
+            foreach (Plant plant in _plants)
+            {
+                Pulled++;
+                yield return plant;
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+        // Disposed counts the enumerators let go of; this wrapper hands out one per walk.
+        public IEnumerable<Plant> Tracked()
+        {
+            try
+            {
+                foreach (Plant plant in this) yield return plant;
+            }
+            finally
+            {
+                Disposed++;
+            }
+        }
+    }
+
+    // A building with no room at all (0.4.28): once something is found the answer is "nothing to take" whatever the rest
+    // of the list holds, so the walk stops right after the candidate that found it. Same forests as above, with the
+    // reach oracle, dead, destroyed and unreachable plants, and full buildings throughout.
+    private static void TestFullBuildingStop(Random random)
+    {
+        int differences = 0, notRightAfter = 0, notLetGo = 0, countedWrong = 0, stoppedSearches = 0;
+        long notWalked = 0;
+        for (int round = 0; round < 4000; round++)
+        {
+            int count = random.Next(0, 60);
+            double yielding = random.NextDouble(), alive = random.NextDouble(), reachable = round % 5 == 0 ? 0.05 : random.NextDouble();
+            List<Plant> plants = new List<Plant>();
+            for (int i = 0; i < count; i++)
+            {
+                plants.Add(new Plant
+                {
+                    Exists = random.NextDouble() > 0.03, Yielding = random.NextDouble() < yielding, Alive = random.NextDouble() < alive,
+                    Reachable = random.NextDouble() < reachable, Good = random.Next(3) == 0 ? "Pine" : "Log", Distance = random.Next(1, 8), Order = i
+                });
+            }
+            Func<Plant, Plant> lookUp = plant => plant.Reachable ? plant : null;
+            bool withOracle = round % 2 == 0;
+            Func<Plant, bool> mayReach = withOracle ? plant => plant.Reachable || random.Next(2) == 0 : (Func<Plant, bool>)null;
+            // The candidate that makes the game's finder find something: the first that exists, is reached and is
+            // yielding or alive.
+            int first = plants.FindIndex(plant => plant.Exists && plant.Reachable && (plant.Yielding || plant.Alive));
+            string games = GamesResult(plants.Select(lookUp), good => false);
+            CountedPlants counted = new CountedPlants(plants);
+            var stopping = new YielderSearch.Counters();
+            string mods = GamesResult(YielderSearch.LazyCandidates(counted.Tracked(), plant => plant.Exists, plant => plant.Yielding,
+                plant => plant.Alive, lookUp, reached => reached != null, stopping, plant => false, mayReach, true), good => false);
+            var walking = new YielderSearch.Counters();
+            string walked = GamesResult(YielderSearch.LazyCandidates(plants, plant => plant.Exists, plant => plant.Yielding,
+                plant => plant.Alive, lookUp, reached => reached != null, walking, plant => false, mayReach), good => false);
+            if (games != mods || games != walked) differences++;
+            if (counted.Pulled != (first >= 0 ? first + 1 : count)) notRightAfter++;
+            if (counted.Disposed != 1) notLetGo++;
+            if (stopping.Stopped != (first >= 0 ? 1 : 0) || stopping.WalkedInStopped != (first >= 0 ? first + 1 : 0) ||
+                stopping.Candidates != counted.Pulled) countedWrong++;
+            if (first >= 0) stoppedSearches++;
+            notWalked += count - counted.Pulled;
+        }
+        Check(differences == 0, $"yielder search: a building with no room gets the game's answer in 4000 random forests when the walk " +
+                                $"stops at the first plant found ({differences} differences)");
+        Check(notRightAfter == 0 && notLetGo == 0,
+            $"yielder search: with no room the walk asks for no plant after the one that found something, and lets go of the list " +
+            $"({notRightAfter} walks went on, {notLetGo} did not let go)");
+        Check(countedWrong == 0 && stoppedSearches > 1000 && notWalked > 20000,
+            $"yielder search: the stops are counted ({stoppedSearches} searches stopped, {notWalked} candidates not walked, " +
+            $"{countedWrong} counted wrong)");
+
+        // The measured case: a full flag among 1300 grown trees, the first 200 out of reach. Up to 0.4.27 every tree was
+        // walked; now the walk ends at the first reachable one.
+        List<Plant> grown = new List<Plant>();
+        for (int i = 0; i < 1300; i++) grown.Add(new Plant { Yielding = true, Alive = true, Reachable = i >= 200, Distance = i % 53, Order = i });
+        CountedPlants flag = new CountedPlants(grown);
+        var full = new YielderSearch.Counters();
+        string fullFlag = GamesResult(YielderSearch.LazyCandidates(flag.Tracked(), plant => plant.Exists, plant => plant.Yielding,
+            plant => plant.Alive, plant => plant.Reachable ? plant : null, reached => reached != null, full, plant => false, null, true),
+            good => false);
+        Check(fullFlag == "nothing to take" && fullFlag == GamesResult(grown.Select(plant => plant.Reachable ? plant : null), good => false) &&
+              flag.Pulled == 201 && full.Lookups == 201,
+            $"yielder search: a full flag among 1300 grown trees, the first 200 out of reach, walks {flag.Pulled} of them instead of 1300");
+        // Nothing found: the walk goes to the end, as before, and the answer is the game's "nothing in range".
+        grown.ForEach(plant => plant.Reachable = false);
+        CountedPlants none = new CountedPlants(grown);
+        string nothing = GamesResult(YielderSearch.LazyCandidates(none.Tracked(), plant => plant.Exists, plant => plant.Yielding,
+            plant => plant.Alive, plant => plant.Reachable ? plant : null, reached => reached != null, new YielderSearch.Counters(),
+            plant => false, null, true), good => false);
+        Check(nothing == "nothing in range" && none.Pulled == 1300,
+            "yielder search: a full building with nothing reachable still walks every candidate and finds nothing in range");
     }
 
     // A verify key is each player's own (the .cfg, the settings page), so it must not change what the game is handed:
