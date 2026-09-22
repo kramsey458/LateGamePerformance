@@ -240,6 +240,10 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        // Last, so that another mod's prefix on the same method runs first whatever the load order: BeaverBuddies
+        // MultiColony narrows `yielders` to the worker's own colony there, and Harmony skips such a prefix once this
+        // one has answered.
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         private static bool FindPrefix(object __instance, Inventory receivingInventory, Accessible start,
             int liftingCapacity, IEnumerable<Yielder> yielders, ref YielderSearchResult __result)
         {

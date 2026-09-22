@@ -193,6 +193,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         private static bool GetWorkplaceBehaviorsOrderedPrefix(object __instance, IList<WorkplaceBehavior> workplaceBehaviors)
         {
             if (!_active)

@@ -83,6 +83,10 @@ answers maybe. The stats line now says how many were left out for each reason (`
   filled), so when a map gets filled cannot change any result. The guarantee is dropped in 0.4.25.
 - `YielderSearchVerify = true` runs the game's own search as well, compares, logs any difference and uses the
   game's result. It is slower than no mod and only for testing.
+- The prefix runs at Harmony's last priority. BeaverBuddies MultiColony has a prefix on the same method that narrows
+  the candidates to the worker's own colony, and Harmony skips such a prefix once one before it has answered; with
+  equal priorities the order is the mod load order, which each computer sets for itself. Up to 0.4.26 the filter ran
+  first only because BeaverBuddies happened to load first.
 - If anything throws, the feature switches itself off for the session and the game's own code runs.
 - It is always on. Up to 0.4.8 it could be switched off in the settings file; see Settings for why not any more.
 
@@ -1117,7 +1121,11 @@ dotnet run --project tests -c Release
 The tests load the installed game's assemblies and check that every patch target, private field and property
 the mod relies on still exists with a compatible signature, plus settings parsing. A patch target containing
 an exception filter (`catch ... when`) is refused: Harmony cannot patch those under the game's Mono runtime, and
-the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). They also build a road
+the failed attempt crashes the game later (0.4.3 did this with `GameSaver.Save`). Every prefix that can skip the
+game's method (one that returns `bool`) must carry `[HarmonyPriority(Priority.Last)]`: the tests find them all in
+the declared patches, sort each with Harmony's own sorter against another mod's ordinary prefix registered after it,
+and require it to come last, so that other mods' prefixes on the same methods (BeaverBuddies', MultiColony's colony
+filter) run first on every computer whatever the mod load order. They also build a road
 network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
 contained. The background rebuild is run for 25 rounds with maps requested in shuffled order while workers

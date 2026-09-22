@@ -650,6 +650,7 @@ namespace LateGamePerformance
                                 Equals(token.Reference, saveReference);
         }
 
+        [HarmonyPriority(Priority.Last)]
         internal static bool CreateFilePrefix(string fileName, ref Stream __result)
         {
             if (!_insideCreateSave || _prepared == null)

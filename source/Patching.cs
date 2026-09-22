@@ -12,6 +12,9 @@ namespace LateGamePerformance
         // A feature whose required patch fails is rolled back entirely, so it can never run half-hooked.
         public bool Required;
         public Func<MethodBase> Target;
+        // A prefix that returns bool can skip the target, and Harmony then skips every later prefix that could change
+        // the call. Each such prefix carries [HarmonyPriority(Priority.Last)] (HarmonyMethod reads it), so other mods'
+        // prefixes on the same method run before it whatever order the mods were loaded in; the tests check them all.
         public MethodInfo Prefix;
         public MethodInfo Postfix;
         // Runs whether the target returned or threw; the exception, if any, carries on unchanged.

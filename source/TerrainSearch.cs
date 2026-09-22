@@ -171,6 +171,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool FillPrefix(object __instance, object terrainNavMeshGraph, object flowField, int startNodeId,
             int destinationNodeId)
         {

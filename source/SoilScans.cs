@@ -376,6 +376,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable InconsistentNaming
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         internal static bool MoisturePrefix(object __instance)
         {
             if (!_active)
@@ -403,6 +404,7 @@ namespace LateGamePerformance
             }
         }
 
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         internal static bool ContaminationPrefix(object __instance)
         {
             if (!_active)

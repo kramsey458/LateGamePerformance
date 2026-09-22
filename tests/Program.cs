@@ -188,6 +188,7 @@ internal static class Program
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
         Check(patchCount == 119, $"119 patches declared (found {patchCount})");
+        TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -367,6 +368,49 @@ internal static class Program
         {
             Check(!System.Text.RegularExpressions.Regex.IsMatch(shipped, @"(?m)^\s*" + key + @"\s*="), $"config: the shipped file does not offer {key}");
         }
+    }
+
+    // A prefix that returns bool can skip the game's method, and Harmony then skips every prefix after it that could
+    // change the call (a ref argument, a bool result). Equal priorities run in the order the mods were loaded, which is
+    // each computer's own mod manager setting. So a skipping prefix of this mod that ran first would, on one computer,
+    // answer before another mod's prefix narrowed the arguments (MultiColony's colony filter on
+    // YielderFinder.FindLivingYielderWithoutAccessible), and on another after it: two players, two answers. Every
+    // skipping prefix therefore carries [HarmonyPriority(Priority.Last)]. Found from the declared patches, not a list,
+    // and checked the way Harmony will use it: the attribute as Feature.Apply's HarmonyMethod reads it, then Harmony's
+    // own sort with another mod's ordinary prefix registered after this one (this mod loaded first).
+    private static void TestReplacingPrefixesRunLast(Feature[] features)
+    {
+        List<string> early = new List<string>();
+        int replacing = 0;
+        MethodInfo another = typeof(Program).GetMethod(nameof(AnotherModsPrefix), BindingFlags.Static | BindingFlags.NonPublic);
+        foreach (Feature feature in features)
+        {
+            foreach (PatchSpec patch in feature.Patches)
+            {
+                if (patch.Prefix == null || patch.Prefix.ReturnType != typeof(bool))
+                {
+                    continue;
+                }
+                replacing++;
+                HarmonyLib.HarmonyMethod ours = new HarmonyLib.HarmonyMethod(patch.Prefix);
+                List<MethodInfo> order = HarmonyLib.PatchProcessor.GetSortedPatchMethods(patch.Target(), new[]
+                {
+                    new HarmonyLib.Patch(ours, 0, Plugin.HarmonyId + "." + feature.Name),
+                    new HarmonyLib.Patch(new HarmonyLib.HarmonyMethod(another), 1, "another.mod")
+                });
+                if (ours.priority != HarmonyLib.Priority.Last || order.Count != 2 || order[1] != patch.Prefix)
+                {
+                    early.Add($"{feature.Name}/{patch.Name} ({patch.Prefix.DeclaringType?.Name}.{patch.Prefix.Name})");
+                }
+            }
+        }
+        Check(replacing > 0 && early.Count == 0,
+            $"patches: all {replacing} prefixes that can skip the game's method run after other mods' prefixes, whatever the load order" +
+            (early.Count > 0 ? "; these run first: " + string.Join(", ", early) : ""));
+    }
+
+    private static void AnotherModsPrefix()
+    {
     }
 
     // The settings page cannot be shown outside the game, but what Mod Settings needs from it can be checked:

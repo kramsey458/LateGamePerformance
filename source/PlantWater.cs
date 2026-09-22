@@ -369,6 +369,7 @@ namespace LateGamePerformance
             }
         }
 
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         internal static bool TickPrefix(object __instance)
         {
             if (!_active)

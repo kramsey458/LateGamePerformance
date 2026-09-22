@@ -235,6 +235,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         internal static bool DisableAllTilesPrefix(object __instance)
         {
             if (!_tilesActive)
@@ -261,6 +262,7 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         internal static bool EnableTilePrefix(object __instance, Vector3Int tileIndex)
         {
             if (!_tilesActive || !_known || !ReferenceEquals(__instance, _mesh))
@@ -333,12 +335,14 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         internal static bool UploadVector2Prefix(object __instance, int columnIndex)
         {
             return Uploads<Vector2>.Prefix(__instance, columnIndex);
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyLib.HarmonyPriority(HarmonyLib.Priority.Last)]
         internal static bool UploadFloatPrefix(object __instance, int columnIndex)
         {
             return Uploads<float>.Prefix(__instance, columnIndex);

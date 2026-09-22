@@ -283,12 +283,14 @@ namespace LateGamePerformance
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool TickPrefix(object __instance)
         {
             return Update(__instance, false);
         }
 
         // ReSharper disable once InconsistentNaming
+        [HarmonyPriority(Priority.Last)]
         internal static bool UpdatePrefix(object __instance)
         {
             return Update(__instance, true);
