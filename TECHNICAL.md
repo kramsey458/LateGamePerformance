@@ -581,6 +581,46 @@ What is the same and what is not:
   reported no distance or reachability difference.
 - If anything throws, the feature switches itself off for the session and the game's own search runs.
 
+### Save snapshot on worker threads (on by default, new in 0.4.22)
+
+Every save begins with `SerializedWorldFactory.Create`: for each entity every persistent component writes its
+state into a tree of dictionaries. Since 0.4.13 moved the JSON, compression and file write off the main thread,
+this snapshot is the part of a save still on it: 200 to 285 ms per autosave in the logged colony, 11,000
+entities. Nearly all of those are trees, crops, paths, levees and platforms, whose persistent components read
+only managed fields of their own entity (growth progress, coordinates, a yield, an inventory's goods, a demolition
+mark) or stateless serializers, and write into their own entity's dictionaries. `SaveSnapshot = true` (the
+default) snapshots those entities on worker threads while the main thread snapshots the rest, then assembles the
+entities in the game's own order and lets the game's own code save the singletons. The save is the one the game
+would have written; only the thread that wrote part of it down differs.
+
+- An entity goes to a worker only if every persistent component on it is on the list in `SaveSnapshot.cs`, which
+  is exactly the set whose `Save` this mod has read in the game's 1.1.2.4 source: `BlockObject`,
+  `BlockObjectState`, `Yielder`, `Growable`, `LivingNaturalResource`, `CoordinatesOffsetter`,
+  `LivingWaterNaturalResource`, `WateredNaturalResource`, `AridNaturalResource`, `ContaminatedNaturalResource`,
+  `GatherableYieldGrower`, `DeadCuttableYieldRemover`, `ConstructionSite`, `Demolishable`, `BuilderPrioritizable`,
+  `Pollinatee`, `LayeredBlockObstacle`, `FlippableDecal`, `DecalSupplier`, `HaulPrioritizable`, `PausableBuilding`,
+  `Emptiable`, `TimedComponentActivator`, `NamedEntity`, `Inventory`, `RuinModels` and
+  `BlockObjectPlacementRandomizer`. Beavers (`Character` reads a transform, `MovementAnimator` reads Unity's
+  time), workplaces and anything with a component from another mod stay on the main thread. Template names, a
+  Unity name lookup, are read on the main thread for every entity first.
+- Why those are safe: the simulation is not running during a save (the tick was finished first), the main thread
+  is inside `Create` until the workers have joined, every worker writes only into its own entities' dictionaries,
+  and the shared helpers they call (`PrimitiveTypeSerialization`, `SaveConversions`, `GoodAmountSerializer`,
+  `GoodRegistryValueSerializer`) keep no state. The reference serializer's cache is not thread-safe, which is why
+  nothing that uses it is on the list.
+- If a worker throws for any reason, the results are discarded, the game's own `Create` runs, and the feature is
+  off for the session. The `SaveSnapshot:` stats line counts entities on workers and on the main thread and the
+  main thread's time per snapshot; once per session a second line names the components that kept entities on the
+  main thread, by how many entities carry them, so the list can be extended.
+- `SaveSnapshotVerify = true`, or the **Verify save snapshots** box on the settings page, takes the game's own
+  snapshot as well at every save, compares every entity (the game's own `SerializedEntity.Equals`) and uses the
+  game's. Measurement only; slower saves.
+- The harness (`tests/SaveSnapshotTests.cs`) runs the builder over 3,000 fake entities with the game's real
+  `EntitySaver`, `ObjectSaver`, `SerializedEntity` and `SerializedWorld`: numbers, strings, lists and nested
+  objects through a value serializer, a tenth of the entities kept on the calling thread; the result equals the
+  sequential snapshot entity for entity and keeps the order, a throwing part comes back as a failure with nothing
+  thrown, and one worker or 64 give the same result.
+
 ### Memory clean-up right after a save (on by default, new in 0.4.17)
 
 A save allocates a lot: the snapshot of the world, then the JSON tree and the compressed bytes. In the logged
@@ -763,6 +803,8 @@ features, disable the mod.
 | `TerrainSearchVerify` | `false` | Run the game's own terrain path search alongside on a shadow field and count every difference. Measurement only. For testing. |
 | `SoilScansVerify` | `false` | Walk every soil cell the game's way as well and compare which cells were updated. For testing. |
 | `WaterRendering` | `true` | Water tiles are only switched when their state changes, and texture uploads the graphics card already has are left out. Rendering only; may differ between peers. |
+| `SaveSnapshot` | `true` | Snapshot trees, crops, paths, levees and platforms on worker threads at every save. Saving only; may differ between peers. |
+| `SaveSnapshotVerify` | `false` | Take the game's own snapshot as well, compare every entity and use the game's. Measurement only. For testing. |
 | `CollectAfterSave` | `true` | Collect garbage right after each save's main-thread part instead of a second later. Memory only; may differ between peers. |
 | `SoundListener` | `true` | Place the audio listener when the camera moved, while it glides, and every tenth frame otherwise. Sound only; may differ between peers. |
 | `AnimatorCulling` | `true` | Leave out the pose update of animated objects with no renderer on screen; their time keeps running. Rendering only; may differ between peers. |
@@ -770,11 +812,11 @@ features, disable the mod.
 | `BackgroundSave` | `true` | Autosaves and menu saves finish (JSON, compression, file) on a worker thread. `false` = the game saves by itself. May differ between peers. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
-Three settings are on the in-game settings page (**Mods > Late Game Performance**): **Incremental garbage
+Four settings are on the in-game settings page (**Mods > Late Game Performance**): **Incremental garbage
 collection**, described above, which is there because it is the one decision that is the player's to make (it
 edits a file in the game's folder); and, since 0.4.19, **Diagnostics timers** and **Verify terrain path searches**,
-the two measurements a tester is asked to switch on for a session. Those two mirror the `Diagnostics` and
-`TerrainSearchVerify` keys in this file: a box starts from the file's value and then remembers what was last chosen
+plus **Verify save snapshots** since 0.4.22, the measurements a tester is asked to switch on for a session. Those
+mirror the `Diagnostics`, `TerrainSearchVerify` and `SaveSnapshotVerify` keys in this file: a box starts from the file's value and then remembers what was last chosen
 on the page, so the page wins once it has been used. Both can be switched while a game is running. Nothing on the
 page affects the simulation. Up to 0.4.9 the page had other boxes; from 0.4.10 per-component timings are
 `RecordTimings` in this file, the warning asks once and needs no setting, and adaptive pacing is removed.

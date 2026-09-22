@@ -5,9 +5,9 @@ using Timberborn.SettingsSystem;
 
 namespace LateGamePerformance
 {
-    // The in-game settings page (Mod Settings mod). Three boxes: the one decision that is the player's to make,
-    // because it edits a file in the game's folder, and the two measurements a tester is asked to switch on for a
-    // session. Nothing that affects the simulation is here (see Config); the other .cfg keys are for tracking a
+    // The in-game settings page (Mod Settings mod). Four boxes: the one decision that is the player's to make,
+    // because it edits a file in the game's folder, and the three measurements a tester is asked to switch on for
+    // a session. Nothing that affects the simulation is here (see Config); the other .cfg keys are for tracking a
     // problem down and a player never needs to see them. The two measurement boxes start from the .cfg value and
     // remember what the player last chose.
     //
@@ -37,6 +37,13 @@ namespace LateGamePerformance
                             "difference in the TerrainSearch: line (identical, within rounding, equally short other " +
                             "route, different distance). Never changes what the game is told; slower. For one test " +
                             "session. Does not affect the simulation, so multiplayer peers may differ."));
+
+        public ModSetting<bool> VerifySaveSnapshots { get; } = new ModSetting<bool>(Plugin.Current.SaveSnapshotVerify,
+            ModSettingDescriptor.Create("Verify save snapshots")
+                .SetTooltip("At every save, take the game's own snapshot as well as this mod's worker-thread one, " +
+                            "compare every entity, and use the game's. Counted in the SaveSnapshot: line. Never " +
+                            "changes what is saved; makes saves slower. For one test session. Does not affect the " +
+                            "simulation, so multiplayer peers may differ."));
 
         public PerformanceSettings(ISettings settings, ModSettingsOwnerRegistry modSettingsOwnerRegistry,
             ModRepository modRepository) : base(settings, modSettingsOwnerRegistry, modRepository)
@@ -76,6 +83,8 @@ namespace LateGamePerformance
             DiagnosticsTimers.ValueChanged += (_, value) => Diagnostics.Enabled = value;
             TerrainSearch.VerifyEnabled = VerifyTerrainSearches.Value;
             VerifyTerrainSearches.ValueChanged += (_, value) => TerrainSearch.VerifyEnabled = value;
+            SaveSnapshot.VerifyEnabled = VerifySaveSnapshots.Value;
+            VerifySaveSnapshots.ValueChanged += (_, value) => SaveSnapshot.VerifyEnabled = value;
         }
     }
 

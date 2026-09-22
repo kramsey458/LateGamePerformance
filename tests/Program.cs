@@ -46,7 +46,7 @@ internal static class Program
                      "Timberborn.MapStateSystem", "Timberborn.TerrainSystem", "Timberborn.BlockSystem", "Timberborn.WalkingSystem",
                      "Timberborn.CoreSound", "Timberborn.CameraSystem", "Timberborn.SoundSystem", "Timberborn.StatusSystem",
                      "Timberborn.EntityPanelSystem", "Timberborn.TimbermeshAnimations", "Timberborn.BaseComponentSystem",
-                     "Timberborn.EntitySystem" })
+                     "Timberborn.EntitySystem", "Timberborn.TemplateSystem", "Timberborn.Versioning" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -78,7 +78,7 @@ internal static class Program
             HaulCache.CreateFeature(new Config()), RouteMaps.CreateFeature(new Config()),
             RouteMaps.CreateBackgroundFeature(), Timing.CreateFeature(), SaveTiming.CreateFeature(), YielderSearch.CreateFeature(new Config()), TerrainMaps.CreateFeature(new Config()),
             PlantWater.CreateFeature(new Config()), DistrictCounts.CreateFeature(new Config()), BackgroundSave.CreateFeature(),
-            WaterMapCopy.CreateFeature(new Config()), SoilScans.CreateFeature(new Config()), TerrainSearch.CreateFeature(new Config()), IdleEntities.CreateFeature(new Config()),
+            WaterMapCopy.CreateFeature(new Config()), SoilScans.CreateFeature(new Config()), TerrainSearch.CreateFeature(new Config()), IdleEntities.CreateFeature(new Config()), SaveSnapshot.CreateFeature(new Config()),
             WaterRendering.CreateTilesFeature(), WaterRendering.CreateUploadsFeature(),
             MetricsDump.CreateFeature(new Config()),
             Diagnostics.CreateFeature(), CatchUp.CreateFeature(), SaveCollect.CreateFeature(),
@@ -98,7 +98,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 93, $"93 patches declared (found {patchCount})");
+        Check(patchCount == 94, $"94 patches declared (found {patchCount})");
         TestSettingsPage();
 
         RouteMapsTests.Run(Assembly.LoadFrom(Path.Combine(_managed, "Timberborn.Navigation.dll")), Check);
@@ -107,6 +107,7 @@ internal static class Program
         WaterAndSoilTests.Run(Check);
         TerrainSearchTests.Run(Check);
         IdleEntitiesTests.Run(Check);
+        SaveSnapshotTests.Run(Check);
         string[] expectedWarnings =
         {
             "CatchUp failed", "SaveCollect failed", "RouteMaps failed", "PlantWater failed", "BackgroundSave: could not open", "on the worker thread failed",
@@ -293,9 +294,9 @@ internal static class Program
                 settings++;
             }
         }
-        Check(settings == 3 && page.GetProperty("IncrementalGc") != null && page.GetProperty("DiagnosticsTimers") != null &&
-              page.GetProperty("VerifyTerrainSearches") != null,
-            "settings page: three settings: incremental garbage collection, diagnostics timers, verify terrain searches");
+        Check(settings == 4 && page.GetProperty("IncrementalGc") != null && page.GetProperty("DiagnosticsTimers") != null &&
+              page.GetProperty("VerifyTerrainSearches") != null && page.GetProperty("VerifySaveSnapshots") != null,
+            "settings page: four settings: incremental garbage collection, diagnostics timers, verify terrain searches, verify save snapshots");
         // The main menu notice is built by the game's container: it needs one public constructor whose
         // parameters are things the main menu binds, and the game calls it through this interface.
         Type notice = typeof(GcNotice);

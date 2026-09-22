@@ -127,6 +127,10 @@ namespace LateGamePerformance
             {
                 BackgroundSave.Activate();
             }
+            if (config.SaveSnapshot && SaveSnapshot.CreateFeature(config).Apply(HarmonyId))
+            {
+                SaveSnapshot.Activate();
+            }
             if (config.CollectAfterSave && SaveCollect.CreateFeature().Apply(HarmonyId))
             {
                 SaveCollect.Activate();
@@ -254,7 +258,8 @@ namespace LateGamePerformance
                          {
                              WaterMapCopy.TakeStatsLine(), SoilScans.TakeStatsLine(), WaterRendering.TakeStatsLine(),
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
-                             TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine()
+                             TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), SaveSnapshot.TakeStatsLine(),
+                             SaveSnapshot.TakeUnlistedLine()
                          })
                 {
                     if (line != null)

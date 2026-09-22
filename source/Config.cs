@@ -56,6 +56,9 @@ namespace LateGamePerformance
         public bool SoundListener = true;
         public bool UiThrottle = true;
         public bool AnimatorCulling = true;
+        // Saving only: which thread writes the snapshot down, never what is written.
+        public bool SaveSnapshot = true;
+        public bool SaveSnapshotVerify = false;
         public bool Timing = true;
         // Pacing only (how much simulation one frame may catch up after a hitch), never which ticks run.
         public bool LimitCatchUp = true;
@@ -134,6 +137,8 @@ namespace LateGamePerformance
             SoundListener = Bool(values, nameof(SoundListener), SoundListener);
             UiThrottle = Bool(values, nameof(UiThrottle), UiThrottle);
             AnimatorCulling = Bool(values, nameof(AnimatorCulling), AnimatorCulling);
+            SaveSnapshot = Bool(values, nameof(SaveSnapshot), SaveSnapshot);
+            SaveSnapshotVerify = Bool(values, nameof(SaveSnapshotVerify), SaveSnapshotVerify);
             Timing = Bool(values, nameof(Timing), Timing);
             LimitCatchUp = Bool(values, nameof(LimitCatchUp), LimitCatchUp);
             SaveTiming = Bool(values, nameof(SaveTiming), SaveTiming);
@@ -151,7 +156,7 @@ namespace LateGamePerformance
                    $"WaterMapCopy={WaterMapCopy}, SoilScans={SoilScans}, TerrainSearch={TerrainSearch}, IdleEntities={IdleEntities}) " +
                    $"HaulCacheVerify={HaulCacheVerify}, RouteMapsBackground={RouteMapsBackground}, RouteMapsMinFields={RouteMapsMinFields}, " +
                    $"RouteMapsWorkers={RouteMapsWorkers}, YielderSearchVerify={YielderSearchVerify}, PlantWaterVerify={PlantWaterVerify}, DistrictCountsVerify={DistrictCountsVerify}, " +
-                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
+                   $"WaterMapCopyVerify={WaterMapCopyVerify}, SoilScansVerify={SoilScansVerify}, TerrainSearchVerify={TerrainSearchVerify}, WaterRendering={WaterRendering}, BackgroundSave={BackgroundSave}, CollectAfterSave={CollectAfterSave}, SoundListener={SoundListener}, UiThrottle={UiThrottle}, AnimatorCulling={AnimatorCulling}, SaveSnapshot={SaveSnapshot}, SaveSnapshotVerify={SaveSnapshotVerify}, Timing={Timing}, LimitCatchUp={LimitCatchUp}, SaveTiming={SaveTiming}, RecordTimings={RecordTimings}, MetricsEveryTicks={MetricsEveryTicks}, " +
                    $"GcReport={GcReport}, Diagnostics={Diagnostics}, " +
                    $"StatsEveryTicks={StatsEveryTicks}";
         }
