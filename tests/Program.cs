@@ -222,12 +222,36 @@ internal static class Program
     private static void TestHaulCacheFlush()
     {
         MethodBase tickAll = Reflect.Method("Timberborn.TickSystem.TickableSingletonService", "TickAll");
+        // CreateFeature and Activate set HaulCache's statics; put them back afterwards so later tests see what they
+        // saw before this one.
+        FieldInfo[] saved =
+        {
+            typeof(HaulCache).GetField("_active", BindingFlags.Static | BindingFlags.NonPublic),
+            typeof(HaulCache).GetField("_verify", BindingFlags.Static | BindingFlags.NonPublic),
+            typeof(HaulCache).GetField("_flushEveryTicks", BindingFlags.Static | BindingFlags.NonPublic)
+        };
+        object[] before = Array.ConvertAll(saved, field => field.GetValue(null));
+        try
+        {
+            FlushChecks(tickAll);
+        }
+        finally
+        {
+            HaulCache.Reset();
+            for (int i = 0; i < saved.Length; i++)
+            {
+                saved[i].SetValue(null, before[i]);
+            }
+        }
+    }
+
+    private static void FlushChecks(MethodBase tickAll)
+    {
         Feature haulCache = HaulCache.CreateFeature(new Config());
         Feature tickHooks = Plugin.CreateTickFeature();
         PatchSpec own = haulCache.Patches.Find(patch => patch.Prefix != null && Equals(patch.Target(), tickAll));
         Check(own != null && own.Required, "haul cache: its per-tick flush is its own required prefix on TickableSingletonService.TickAll");
         FieldInfo epoch = typeof(HaulCache).GetField("_epoch", BindingFlags.Static | BindingFlags.NonPublic);
-        FieldInfo active = typeof(HaulCache).GetField("_active", BindingFlags.Static | BindingFlags.NonPublic);
         HaulCache.Activate();
         int Flushes(params Feature[] installed)
         {
@@ -251,8 +275,6 @@ internal static class Program
         int both = Flushes(haulCache, tickHooks);
         Check(alone == 3, $"haul cache: dropped on each of 3 ticks with the TickHooks feature missing (dropped {alone} times)");
         Check(both == 3, $"haul cache: dropped once per tick with TickHooks installed too ({both} times in 3 ticks)");
-        HaulCache.Reset();
-        active.SetValue(null, false);
     }
 
     private static void TestCatchUp()

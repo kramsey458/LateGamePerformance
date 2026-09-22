@@ -24,8 +24,8 @@ get reused is the per-building part, about a third of the time.
 As a safety net, everything cached is dropped every tick. An input
 the mod does not track, such as one added by another mod, can then be out of date only within a single tick.
 (Up to 0.4.8 that interval was a setting; it is fixed now, see Settings.) The drop is the cache's own required
-hook at the start of the tick (`TickableSingletonService.TickAll`), so the cache never runs without it; up to
-0.4.26 it rode on the optional hook that also writes the stats lines.
+hook at the start of the tick (`TickableSingletonService.TickAll`), so the cache never runs without it; it used to
+ride on the optional hook that also writes the stats lines.
 
 If anything throws inside the cache, it switches itself off for the session and the game's own code runs.
 If a required game method is missing (for example after a game update), the feature does not enable at all.
