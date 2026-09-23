@@ -95,12 +95,13 @@ any difference").
 - **Stack and hosting:** plain static HTML, CSS and small vanilla JS in `docs/` on `main`, no build step. GitHub Pages
   (legacy build) serves `main` `/docs` at https://timbermods.github.io/LateGamePerformance/; merging to `main`
   publishes. `docs/.nojekyll` must stay. Pages: `index.html`, `install.html`, `troubleshooting.html`, `faq.html`,
-  `404.html`, plus `style.css`, `site.js`, `release.js`, `favicon.svg`. Fast, lightweight, mobile-friendly, no external
-  fonts or CDNs today.
+  `404.html`, plus `style.css`, `site.js`, `release.js`, `favicon.svg`, `fonts/` (Saira Semi Condensed 700/800,
+  self-hosted, OFL) and `textures/` (three procedural WebP surfaces from `make_textures.py`). Fast, lightweight,
+  mobile-friendly, no external fonts or CDNs at runtime.
 - **Site tests and CI: none.** The repo has no `.github/workflows/`, and the C# harness in `tests/`
   (`dotnet run --project tests -c Release`; 509 checks / 129 patch targets for 0.4.29, 523 / 131 for 0.4.30) checks the
-  mod against the game's assemblies and never reads `docs/`. The contracts below are therefore unenforced; the redesign
-  must keep them by hand (and could add a site check like MixedStorage's `tests/test-site.mjs` only if asked):
+  mod against the game's assemblies and never reads `docs/`. The contracts below are therefore unenforced; every site
+  change must keep them by hand (and could add a site check like MixedStorage's `tests/test-site.mjs` only if asked):
   1. `docs/release.js` is the shared Timbermods release script, byte-identical to MixedStorage's copy (SHA-1
      `f771fa55eea5db13c26043fdde5a374d1944aa0b`). **Replace it with a newer shared copy, never edit it.** It lives at
      `docs/release.js` here (not `assets/`); TECHNICAL.md's Website section documents that path.
@@ -112,7 +113,7 @@ any difference").
      `localStorage` (`tbmods.release.v1.timbermods/LateGamePerformance`), writes only text and `href`.
   3. The HTML keeps working fallbacks: download links point at `/releases/latest`; the version (`0.4.29`), tag, ZIP
      name `LateGamePerformance-0.4.29.zip` and SHA-256 `652e6f52…a252f6e3e` are written in by hand. Current uses:
-     index hero eyebrow and Download button, install step 3 and `#checksum` (`Get-FileHash` line and hash), the
+     the index hero and closing Download buttons (`tag`), install step 3 and `#checksum` (`Get-FileHash` line and hash), the
      install and troubleshooting `loading.` log lines, troubleshooting `#crash`.
   4. Text written for one build carries `data-release-pinned="0.4.29"`: the index hero notice, the index `#status`
      head, and the FAQ "How much faster" answer. When a new Latest ships, rewrite that text and bump the attribute.
@@ -120,7 +121,8 @@ any difference").
      `noindex`, and loads no scripts except the theme snippet.
   6. Theme: an inline head snippet reads `localStorage` key `lgp-theme` into `data-theme` before CSS loads; `site.js`
      drives `#theme-toggle` (label "Dark mode"/"Light mode") and the chart tooltips (`.chart-card .tip`, rows with
-     `data-name`/`data-value`/`data-color`/`data-desc`). Everything works without `site.js`: charts have direct labels
+     `data-name`/`data-value`/`data-color`/`data-desc`), plus the timing tower's one-time switch-on (`[data-tower]`) and
+     opening the `<details>` a link's hash points at. Everything works without `site.js`: charts have direct labels
      and a "View chart data as a table" `<details>`.
   7. Inbound links that must keep resolving: README links `index.html#status`, `install.html`, `install.html#checksum`,
      `faq.html`; the site links `faq.html#same-results`, `faq.html#timing`, `install.html#gc`, `install.html#layout`,
@@ -131,11 +133,10 @@ any difference").
 - **Sources of truth:** `README.md`, `TECHNICAL.md` (every feature, setting, log line; its Website section), the
   release notes. There is no CHANGELOG file: version history lives in the release notes and TECHNICAL.md's "new in"
   markers. Where site and README disagree, flag it.
-- **Known mismatches on the current site** (to fix in content, not to copy): the co-op startup line on
-  `install.html#multiplayer` and `faq.html#co-op` lists eleven features (no `Reachability on`) while the rest of the
-  site and 0.4.29 list twelve; the FAQ hauling-cache answer still speaks of "In 0.4.27" and "the 0.4.28 preview";
-  feature cards carry version tags ("(0.4.18)", "(0.4.27)") and several answers are version histories, against the
-  standing rule below; README says 0.4.28 was played "about half an hour" in one place and "about an hour" in another.
+- **Site and README agree** as of the Pit Crew redesign (2026-09-23): every copy of the startup line lists the twelve
+  0.4.29 features, player pages carry no version tags or version histories, and the README's played-session wording is
+  consistent. One small wording difference is left on purpose: `install.html` says "It is a young mod, so try it on a
+  copy of your save" where the README says "It is still a young mod, so try it on a copy of a save first".
 - **Standing rules:** player pages describe the mod **as it is now**; version history belongs in the release notes and
   TECHNICAL.md, keeping only upgrade facts players need (close the game, delete the old folder, co-op updates
   together; an old `.cfg` with `HaulCache`, `HaulCacheFlushEveryTicks`, `RouteMaps`, `YielderSearch` or
@@ -172,10 +173,12 @@ any difference").
 
 ## Evidence on Hand
 
-- **Images:** only `docs/favicon.svg`. The hero's inline SVG frame-time line is labelled "Illustration only, not real
-  data" and must stay labelled that way (or be removed); it may never be presented as a measurement. **No in-game
-  screenshots, no video, no profiler captures, no frame-rate graphs exist.** Leave marked slots for the maintainer's
-  own shots (a big colony, the settings page, a `Player.log` excerpt) rather than faking any.
+- **Images:** `docs/favicon.svg` and three procedural textures (`docs/textures/concrete.webp`, `asphalt.webp`,
+  `board.webp`, each with a provenance sidecar). The old hero's illustrative frame-time line was removed in the
+  redesign; the hero now shows the pit board with one measured figure, and no drawn curve that isn't real data may
+  return. **No in-game screenshots, no video, no profiler captures, no frame-rate graphs exist.** The site has no image
+  slots; add the maintainer's own shots (a big colony, the settings page, a `Player.log` excerpt) only when he
+  provides them, never faked.
 - **Real numbers, test harness** (not a live game): tree search in a model forest of 2,000 marked trees with 50 grown,
   2,000 path lookups vs 51; 420 route maps on a 22,600-tile road network, about 1.8 s one at a time vs about 0.23 s on 7
   workers (harness network is heavier than a real colony's); 9.5 million route-map nodes compared, all identical; 0
