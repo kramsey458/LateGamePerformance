@@ -1,0 +1,836 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-23T19:41:05+00:00",
+  "title": "Design System: Late Game Performance",
+  "extensions": {
+    "colorMeta": {
+      "concrete-ground": {
+        "role": "neutral",
+        "displayName": "Pit-Lane Concrete",
+        "canonical": "#dcd9d2",
+        "oklch": "oklch(88.6% 0.010 87.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 87.5)",
+          "oklch(26.4% 0.003 87.5)",
+          "oklch(37.9% 0.004 87.5)",
+          "oklch(49.3% 0.005 87.5)",
+          "oklch(60.7% 0.007 87.5)",
+          "oklch(72.1% 0.008 87.5)",
+          "oklch(83.6% 0.009 87.5)",
+          "oklch(95.0% 0.009 87.5)"
+        ],
+        "cssVar": "--ground (light)"
+      },
+      "asphalt-ink": {
+        "role": "neutral",
+        "displayName": "Asphalt Ink",
+        "canonical": "#16181b",
+        "oklch": "oklch(20.8% 0.007 258.4)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 258.4)",
+          "oklch(26.4% 0.006 258.4)",
+          "oklch(37.9% 0.005 258.4)",
+          "oklch(49.3% 0.004 258.4)",
+          "oklch(60.7% 0.003 258.4)",
+          "oklch(72.1% 0.003 258.4)",
+          "oklch(83.6% 0.002 258.4)",
+          "oklch(95.0% 0.002 258.4)"
+        ],
+        "cssVar": "--ink, --rule-strong (light); --paint-ink"
+      },
+      "concrete-muted-ink": {
+        "role": "neutral",
+        "displayName": "Concrete Muted Ink",
+        "canonical": "#45484d",
+        "oklch": "oklch(40.1% 0.009 260.7)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 260.7)",
+          "oklch(26.4% 0.008 260.7)",
+          "oklch(37.9% 0.009 260.7)",
+          "oklch(49.3% 0.008 260.7)",
+          "oklch(60.7% 0.007 260.7)",
+          "oklch(72.1% 0.006 260.7)",
+          "oklch(83.6% 0.004 260.7)",
+          "oklch(95.0% 0.003 260.7)"
+        ],
+        "cssVar": "--muted (light)"
+      },
+      "concrete-rule": {
+        "role": "neutral",
+        "displayName": "Concrete Rule",
+        "canonical": "#b3afa6",
+        "oklch": "oklch(75.5% 0.013 86.8)",
+        "tonalRamp": [
+          "oklch(15.0% 0.004 86.8)",
+          "oklch(26.4% 0.006 86.8)",
+          "oklch(37.9% 0.007 86.8)",
+          "oklch(49.3% 0.009 86.8)",
+          "oklch(60.7% 0.011 86.8)",
+          "oklch(72.1% 0.013 86.8)",
+          "oklch(83.6% 0.012 86.8)",
+          "oklch(95.0% 0.010 86.8)"
+        ],
+        "cssVar": "--rule (light)"
+      },
+      "pit-box-yellow": {
+        "role": "secondary",
+        "displayName": "Pit-Box Yellow",
+        "canonical": "#f2c230",
+        "oklch": "oklch(83.4% 0.158 89.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.040 89.0)",
+          "oklch(26.4% 0.050 89.0)",
+          "oklch(37.9% 0.072 89.0)",
+          "oklch(49.3% 0.094 89.0)",
+          "oklch(60.7% 0.115 89.0)",
+          "oklch(72.1% 0.137 89.0)",
+          "oklch(83.6% 0.158 89.0)",
+          "oklch(95.0% 0.136 89.0)"
+        ],
+        "cssVar": "--paint"
+      },
+      "fastest-lap-purple": {
+        "role": "primary",
+        "displayName": "Fastest-Lap Purple",
+        "canonical": "#6d4fe0",
+        "oklch": "oklch(54.3% 0.209 286.7)",
+        "tonalRamp": [
+          "oklch(15.0% 0.111 286.7)",
+          "oklch(26.4% 0.139 286.7)",
+          "oklch(37.9% 0.168 286.7)",
+          "oklch(49.3% 0.197 286.7)",
+          "oklch(60.7% 0.193 286.7)",
+          "oklch(72.1% 0.164 286.7)",
+          "oklch(83.6% 0.136 286.7)",
+          "oklch(95.0% 0.107 286.7)"
+        ],
+        "cssVar": "--bar-mod (light)"
+      },
+      "lap-link": {
+        "role": "primary",
+        "displayName": "Lap Link",
+        "canonical": "#5a3bd0",
+        "oklch": "oklch(48.5% 0.215 284.6)",
+        "tonalRamp": [
+          "oklch(15.0% 0.129 284.6)",
+          "oklch(26.4% 0.158 284.6)",
+          "oklch(37.9% 0.187 284.6)",
+          "oklch(49.3% 0.213 284.6)",
+          "oklch(60.7% 0.183 284.6)",
+          "oklch(72.1% 0.154 284.6)",
+          "oklch(83.6% 0.124 284.6)",
+          "oklch(95.0% 0.095 284.6)"
+        ],
+        "cssVar": "--link, --focus (light)"
+      },
+      "lap-link-deep": {
+        "role": "primary",
+        "displayName": "Lap Link Deep",
+        "canonical": "#3e22a8",
+        "oklch": "oklch(39.0% 0.196 281.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.140 281.9)",
+          "oklch(26.4% 0.167 281.9)",
+          "oklch(37.9% 0.193 281.9)",
+          "oklch(49.3% 0.172 281.9)",
+          "oklch(60.7% 0.145 281.9)",
+          "oklch(72.1% 0.118 281.9)",
+          "oklch(83.6% 0.091 281.9)",
+          "oklch(95.0% 0.064 281.9)"
+        ],
+        "cssVar": "--link-hover (light)"
+      },
+      "timing-green": {
+        "role": "tertiary",
+        "displayName": "Timing Green",
+        "canonical": "#1d7442",
+        "oklch": "oklch(49.6% 0.113 153.3)",
+        "tonalRamp": [
+          "oklch(15.0% 0.066 153.3)",
+          "oklch(26.4% 0.082 153.3)",
+          "oklch(37.9% 0.097 153.3)",
+          "oklch(49.3% 0.113 153.3)",
+          "oklch(60.7% 0.098 153.3)",
+          "oklch(72.1% 0.083 153.3)",
+          "oklch(83.6% 0.067 153.3)",
+          "oklch(95.0% 0.052 153.3)"
+        ],
+        "cssVar": "--good (light)"
+      },
+      "timing-amber": {
+        "role": "tertiary",
+        "displayName": "Timing Amber",
+        "canonical": "#8a5d00",
+        "oklch": "oklch(51.4% 0.108 76.1)",
+        "tonalRamp": [
+          "oklch(15.0% 0.061 76.1)",
+          "oklch(26.4% 0.076 76.1)",
+          "oklch(37.9% 0.090 76.1)",
+          "oklch(49.3% 0.105 76.1)",
+          "oklch(60.7% 0.096 76.1)",
+          "oklch(72.1% 0.081 76.1)",
+          "oklch(83.6% 0.066 76.1)",
+          "oklch(95.0% 0.051 76.1)"
+        ],
+        "cssVar": "--amber (light)"
+      },
+      "signal-red": {
+        "role": "tertiary",
+        "displayName": "Signal Red",
+        "canonical": "#a8241c",
+        "oklch": "oklch(47.9% 0.169 28.8)",
+        "tonalRamp": [
+          "oklch(15.0% 0.102 28.8)",
+          "oklch(26.4% 0.126 28.8)",
+          "oklch(37.9% 0.149 28.8)",
+          "oklch(49.3% 0.167 28.8)",
+          "oklch(60.7% 0.143 28.8)",
+          "oklch(72.1% 0.120 28.8)",
+          "oklch(83.6% 0.097 28.8)",
+          "oklch(95.0% 0.074 28.8)"
+        ],
+        "cssVar": "--warn (light)"
+      },
+      "game-grey": {
+        "role": "neutral",
+        "displayName": "Game Grey",
+        "canonical": "#6f7379",
+        "oklch": "oklch(55.4% 0.010 258.4)",
+        "tonalRamp": [
+          "oklch(15.0% 0.005 258.4)",
+          "oklch(26.4% 0.007 258.4)",
+          "oklch(37.9% 0.008 258.4)",
+          "oklch(49.3% 0.010 258.4)",
+          "oklch(60.7% 0.010 258.4)",
+          "oklch(72.1% 0.008 258.4)",
+          "oklch(83.6% 0.007 258.4)",
+          "oklch(95.0% 0.005 258.4)"
+        ],
+        "cssVar": "--bar-game (light)"
+      },
+      "asphalt-ground": {
+        "role": "neutral",
+        "displayName": "Asphalt Ground",
+        "canonical": "#141619",
+        "oklch": "oklch(19.9% 0.007 258.4)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 258.4)",
+          "oklch(26.4% 0.006 258.4)",
+          "oklch(37.9% 0.005 258.4)",
+          "oklch(49.3% 0.004 258.4)",
+          "oklch(60.7% 0.003 258.4)",
+          "oklch(72.1% 0.003 258.4)",
+          "oklch(83.6% 0.002 258.4)",
+          "oklch(95.0% 0.002 258.4)"
+        ],
+        "cssVar": "--ground (dark); --asphalt (light)"
+      },
+      "chalk-ink": {
+        "role": "neutral",
+        "displayName": "Chalk Ink",
+        "canonical": "#e9e7e1",
+        "oklch": "oklch(92.8% 0.008 91.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.002 91.5)",
+          "oklch(26.4% 0.002 91.5)",
+          "oklch(37.9% 0.003 91.5)",
+          "oklch(49.3% 0.004 91.5)",
+          "oklch(60.7% 0.005 91.5)",
+          "oklch(72.1% 0.006 91.5)",
+          "oklch(83.6% 0.007 91.5)",
+          "oklch(95.0% 0.008 91.5)"
+        ],
+        "cssVar": "--ink, --rule-strong (dark)"
+      },
+      "asphalt-muted-ink": {
+        "role": "neutral",
+        "displayName": "Asphalt Muted Ink",
+        "canonical": "#aeb2b8",
+        "oklch": "oklch(76.2% 0.010 258.3)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 258.3)",
+          "oklch(26.4% 0.004 258.3)",
+          "oklch(37.9% 0.005 258.3)",
+          "oklch(49.3% 0.007 258.3)",
+          "oklch(60.7% 0.008 258.3)",
+          "oklch(72.1% 0.009 258.3)",
+          "oklch(83.6% 0.009 258.3)",
+          "oklch(95.0% 0.007 258.3)"
+        ],
+        "cssVar": "--muted (dark)"
+      },
+      "asphalt-rule": {
+        "role": "neutral",
+        "displayName": "Asphalt Rule",
+        "canonical": "#33373d",
+        "oklch": "oklch(33.5% 0.012 258.4)",
+        "tonalRamp": [
+          "oklch(15.0% 0.009 258.4)",
+          "oklch(26.4% 0.011 258.4)",
+          "oklch(37.9% 0.011 258.4)",
+          "oklch(49.3% 0.010 258.4)",
+          "oklch(60.7% 0.008 258.4)",
+          "oklch(72.1% 0.006 258.4)",
+          "oklch(83.6% 0.005 258.4)",
+          "oklch(95.0% 0.003 258.4)"
+        ],
+        "cssVar": "--rule (dark); --chalk-rule"
+      },
+      "fastest-lap-purple-dark": {
+        "role": "primary",
+        "displayName": "Fastest-Lap Purple (dark)",
+        "canonical": "#a893ff",
+        "oklch": "oklch(72.7% 0.154 291.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.047 291.0)",
+          "oklch(26.4% 0.069 291.0)",
+          "oklch(37.9% 0.090 291.0)",
+          "oklch(49.3% 0.111 291.0)",
+          "oklch(60.7% 0.132 291.0)",
+          "oklch(72.1% 0.153 291.0)",
+          "oklch(83.6% 0.134 291.0)",
+          "oklch(95.0% 0.113 291.0)"
+        ],
+        "cssVar": "--bar-mod (dark)"
+      },
+      "lap-link-dark": {
+        "role": "primary",
+        "displayName": "Lap Link (dark; lap purple on asphalt in both themes)",
+        "canonical": "#b9a8ff",
+        "oklch": "oklch(77.9% 0.123 292.3)",
+        "tonalRamp": [
+          "oklch(15.0% 0.031 292.3)",
+          "oklch(26.4% 0.047 292.3)",
+          "oklch(37.9% 0.064 292.3)",
+          "oklch(49.3% 0.081 292.3)",
+          "oklch(60.7% 0.098 292.3)",
+          "oklch(72.1% 0.115 292.3)",
+          "oklch(83.6% 0.115 292.3)",
+          "oklch(95.0% 0.098 292.3)"
+        ],
+        "cssVar": "--link (dark); --lap"
+      },
+      "lap-link-hover-dark": {
+        "role": "primary",
+        "displayName": "Lap Link Hover (dark)",
+        "canonical": "#d6cbff",
+        "oklch": "oklch(86.8% 0.072 294.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.018 294.5)",
+          "oklch(26.4% 0.020 294.5)",
+          "oklch(37.9% 0.030 294.5)",
+          "oklch(49.3% 0.040 294.5)",
+          "oklch(60.7% 0.050 294.5)",
+          "oklch(72.1% 0.059 294.5)",
+          "oklch(83.6% 0.069 294.5)",
+          "oklch(95.0% 0.065 294.5)"
+        ],
+        "cssVar": "--link-hover (dark)"
+      },
+      "lap-focus-dark": {
+        "role": "primary",
+        "displayName": "Lap Focus (dark)",
+        "canonical": "#c3b5ff",
+        "oklch": "oklch(81.1% 0.104 292.6)",
+        "tonalRamp": [
+          "oklch(15.0% 0.026 292.6)",
+          "oklch(26.4% 0.036 292.6)",
+          "oklch(37.9% 0.050 292.6)",
+          "oklch(49.3% 0.064 292.6)",
+          "oklch(60.7% 0.078 292.6)",
+          "oklch(72.1% 0.093 292.6)",
+          "oklch(83.6% 0.101 292.6)",
+          "oklch(95.0% 0.087 292.6)"
+        ],
+        "cssVar": "--focus (dark)"
+      },
+      "lap-button-ink-dark": {
+        "role": "primary",
+        "displayName": "Lap Button Ink (dark)",
+        "canonical": "#120c2b",
+        "oklch": "oklch(18.4% 0.060 287.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.058 287.9)",
+          "oklch(26.4% 0.054 287.9)",
+          "oklch(37.9% 0.046 287.9)",
+          "oklch(49.3% 0.038 287.9)",
+          "oklch(60.7% 0.030 287.9)",
+          "oklch(72.1% 0.021 287.9)",
+          "oklch(83.6% 0.015 287.9)",
+          "oklch(95.0% 0.015 287.9)"
+        ],
+        "cssVar": "--btn-ink (dark)"
+      },
+      "timing-green-dark": {
+        "role": "tertiary",
+        "displayName": "Timing Green (dark; green on asphalt in both themes)",
+        "canonical": "#6fd79a",
+        "oklch": "oklch(80.0% 0.131 156.1)",
+        "tonalRamp": [
+          "oklch(15.0% 0.033 156.1)",
+          "oklch(26.4% 0.047 156.1)",
+          "oklch(37.9% 0.065 156.1)",
+          "oklch(49.3% 0.083 156.1)",
+          "oklch(60.7% 0.101 156.1)",
+          "oklch(72.1% 0.119 156.1)",
+          "oklch(83.6% 0.126 156.1)",
+          "oklch(95.0% 0.108 156.1)"
+        ],
+        "cssVar": "--good (dark); --lap-green"
+      },
+      "timing-amber-dark": {
+        "role": "tertiary",
+        "displayName": "Timing Amber (dark)",
+        "canonical": "#e8b54a",
+        "oklch": "oklch(80.0% 0.135 82.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.034 82.9)",
+          "oklch(26.4% 0.048 82.9)",
+          "oklch(37.9% 0.067 82.9)",
+          "oklch(49.3% 0.085 82.9)",
+          "oklch(60.7% 0.104 82.9)",
+          "oklch(72.1% 0.122 82.9)",
+          "oklch(83.6% 0.130 82.9)",
+          "oklch(95.0% 0.111 82.9)"
+        ],
+        "cssVar": "--amber (dark)"
+      },
+      "signal-red-dark": {
+        "role": "tertiary",
+        "displayName": "Signal Red (dark)",
+        "canonical": "#ff8f85",
+        "oklch": "oklch(76.8% 0.137 26.1)",
+        "tonalRamp": [
+          "oklch(15.0% 0.035 26.1)",
+          "oklch(26.4% 0.054 26.1)",
+          "oklch(37.9% 0.073 26.1)",
+          "oklch(49.3% 0.092 26.1)",
+          "oklch(60.7% 0.111 26.1)",
+          "oklch(72.1% 0.129 26.1)",
+          "oklch(83.6% 0.126 26.1)",
+          "oklch(95.0% 0.107 26.1)"
+        ],
+        "cssVar": "--warn (dark)"
+      },
+      "game-grey-dark": {
+        "role": "neutral",
+        "displayName": "Game Grey (dark)",
+        "canonical": "#8b9097",
+        "oklch": "oklch(65.1% 0.012 256.7)",
+        "tonalRamp": [
+          "oklch(15.0% 0.005 256.7)",
+          "oklch(26.4% 0.006 256.7)",
+          "oklch(37.9% 0.008 256.7)",
+          "oklch(49.3% 0.010 256.7)",
+          "oklch(60.7% 0.011 256.7)",
+          "oklch(72.1% 0.011 256.7)",
+          "oklch(83.6% 0.009 256.7)",
+          "oklch(95.0% 0.008 256.7)"
+        ],
+        "cssVar": "--bar-game (dark)"
+      },
+      "night-asphalt-panel": {
+        "role": "neutral",
+        "displayName": "Night Asphalt Panel",
+        "canonical": "#0d0f11",
+        "oklch": "oklch(16.7% 0.005 248.1)",
+        "tonalRamp": [
+          "oklch(15.0% 0.005 248.1)",
+          "oklch(26.4% 0.005 248.1)",
+          "oklch(37.9% 0.004 248.1)",
+          "oklch(49.3% 0.003 248.1)",
+          "oklch(60.7% 0.003 248.1)",
+          "oklch(72.1% 0.002 248.1)",
+          "oklch(83.6% 0.001 248.1)",
+          "oklch(95.0% 0.001 248.1)"
+        ],
+        "cssVar": "--asphalt (dark)"
+      },
+      "panel-chalk": {
+        "role": "neutral",
+        "displayName": "Panel Chalk",
+        "canonical": "#eceae4",
+        "oklch": "oklch(93.7% 0.008 91.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.002 91.5)",
+          "oklch(26.4% 0.002 91.5)",
+          "oklch(37.9% 0.003 91.5)",
+          "oklch(49.3% 0.004 91.5)",
+          "oklch(60.7% 0.005 91.5)",
+          "oklch(72.1% 0.006 91.5)",
+          "oklch(83.6% 0.007 91.5)",
+          "oklch(95.0% 0.008 91.5)"
+        ],
+        "cssVar": "--chalk"
+      },
+      "panel-chalk-muted": {
+        "role": "neutral",
+        "displayName": "Panel Chalk Muted",
+        "canonical": "#b3b6bb",
+        "oklch": "oklch(77.5% 0.008 260.7)",
+        "tonalRamp": [
+          "oklch(15.0% 0.002 260.7)",
+          "oklch(26.4% 0.003 260.7)",
+          "oklch(37.9% 0.004 260.7)",
+          "oklch(49.3% 0.005 260.7)",
+          "oklch(60.7% 0.006 260.7)",
+          "oklch(72.1% 0.007 260.7)",
+          "oklch(83.6% 0.007 260.7)",
+          "oklch(95.0% 0.006 260.7)"
+        ],
+        "cssVar": "--chalk-muted"
+      },
+      "board-slat": {
+        "role": "neutral",
+        "displayName": "Board Slat",
+        "canonical": "#1a1c1f",
+        "oklch": "oklch(22.6% 0.007 258.4)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 258.4)",
+          "oklch(26.4% 0.006 258.4)",
+          "oklch(37.9% 0.005 258.4)",
+          "oklch(49.3% 0.004 258.4)",
+          "oklch(60.7% 0.004 258.4)",
+          "oklch(72.1% 0.003 258.4)",
+          "oklch(83.6% 0.002 258.4)",
+          "oklch(95.0% 0.002 258.4)"
+        ]
+      },
+      "board-frame-steel": {
+        "role": "neutral",
+        "displayName": "Board Frame Steel",
+        "canonical": "#a9afb5",
+        "oklch": "oklch(75.1% 0.011 248.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 248.0)",
+          "oklch(26.4% 0.005 248.0)",
+          "oklch(37.9% 0.006 248.0)",
+          "oklch(49.3% 0.008 248.0)",
+          "oklch(60.7% 0.009 248.0)",
+          "oklch(72.1% 0.011 248.0)",
+          "oklch(83.6% 0.010 248.0)",
+          "oklch(95.0% 0.008 248.0)"
+        ]
+      },
+      "board-pole-steel": {
+        "role": "neutral",
+        "displayName": "Board Pole Steel",
+        "canonical": "#8f959b",
+        "oklch": "oklch(66.7% 0.011 248.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.004 248.0)",
+          "oklch(26.4% 0.006 248.0)",
+          "oklch(37.9% 0.007 248.0)",
+          "oklch(49.3% 0.009 248.0)",
+          "oklch(60.7% 0.010 248.0)",
+          "oklch(72.1% 0.011 248.0)",
+          "oklch(83.6% 0.009 248.0)",
+          "oklch(95.0% 0.007 248.0)"
+        ]
+      },
+      "board-inner-edge": {
+        "role": "neutral",
+        "displayName": "Board Inner Edge",
+        "canonical": "#5d6268",
+        "oklch": "oklch(49.4% 0.011 252.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.007 252.9)",
+          "oklch(26.4% 0.008 252.9)",
+          "oklch(37.9% 0.010 252.9)",
+          "oklch(49.3% 0.011 252.9)",
+          "oklch(60.7% 0.010 252.9)",
+          "oklch(72.1% 0.008 252.9)",
+          "oklch(83.6% 0.007 252.9)",
+          "oklch(95.0% 0.005 252.9)"
+        ]
+      },
+      "board-chalk": {
+        "role": "neutral",
+        "displayName": "Board Chalk",
+        "canonical": "#f4f2ec",
+        "oklch": "oklch(96.1% 0.008 91.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.002 91.5)",
+          "oklch(26.4% 0.002 91.5)",
+          "oklch(37.9% 0.002 91.5)",
+          "oklch(49.3% 0.004 91.5)",
+          "oklch(60.7% 0.005 91.5)",
+          "oklch(72.1% 0.006 91.5)",
+          "oklch(83.6% 0.007 91.5)",
+          "oklch(95.0% 0.008 91.5)"
+        ]
+      },
+      "board-label": {
+        "role": "neutral",
+        "displayName": "Board Label",
+        "canonical": "#c9cdd2",
+        "oklch": "oklch(84.7% 0.008 253.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.002 253.9)",
+          "oklch(26.4% 0.002 253.9)",
+          "oklch(37.9% 0.004 253.9)",
+          "oklch(49.3% 0.005 253.9)",
+          "oklch(60.7% 0.006 253.9)",
+          "oklch(72.1% 0.007 253.9)",
+          "oklch(83.6% 0.008 253.9)",
+          "oklch(95.0% 0.007 253.9)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The home page title; guide titles use clamp(2.4rem, 5.4vw, 3.8rem)."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section headings, balanced wrap. Guide h2s run clamp(1.6rem, 3vw, 2.1rem) under a hairline."
+      },
+      "pitch": {
+        "displayName": "Pitch",
+        "purpose": "The one line under the title, in Fastest-Lap Purple."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Station names, sheet titles, sub-sections."
+      },
+      "board-numeral": {
+        "displayName": "Board Numeral",
+        "purpose": "The pit board's GAME and MOD values; units in 700 at max(.55em, 1rem)."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "Chart values, proof figures (1.35rem), tooltip values (1.2rem), button labels (1.12rem)."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Table heads, station field names, nav, TOC and footer headings; mixed case."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Reading text; bold is 650."
+      },
+      "lead": {
+        "displayName": "Lead",
+        "purpose": "Hero lead at 58ch; section intros are 1.1rem in muted ink."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Exact identifiers, log lines, code blocks and the timing tower rows."
+      }
+    },
+    "shadows": [
+      {
+        "name": "board-drop",
+        "value": "inset 0 0 0 1px #5d6268, 0 18px 30px -18px rgba(0, 0, 0, .55)",
+        "purpose": "The pit board held out over the pit wall; the inset is the steel frame's inner lip."
+      },
+      {
+        "name": "pole-shading",
+        "value": "inset -4px 0 0 rgba(0, 0, 0, .18)",
+        "purpose": "The shaded side of the board's flat painted-steel pole."
+      },
+      {
+        "name": "tooltip-lift",
+        "value": "0 10px 24px -10px rgba(0, 0, 0, .6)",
+        "purpose": "Chart readouts floating over the sheet."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-crew",
+        "value": "cubic-bezier(.2, .8, .2, 1)",
+        "purpose": "The one easing for every state change."
+      },
+      {
+        "name": "button-rise",
+        "value": "transform .15s, background-color .15s; translateY(-1px) on hover",
+        "purpose": "Buttons rise 1px and step their fill on hover."
+      },
+      {
+        "name": "tower-switch-on",
+        "value": "color .3s, opacity .3s; rows start 120ms + 90ms apart; once, at 35% visible",
+        "purpose": "The timing tower's twelve rows switch on in order, like the startup line being written. Off without the script or under reduced motion."
+      },
+      {
+        "name": "faq-chevron",
+        "value": "transform .2s; rotate(180deg) when open",
+        "purpose": "FAQ and troubleshooting disclosures."
+      },
+      {
+        "name": "tooltip-fade",
+        "value": "opacity .12s",
+        "purpose": "Chart tooltips on hover or keyboard focus."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transition: none; animation: none",
+        "purpose": "prefers-reduced-motion: reduce removes every transition."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stations-lane",
+        "value": "1000px",
+        "purpose": "Stations stack with one vertical lane down the left; tower static; co-op grid one column."
+      },
+      {
+        "name": "single-column",
+        "value": "860px",
+        "purpose": "Hero, sheets, status, roster, closing go to one column; pit board caps at 460px; TOC static in two columns."
+      },
+      {
+        "name": "phone",
+        "value": "720px",
+        "purpose": "Header not sticky, nav on its own row, board rows 68px, TOC and proofs one column."
+      }
+    ],
+    "themes": {
+      "toggle": "localStorage lgp-theme ('light'|'dark') sets html[data-theme]; otherwise prefers-color-scheme; button reads 'Dark mode'/'Light mode'",
+      "textures": {
+        "concrete": "textures/concrete.webp (light ground)",
+        "asphalt": "textures/asphalt.webp (dark ground and the asphalt kit in both themes)",
+        "board": "textures/board.webp (pit board slats, 320x160 tile; 272x136 under 720px)"
+      },
+      "provenance": "docs/textures/make_textures.py, procedural, fixed seed; each .webp has a .webp.json sidecar"
+    },
+    "fonts": {
+      "display": "Saira Semi Condensed 700/800, self-hosted woff2 (OFL, docs/fonts/OFL-Saira.txt); 800 preloaded"
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Download only: purple fill, rises 1px on hover.",
+      "html": "<a class=\"ds-btn ds-btn-primary\" href=\"#\"><svg viewBox=\"0 0 18 18\" aria-hidden=\"true\"><path d=\"M9 2v10M4.5 7.5L9 12l4.5-4.5M3 15.5h12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg><span>Download v0.4.29</span></a>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:0 22px;border-radius:3px;font:800 1.12rem/1 var(--display);letter-spacing:.01em;text-decoration:none;border:2px solid transparent;transition:transform .15s cubic-bezier(.2,.8,.2,1),background-color .15s}.ds-btn svg{width:18px;height:18px}.ds-btn-primary{background:var(--bar-mod);color:var(--btn-ink)}.ds-btn-primary:hover{background:var(--link-hover);transform:translateY(-1px)}.ds-btn:focus-visible{outline:3px solid var(--focus);outline-offset:3px}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary actions: 2px ink border, band wash on hover.",
+      "html": "<a class=\"ds-btn-ghost\" href=\"#\">Install guide</a>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-btn-ghost{display:inline-flex;align-items:center;min-height:50px;padding:0 22px;border-radius:3px;font:800 1.12rem/1 var(--display);text-decoration:none;color:var(--ink);border:2px solid var(--rule-strong);background:var(--ground);transition:transform .15s cubic-bezier(.2,.8,.2,1),background-color .15s}.ds-btn-ghost:hover{background:#d2cfc8;transform:translateY(-1px)}.ds-btn-ghost:focus-visible{outline:3px solid var(--focus);outline-offset:3px}"
+    },
+    {
+      "name": "Pit Wall Navigation",
+      "kind": "nav",
+      "refersTo": "nav-link",
+      "description": "Asphalt header over a 5px yellow rule; current tab underlined in yellow; text theme toggle.",
+      "html": "<header class=\"ds-head\"><a class=\"ds-brand\" href=\"#\">Late Game Performance</a><nav class=\"ds-nav\"><a href=\"#\" aria-current=\"page\">Features</a><a href=\"#\">Install</a><a href=\"#\">FAQ</a></nav><button class=\"ds-theme\" type=\"button\">Dark mode</button></header>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-head{display:flex;align-items:center;gap:16px;min-height:64px;padding:0 20px;background:var(--asphalt);color:var(--chalk);border-bottom:5px solid var(--paint)}.ds-brand{color:var(--chalk);text-decoration:none;font:800 1.2rem/1 var(--display)}.ds-nav{display:flex;gap:2px}.ds-nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;color:var(--chalk-muted);text-decoration:none;font:700 1.02rem/1 var(--display);border-bottom:3px solid transparent}.ds-nav a:hover{color:var(--chalk)}.ds-nav a[aria-current=page]{color:var(--chalk);border-bottom-color:var(--paint)}.ds-nav a:focus-visible,.ds-theme:focus-visible{outline:3px solid var(--paint);outline-offset:3px}.ds-theme{margin-left:auto;min-height:44px;padding:0 14px;background:transparent;color:var(--chalk);border:1px solid var(--chalk-rule);border-radius:3px;font:700 .95rem/1 var(--display);cursor:pointer}.ds-theme:hover{border-color:var(--chalk-muted)}"
+    },
+    {
+      "name": "Pit Board",
+      "kind": "custom",
+      "refersTo": "pit-board",
+      "description": "The hero's one played game-vs-mod readout on a slatted board in a painted-steel frame.",
+      "html": "<div class=\"ds-board\" role=\"img\" aria-label=\"Hauler job list: game 0.94 ms, mod 0.24 ms\"><div class=\"ds-row ds-t\"><span>HAULER JOB LIST</span></div><div class=\"ds-row\"><span class=\"k\">GAME</span><span class=\"v\">0.94<small>ms</small></span></div><div class=\"ds-row ds-m\"><span class=\"k\">MOD</span><span class=\"v\">0.24<small>ms</small></span></div><div class=\"ds-row ds-f\"><span>SAME LIST · 0 DIFFERENCES</span></div></div>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-board{max-width:420px;background:repeating-linear-gradient(#1a1c1f 0 78px,#101113 78px 80px);border:8px solid #a9afb5;border-radius:5px;box-shadow:inset 0 0 0 1px #5d6268,0 18px 30px -18px rgba(0,0,0,.55);color:#f4f2ec;font-family:var(--display);font-variant-numeric:tabular-nums}.ds-row{display:grid;grid-template-columns:4.4em 1fr;align-items:center;height:80px;padding:0 18px;gap:12px}.ds-t,.ds-f{grid-template-columns:1fr}.ds-row .k{font-weight:700;letter-spacing:.08em;color:#c9cdd2}.ds-row .v{font-weight:800;font-size:3.2rem;line-height:1}.ds-row .v small{font-size:1rem;font-weight:700;margin-left:.2em;color:#c9cdd2}.ds-t span{font-weight:800;font-size:1.12rem;letter-spacing:.1em;color:var(--paint)}.ds-m .v{color:var(--lap)}.ds-f span{font-weight:700;letter-spacing:.06em;color:var(--lap-green)}"
+    },
+    {
+      "name": "Pit Box Station",
+      "kind": "custom",
+      "refersTo": "pit-box-station",
+      "description": "One of six numbered stations inside the yellow-framed pit box, crossed by its row's painted lane, with fixed Work and Checked fields.",
+      "html": "<div class=\"ds-box\"><article class=\"ds-stn\"><span class=\"ds-n\">1</span><h3>Haulers stop redoing their homework</h3><p>The mod keeps each building's jobs until something that feeds them changes.</p><dl><dt>Work</dt><dd>Kept, reused until it changes</dd><dt>Checked</dt><dd><code>HaulCacheVerify</code></dd></dl></article></div>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-box{max-width:380px;border:5px solid var(--paint);background:var(--asphalt);color:var(--chalk)}.ds-stn{padding:22px 22px 20px;background:linear-gradient(var(--paint),var(--paint)) 0 38px/100% 4px no-repeat,var(--asphalt)}.ds-n{display:grid;place-items:center;width:36px;height:36px;margin-bottom:16px;background:var(--paint);color:var(--paint-ink);font:800 1.3rem/1 var(--display);border-radius:2px}.ds-stn h3{font:700 1.32rem/1.15 var(--display);margin:0 0 .4em;color:var(--chalk)}.ds-stn p{color:var(--chalk-muted);font:400 .98rem/1.62 var(--font);margin:0 0 1em}.ds-stn dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;margin:0;border-top:1px solid var(--chalk-rule);padding-top:12px;font:400 .92rem/1.5 var(--font)}.ds-stn dt{font:700 .92rem/1.5 var(--display);color:var(--chalk-muted)}.ds-stn dd{margin:0}.ds-stn code{font-family:var(--mono);background:rgba(255,255,255,.08);padding:.08em .3em;border-radius:3px}"
+    },
+    {
+      "name": "Timing Tower",
+      "kind": "custom",
+      "refersTo": "timing-tower",
+      "description": "The startup log line as a race order; on the site its twelve rows switch on once, in order.",
+      "html": "<figure class=\"ds-tower\"><div class=\"ds-th\"><code>[LateGamePerformance]</code><b>Simulation features:</b></div><ol><li>HaulCache <span class=\"on\">on</span></li><li>RouteMaps <span class=\"on\">on</span></li><li>YielderSearch <span class=\"on\">on</span></li></ol></figure>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-tower{margin:0;max-width:400px;background:var(--asphalt);color:var(--chalk);border-top:5px solid var(--paint);font-variant-numeric:tabular-nums}.ds-th{padding:14px 18px 12px;border-bottom:1px solid var(--chalk-rule)}.ds-th code{font:.84rem var(--mono);color:var(--chalk-muted)}.ds-th b{display:block;font:800 1.2rem/1.2 var(--display);margin-top:2px}.ds-tower ol{list-style:none;margin:0;padding:6px 0;counter-reset:p}.ds-tower li{counter-increment:p;display:grid;grid-template-columns:1.8em 1fr auto;align-items:center;gap:10px;padding:5px 18px;font:.93rem var(--mono)}.ds-tower li::before{content:counter(p);font:800 1rem/1 var(--display);color:var(--chalk-muted);text-align:right}.ds-tower li:nth-child(odd){background:rgba(255,255,255,.03)}.ds-tower .on{font:800 .84rem/1 var(--display);letter-spacing:.08em;color:var(--lap-green);padding:3px 7px;border:1px solid currentColor;border-radius:2px;transition:color .3s cubic-bezier(.2,.8,.2,1),opacity .3s}.ds-tower li:hover .on{opacity:.3;color:var(--chalk-muted)}"
+    },
+    {
+      "name": "Timing Sheet",
+      "kind": "card",
+      "description": "A figure with its source line and limit: ink top rule, tabular table, mod column purple, a state word beside the colour.",
+      "html": "<div class=\"ds-sheet\"><h3>Hauler job list</h3><p class=\"src\">Played, 362 beavers, Verify every feature on.</p><table><thead><tr><th>Per request</th><th class=\"n\">Game</th><th class=\"n\">Mod</th><th>State</th></tr></thead><tbody><tr><td>Job list</td><td class=\"n\">0.94 ms</td><td class=\"n m\">0.24 ms</td><td><span class=\"st\">faster</span></td></tr></tbody></table><p class=\"src\">One part of a tick; overall tick time did not measurably drop.</p></div>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-sheet{max-width:520px;border-top:3px solid var(--rule-strong);padding-top:16px;color:var(--ink);font:400 1rem/1.62 var(--font)}.ds-sheet h3{font:700 1.32rem/1.15 var(--display);margin:0 0 .2em}.ds-sheet .src{font-size:.95rem;color:var(--muted);margin:0 0 1rem}.ds-sheet table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}.ds-sheet th,.ds-sheet td{text-align:left;padding:10px 14px 10px 0;border-bottom:1px solid var(--rule)}.ds-sheet thead th{font:700 .92rem/1.3 var(--display);color:var(--muted);border-bottom:2px solid var(--rule-strong)}.ds-sheet .n{text-align:right}.ds-sheet .m{color:var(--bar-mod);font-weight:700}.ds-sheet .st{font:700 .88rem/1 var(--display);letter-spacing:.03em;color:var(--good)}"
+    },
+    {
+      "name": "Install Step",
+      "kind": "custom",
+      "refersTo": "step-number",
+      "description": "Guide steps numbered in yellow squares under a hairline.",
+      "html": "<ol class=\"ds-steps\"><li><strong>Install Harmony and Mod Settings</strong><p>Both are required.</p></li><li><strong>Download the ZIP from Assets</strong><p>One folder in Mods.</p></li></ol>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-steps{list-style:none;padding:0;margin:0;counter-reset:s;max-width:560px;color:var(--ink);font:400 1rem/1.62 var(--font)}.ds-steps li{counter-increment:s;position:relative;padding:16px 0 14px 60px;border-top:1px solid var(--rule)}.ds-steps li::before{content:counter(s);position:absolute;left:0;top:14px;width:40px;height:40px;display:grid;place-items:center;background:var(--paint);color:var(--paint-ink);font:800 1.25rem/1 var(--display);border-radius:2px}.ds-steps strong{display:block;font:700 1.18rem/1.3 var(--display)}.ds-steps p{margin:0}"
+    },
+    {
+      "name": "Warning Notice",
+      "kind": "card",
+      "refersTo": "notice-warn",
+      "description": "Red rule and wash, only for warnings; the plain notice uses an ink rule and band wash.",
+      "html": "<div class=\"ds-notice\"><p><strong>Every co-op player needs the same version.</strong> Update together.</p></div>",
+      "css": ":host{--ground:#dcd9d2;--ink:#16181b;--muted:#45484d;--rule:#b3afa6;--rule-strong:#16181b;--band:rgba(22,24,27,.045);--link:#5a3bd0;--link-hover:#3e22a8;--paint:#f2c230;--paint-ink:#16181b;--good:#1d7442;--amber:#8a5d00;--warn:#a8241c;--bar-game:#6f7379;--bar-mod:#6d4fe0;--btn-ink:#fff;--focus:#5a3bd0;--asphalt:#141619;--chalk:#eceae4;--chalk-muted:#b3b6bb;--chalk-rule:#33373d;--lap:#b9a8ff;--lap-green:#6fd79a;--display:'Saira Semi Condensed','Arial Narrow',sans-serif;--font:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;} .ds-notice{max-width:560px;padding:14px 18px;border-top:3px solid var(--warn);background:rgba(168,36,28,.08);color:var(--ink);font:400 1rem/1.62 var(--font)}.ds-notice p{margin:0}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Pit Crew",
+    "overview": "The race and the car are the game's own; the crew only makes every stop shorter, with the parts laid out ready and many hands working at once. The site is a pit lane at dusk: poured concrete by day, asphalt by night, painted pit-box yellow marking out structure, and one colour, fastest-lap purple, reserved for the mod's result. Every figure is presented the way a pit wall presents it: a single readout with the game's number beside the mod's and a source line underneath.\n\nDensity is moderate and editorial. Body text is achromatic system-ui in comfortable measures (58–62ch), and colour lives only in paint, numbers and edges. The heavy objects (the pit board, the pit box of six stations, the timing tower, code blocks, header and footer) are set in textured asphalt in both themes, so they read as the same physical kit whichever way the lights are.\n\nThe world explicitly rejects the shared Timbermods docs template this site used to wear (cream paper, icon tiles, a grid of identical cards, pill badges, eyebrows) and the fake \"smooth line\" performance sketch: a drawn curve that looks like data but isn't.",
+    "keyCharacteristics": [
+      "Concrete (light) and asphalt (dark) grounds, each with a procedural aggregate texture from `docs/textures/make_textures.py`.",
+      "Painted yellow is structure only: rules, box lines, lanes, numbers.",
+      "Purple marks the mod's figure and the act of going (links, Download); the game's figure is grey.",
+      "Saira Semi Condensed 700/800 for headings and every number; system-ui for reading; mono for exact identifiers.",
+      "Square, painted, flat: 0–3px corners, 5px painted rules, almost no shadow.",
+      "Asphalt kit in both themes: board, pit box, tower, code, tooltips, header, footer."
+    ],
+    "rules": [
+      {
+        "name": "The Paint Is Structure Rule",
+        "body": "Yellow paints lines, lanes, frames and numbers. It never fills a panel, never tints text on concrete, and never marks a result.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fastest Lap Rule",
+        "body": "Purple is the mod's figure and the way forward (links, Download). The game's figure is always grey, never red: the game is not the villain, it is the race.",
+        "section": "colors"
+      },
+      {
+        "name": "The Colour Carries A Word Rule",
+        "body": "Green, amber and red always sit beside the word that says what they mean (\"faster\", \"same\", \"on\", \"tested\", \"open\", a warning heading). Colour alone never states a result.",
+        "section": "colors"
+      },
+      {
+        "name": "The Numbers Are Display Rule",
+        "body": "Every figure a reader compares is set in Saira at 800 with tabular numerals; tables use `font-variant-numeric: tabular-nums` throughout.",
+        "section": "typography"
+      },
+      {
+        "name": "The Board Speaks In Capitals Rule",
+        "body": "Uppercase with open tracking (0.06–0.1em) belongs to the pit board's rows and the tower's \"on\" tags, where it is the native voice of the object. Nowhere else on the site is set in spaced capitals.",
+        "section": "typography"
+      },
+      {
+        "name": "The Painted Not Lifted Rule",
+        "body": "Panels, stations, sheets, notices and buttons sit flat on the ground. A shadow is permitted only for an object that stands off it (the board) or floats over content (a tooltip).",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** pair every figure with its source line and its limit, and show the game's number beside the mod's.",
+      "**Do** keep yellow (#f2c230) to painted structure: 5px section and frame rules, lanes, station and step numbers, the current-tab underline.",
+      "**Do** colour the mod's figure purple and the game's figure grey, and put the state word next to any green, amber or red.",
+      "**Do** set the pit board, pit box, timing tower, code blocks, tooltips, header and footer in asphalt in both themes.",
+      "**Do** set every compared number in Saira Semi Condensed 800 with tabular numerals, and keep body text achromatic system-ui.",
+      "**Do** keep nav, button and disclosure targets at 44px or more, and the 3px focus outline at 3px offset (yellow on asphalt chrome).",
+      "**Do** give every chart direct labels, a keyboard-reachable tooltip and a table view."
+    ],
+    "donts": [
+      "**Don't** return to the Timbermods docs template: cream paper, icon tiles, grids of identical cards, pill badges, eyebrows or kickers above headings.",
+      "**Don't** draw a performance curve or chart that is not real measured data.",
+      "**Don't** use yellow as a panel fill, as text on concrete, or to mark a result.",
+      "**Don't** colour the game's figure red or treat it as a failure; red is only for warnings.",
+      "**Don't** use spaced uppercase outside the pit board and the tower's \"on\" tags.",
+      "**Don't** add shadows to panels, cards or buttons; only the board and tooltips stand off the page.",
+      "**Don't** use Timberborn art or screenshots."
+    ]
+  }
+}
