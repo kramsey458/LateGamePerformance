@@ -1868,8 +1868,8 @@ comment in the file lists them. The HTML keeps the values of the last release as
 cached in the browser for 30 minutes.
 
 **What is not automatic:** text that describes one specific build, such as the tested and not-yet-verified lists
-and "played as 0.4.8". Those elements carry `data-release-pinned` with the version they were written for (0.4.27
-at the time of writing). When the newest release is a different version, the script adds a note saying which
+and "played as 0.4.8". Those elements carry `data-release-pinned` with the version they were written for (the
+same version as the static fallbacks in the HTML). When the newest release is a different version, the script adds a note saying which
 version the text was written for. Rewrite the text for the new release and
 change the attribute. The fallback values in the HTML can be refreshed then too, but they only show without the
 script.
