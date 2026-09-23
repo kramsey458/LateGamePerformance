@@ -77,3 +77,22 @@
   window.addEventListener('DOMContentLoaded', openTarget);
   if (document.readyState !== 'loading') openTarget();
 })();
+
+// The timing tower on the home page: its twelve rows switch on in order once, like the startup line being written,
+// the first time it scrolls into view. Without this file, or with reduced motion, every row simply reads "on".
+(function () {
+  'use strict';
+  var tower = document.querySelector('[data-tower]');
+  if (!tower || !('IntersectionObserver' in window)) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var rows = tower.querySelectorAll('li');
+  tower.classList.add('is-armed');
+  var io = new IntersectionObserver(function (entries) {
+    if (!entries.some(function (e) { return e.isIntersecting; })) return;
+    io.disconnect();
+    Array.prototype.forEach.call(rows, function (row, i) {
+      setTimeout(function () { row.classList.add('is-live'); }, 120 + i * 90);
+    });
+  }, { threshold: 0.35 });
+  io.observe(tower);
+})();
