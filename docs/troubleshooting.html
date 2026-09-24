@@ -54,15 +54,15 @@
     <thead><tr><th scope="col">Message</th><th scope="col">Meaning</th></tr></thead>
     <tbody>
       <tr><td><code><span data-release="version">0.4.30</span> loading.</code></td><td>The mod started. Normal.</td></tr>
-      <tr><td><code>HaulCache: enabled (9/9 patches).</code> and similar for <code>RouteMaps</code>, <code>YielderSearch</code></td><td>A feature installed all its hooks. Normal.</td></tr>
-      <tr><td><code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on, Reachability on.</code></td><td>All twelve features that affect the simulation are running. Normal, and it should read the same for every player.</td></tr>
+      <tr><td><code>HaulCache: enabled (9/9 patches).</code> and similar for <code>RouteMaps</code>, <code>YielderSearch</code></td><td>A feature started. Normal.</td></tr>
+      <tr><td><code>Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on, WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on, Reachability on.</code></td><td>All twelve features that affect the simulation are running. Normal, and the same for every player.</td></tr>
       <tr><td><code>Simulation features: … OFF …</code></td><td>A feature could not start. <a href="#off">What to do</a>.</td></tr>
       <tr><td><code>… required patch '…' failed … Feature disabled; the game runs unmodified for this part.</code></td><td>The reason a feature could not start. <a href="#off">What to do</a>.</td></tr>
       <tr><td><code>… failed and turned itself off for this session: …</code></td><td>A feature hit an unexpected error and switched itself off. <a href="#failed">What to do</a>.</td></tr>
       <tr><td><code>Simulation features: … OFF … turned itself off during this session after an error …</code></td><td>The startup line, said again after a feature switched itself off, with that feature <code>OFF</code>. <a href="#failed">What to do</a>.</td></tr>
-      <tr><td><code>… could not be built on the first try; it was built again on the main thread …</code></td><td>A route or terrain map failed on a worker thread and the main thread built it instead. The feature stays on and every player keeps the same maps. <a href="#report">Report it</a>.</td></tr>
+      <tr><td><code>… could not be built on the first try; it was built again on the main thread …</code></td><td>A route or terrain map failed on a worker thread, and the main thread built it instead. The feature stays on. <a href="#report">Report it</a>.</td></tr>
       <tr><td><code>GC: incremental=True</code> or <code>False</code></td><td>Whether memory clean-ups are spread out. <a href="#gc-off">If False</a>.</td></tr>
-      <tr><td><code>Settings: '…' is ignored. It is no longer a setting…</code></td><td>An old settings file has a key that no longer exists. <a href="#ignored">Harmless</a>.</td></tr>
+      <tr><td><code>Settings: '…' is ignored. It is no longer a setting…</code></td><td>An older settings file has a key the mod doesn't use. <a href="#ignored">Harmless</a>.</td></tr>
       <tr><td><code>Last 1000 ticks. Timing: …</code>, <code>HaulCache: …</code>, <code>RouteMaps: …</code>, <code>YielderSearch: …</code></td><td>Stats lines. Normal. <a href="faq.html#timing">What they show</a>.</td></tr>
       <tr><td><code>Save: … ms total = …</code></td><td>One line per save, with the time of each stage. Normal.</td></tr>
     </tbody>
@@ -94,8 +94,8 @@
     <div class="answer">
       <ul>
         <li>Make sure you're reading the right session. The log is overwritten each launch, and the previous one is <code>Player-prev.log</code>.</li>
-        <li>Check the mod list near the top of the log. <code>Late Game Performance</code> should be listed. If it isn't, it wasn't enabled, or you didn't restart after enabling it.</li>
-        <li>If it's listed but the <code>loading.</code> line is missing, check the game didn't fail to load the mod's DLL further down the log, and <a href="#report">report it</a> with that log.</li>
+        <li>Check the mod list near the top of the log. If <code>Late Game Performance</code> isn't there, it wasn't enabled, or you didn't restart after enabling it.</li>
+        <li>If it's listed but the <code>loading.</code> line is missing, look further down for an error loading the mod, and <a href="#report">report it</a> with the log.</li>
       </ul>
     </div>
   </details>
@@ -103,17 +103,21 @@
   <details class="q" id="crash">
     <summary>The game crashes while loading</summary>
     <div class="answer">
-      <p>Use the latest release. Version 0.4.3 is broken and crashes the game while loading; if that is what you have, replace it. If you are on <span data-release="version">0.4.30</span> and it still crashes, <a href="#report">report it</a> with <code>Player.log</code>, and try the game once with only Harmony, Mod Settings and this mod enabled.</p>
+      <ol>
+        <li>Use the latest release. Version 0.4.3 crashes the game while loading, so replace it.</li>
+        <li>Still crashing on <span data-release="version">0.4.30</span>? Try the game once with only Harmony, Mod Settings and this mod enabled.</li>
+        <li><a href="#report">Report it</a> with <code>Player.log</code>.</li>
+      </ol>
     </div>
   </details>
 
   <details class="q" id="off">
     <summary>The startup line says a feature is <code>OFF</code></summary>
     <div class="answer">
-      <p>A game method the feature needs was missing or different, most often after a game update, so the feature did not start and this computer runs the game's own code for that part. The lines just above the summary say which patch failed.</p>
+      <p>Something the feature needs is missing or changed in the game, usually after a game update. The feature didn't start, and this computer runs the game's own code for that part. The lines just above say which part failed.</p>
       <ul>
-        <li><strong>HaulCache or YielderSearch OFF:</strong> nothing is lost except the speed-up. Both give exactly the game's results, so one of them being off on one computer changes nothing about the simulation.</li>
-        <li><strong>RouteMaps or TerrainSearch OFF on one computer:</strong> this is the case worth acting on in multiplayer, because with either one off, that computer can pick a different route from the other players. Check that every player is on the same game version and the same mod version, then compare everyone's startup line.</li>
+        <li><strong>HaulCache or YielderSearch OFF:</strong> only the speed-up is lost. Both give the game's own results, so the simulation is the same.</li>
+        <li><strong>RouteMaps or TerrainSearch OFF on one computer:</strong> in multiplayer, that computer can pick a different route from the others. Check that every player has the same game and mod version, then compare everyone's startup line.</li>
         <li>Either way, <a href="#report">report it</a> with the log, so it can be fixed for that game version.</li>
       </ul>
     </div>
@@ -122,7 +126,12 @@
   <details class="q" id="failed">
     <summary>A log line says a feature "failed and turned itself off for this session"</summary>
     <div class="answer">
-      <p>The feature hit an unexpected error, so it switched itself off and the game's own code took over for the rest of the session. The game shows a dialog saying so, and <code>Player.log</code> repeats the <code>Simulation features:</code> line with that feature <code>OFF</code> at once, on every stats interval and in each new game. In single player nothing is lost but speed. In multiplayer the other players may still be running the mod's code for that part, so every player should quit and restart the game before playing on together; the feature is back after a restart. Either way, <a href="#report">report it</a> with the whole line, including the error text that follows it, and in multiplayer include everyone's log.</p>
+      <p>The feature hit an unexpected error and switched itself off for the rest of the session. The game's own code runs instead, and a dialog says so.</p>
+      <ol>
+        <li><strong>Single player:</strong> play on. Nothing is lost but speed.</li>
+        <li><strong>Multiplayer:</strong> every player quits and restarts the game before playing on together. The feature is back after a restart.</li>
+        <li><a href="#report">Report it</a> with the whole line, including the error text after it. In multiplayer, include everyone's log.</li>
+      </ol>
     </div>
   </details>
 
@@ -131,9 +140,8 @@
     <div class="answer">
       <ul>
         <li>It targets large colonies. A small one has little repeated work to remove.</li>
-        <li>Open the <code>Timing:</code> line (<a href="faq.html#timing">what it shows</a>). If <strong>everything else</strong> is most of the main thread's time, that is rendering, animation and Unity itself, which this mod does not touch. A frame rate cap then gives the simulation more of each second, because the per-frame cost is paid less often.</li>
-        <li>If the freezes you see are about once a minute and last most of a second, tick <a href="install.html#gc">Incremental garbage collection</a>. Check that the startup line says <code>GC: incremental=True</code>.</li>
-        <li>How much the tree search saves depends on your forest: a lot when most marked trees are still growing, nothing when every marked tree is grown.</li>
+        <li>Check the <code>Timing:</code> line (<a href="faq.html#timing">what it shows</a>). If <strong>everything else</strong> takes most of the main thread's time, that is mostly rendering and Unity itself, which this mod can't speed up. A frame-rate cap then gives the simulation more of each second.</li>
+        <li>Freezes of most of a second, about once a minute? Tick <a href="install.html#gc">Incremental garbage collection</a>, restart, and check the startup line says <code>GC: incremental=True</code>.</li>
       </ul>
     </div>
   </details>
@@ -142,10 +150,10 @@
     <summary>The startup line says <code>GC: incremental=False</code></summary>
     <div class="answer">
       <ul>
-        <li><strong>You haven't ticked it.</strong> It is a setting: <strong>Mods &gt; Late Game Performance &gt; Incremental garbage collection</strong>. See <a href="install.html#gc">how</a>.</li>
-        <li><strong>You ticked it but haven't restarted.</strong> Unity reads the choice before any mod loads, so it takes effect the next time the game starts.</li>
-        <li><strong>The file could not be written.</strong> The log then has a line starting <code>GC: could not change</code> or <code>GC: … was not found</code>. Close the game and add the line <code>gc-max-time-slice=3</code> to <code>Timberborn_Data\boot.config</code> in the game's install folder by hand (a read-only install folder is the usual cause).</li>
-        <li><strong>A game update or Steam's file check put the original file back.</strong> If the box is ticked, the mod puts the line back at the next start and logs <code>Putting it back</code>. Restart once more.</li>
+        <li><strong>You haven't ticked it.</strong> Tick <strong>Mods → Late Game Performance → Incremental garbage collection</strong> (<a href="install.html#gc">how</a>).</li>
+        <li><strong>You ticked it but haven't restarted.</strong> It takes effect the next time the game starts.</li>
+        <li><strong>The file couldn't be written.</strong> The log has a line starting <code>GC: could not change</code> or <code>GC: … was not found</code>. Close the game and add the line <code>gc-max-time-slice=3</code> to <code>Timberborn_Data\boot.config</code> in the game's install folder by hand.</li>
+        <li><strong>A game update or Steam's file check restored the original file.</strong> If the box is ticked, the mod adds the line again at the next start and logs <code>Putting it back</code>. Restart once more.</li>
       </ul>
     </div>
   </details>
@@ -153,14 +161,14 @@
   <details class="q" id="notice">
     <summary>A message about garbage collection appears in the main menu</summary>
     <div class="answer">
-      <p>That is the reminder that incremental collection is off. It offers <strong>Turn it on</strong> or <strong>Not now</strong>, and it asks only once: <strong>Not now</strong> is remembered, even after you update the mod. It does not appear when the line is already in <code>boot.config</code> and only a restart is missing. To turn it on later, tick <strong>Incremental garbage collection</strong> on the mod's settings page.</p>
+      <p>It says incremental collection is off and offers <strong>Turn it on</strong> or <strong>Not now</strong>. It asks only once. To turn it on later, tick <strong>Mods → Late Game Performance → Incremental garbage collection</strong>.</p>
     </div>
   </details>
 
   <details class="q" id="ignored">
     <summary>The log says a setting "is ignored. It is no longer a setting"</summary>
     <div class="answer">
-      <p>Your <code>LateGamePerformance.cfg</code> is from an older version and still has one of the keys <code>HaulCache</code>, <code>HaulCacheFlushEveryTicks</code>, <code>RouteMaps</code>, <code>YielderSearch</code> or <code>PathFollowVerify</code>. They are ignored and harmless: those features are always on (or gone), the same for everyone. You can delete those lines from the file. To run without one of them, disable the mod.</p>
+      <p>Your <code>LateGamePerformance.cfg</code> is from an older version and has one of the keys <code>HaulCache</code>, <code>HaulCacheFlushEveryTicks</code>, <code>RouteMaps</code> or <code>YielderSearch</code>. It is ignored and harmless: those features are always on, the same for everyone. You can delete the line.</p>
     </div>
   </details>
 
@@ -168,9 +176,9 @@
     <summary>The game got slower after I changed a setting</summary>
     <div class="answer">
       <ul>
-        <li>The verify settings (<code>HaulCacheVerify = true</code>, <code>YielderSearchVerify = true</code>, the <strong>Verify every feature</strong> box and the others) run the game's own code as well and compare. They are slower than no mod and are for testing only. Set them back to <code>false</code>, or untick the boxes.</li>
-        <li><code>RecordTimings = true</code> adds two stopwatch calls around every component tick, so the game runs a little slower while it is on. Set it back to <code>false</code> after a profiling session.</li>
-        <li>The <strong>Diagnostics timers</strong> box (<code>Diagnostics = true</code>) adds overhead to hot code. Switch it off again after collecting numbers.</li>
+        <li><strong>The verify settings</strong> (the <strong>Verify …</strong> boxes and the <code>…Verify</code> keys) run the game's own code as well, so they are slower than no mod. Untick the boxes, or set the keys back to <code>false</code>.</li>
+        <li><code>RecordTimings = true</code> makes the game run a little slower. Set it back to <code>false</code> after a profiling session.</li>
+        <li>The <strong>Diagnostics timers</strong> box (<code>Diagnostics = true</code>) adds a little overhead. Untick it after collecting numbers.</li>
       </ul>
     </div>
   </details>
@@ -179,10 +187,9 @@
     <summary>Multiplayer: the players' startup lines or versions differ</summary>
     <div class="answer">
       <ul>
-        <li>Every player must run the <strong>same version</strong> of the mod and the same game version. Nothing in the settings file affects the simulation, so there is nothing else to match.</li>
+        <li>Every player must run the <strong>same version</strong> of the mod and the same game version. Nothing else has to match (<a href="install.html#multiplayer">why</a>).</li>
         <li>Each player's <code>Simulation features:</code> line should read the same. If one says <code>OFF</code>, see <a href="#off">above</a>.</li>
-        <li>Garbage collection, thread counts, the timing options and the verify settings may differ between players. They do not affect the simulation.</li>
-        <li>If games go out of step (a desync), keep <code>Player.log</code> from every player and <a href="#report">report it</a> with the mod list of each player. Also say whether the fault happens without this mod.</li>
+        <li>If games go out of step (a desync), keep every player's <code>Player.log</code> and <a href="#report">report it</a> with each player's mod list. Say whether it also happens without this mod.</li>
       </ul>
     </div>
   </details>

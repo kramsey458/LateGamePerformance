@@ -162,7 +162,8 @@ any difference").
 
 - **Voice:** a fellow player explaining a useful mod. Clear, exact, calm, never hype. "Straight answers, including the
   ones that aren't flattering." Numbers only where they were measured, each with where it came from (test harness or a
-  named played session) and what it does not promise.
+  named played session) and what it does not promise. Short and plain: one idea per sentence, each thing said once, no
+  internals and no history (see CLAUDE.md, *Writing README and website text*).
 - **No official Timberborn logos or key art.** The game's own item icons are allowed where used; the current site uses
   none, and the favicon is the mod's own frame-time mark (`docs/favicon.svg`: purple tile, spiky line flattening out).
 - **License:** MIT (the mod's code, docs and site). Credit Mechanistry for any game icons used.
