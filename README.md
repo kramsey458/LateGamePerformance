@@ -25,9 +25,9 @@ In a big late-game colony the game does the same work again and again: finding j
 
 ## What to expect
 
-- **0.4.29 is the latest release** and the recommended download. It was played as 0.4.28, the same code plus one walking replacement that gained nothing and was removed, in two sessions in a 362-beaver colony: saves froze for 325 to 430 ms instead of 0.8 to 1.3 s on an earlier build of this mod, and with **Verify every feature** ticked every verify setting that ran reported 0 differences from the game's own code (the hauling lists took 0.24 ms per request against the game's 0.94 ms). The overall tick time did not measurably drop in that short session. 509 automated checks pass, including 129 patch targets.
+- **0.4.30 is the latest release** and the recommended download. It has been played, on a second computer whose logs have not been read yet. It keeps up to 32 terrain searches by start tile (at most 32 MB, the same on every computer) for the need picks of about 100 ms seen in the verify session, compiles its search loop, and accepts BeaverBuddies MultiColony's newer saving code after a review. 523 automated checks pass, including 131 patch targets.
+- The build before it was played as 0.4.28, the same code as 0.4.29 plus one walking replacement that gained nothing and was removed, in two sessions in a 362-beaver colony: saves froze for 325 to 430 ms instead of 0.8 to 1.3 s on an earlier build of this mod, and with **Verify every feature** ticked every verify setting reported 0 differences from the game's own code, the save snapshot included (the hauling lists took 0.24 ms per request against the game's 0.94 ms). The overall tick time did not measurably drop in that short session.
 - Earlier builds were played in a late-game save of about 350 beavers: noticeably fewer lag spikes, then reported as working well and as working amazingly well.
-- **0.4.30 is a preview**, not yet played. It keeps up to 32 terrain searches by start tile (at most 32 MB, the same on every computer) for the need picks of about 100 ms seen in the verify session, compiles its search loop, and accepts BeaverBuddies MultiColony's newer saving code after a review. 523 automated checks pass, including 131 patch targets.
 - Incremental garbage collection, in one 35-minute multiplayer session on two computers: 39 freezes with a median of 675 ms (about 30 s in total) on the computer without it, one collection frame over 50 ms on the computer with it.
 - It is aimed at large colonies. A small colony has little repeated work to remove, so you are unlikely to notice much.
 - How much you gain depends on your colony and your computer. There is no controlled frame rate benchmark yet.
@@ -48,22 +48,22 @@ One difference is documented: route maps are filled before the game first asks f
 
 Tested extensively against the game's own code and in play:
 
-- 509 automated checks pass against the installed game's assemblies, including 129 patch targets.
+- 523 automated checks pass against the installed game's assemblies, including 131 patch targets.
 - Rebuilt route maps are identical to the game's, node for node (9.5 million compared), and every map is complete when it is asked for.
 - The tree and plant search matches a model of the game's search in 4,000 random forests, with 0 differences.
-- Resumed terrain searches run against the game's real search classes on a random terrain: every search from scratch is identical node for node, and 1,200 searches in pricing runs all give the game's distance (88% bit for bit, the rest within rounding), exploring half the tiles.
+- Resumed terrain searches run against the game's real search classes on a random terrain: every search from scratch is identical node for node, and 1,200 searches in pricing runs all give the game's distance (88% bit for bit, the rest within rounding), exploring half the tiles. With searches kept for up to 32 start tiles, the need-pick pattern (5,280 questions with 48 terrain changes) explored 59% fewer tiles, with every distance the game's (4,817 bit for bit, 463 within rounding).
 - Played in multiplayer sessions on two computers, in the 350-beaver late-game save, and in a 362-beaver colony with **Verify every feature** on (0 differences).
 
-Not yet done: 0.4.29 has been played only as 0.4.28 (the same code plus PathFollow), in two sessions in one colony; the save snapshot check has not run in the game yet (it needs an autosave with the verify box on); the frames that get slower each evening are still unexplained; the verify session so far covers only a few minutes of play; and groups larger than two players haven't been reported. It is still a young mod, so try it on a copy of a save first. The full list is on the [website](https://timbermods.github.io/LateGamePerformance/#status).
+Not yet done: the logs of the 0.4.30 session have not been read, so its effect on the need-pick hitches is not measured yet; the frames that get slower each evening are still unexplained; the verify session covers about twenty minutes of play; and groups larger than two players haven't been reported. It is still a young mod, so try it on a copy of a save first. The full list is on the [website](https://timbermods.github.io/LateGamePerformance/#status).
 
 ## Install
 
 1. Install **Harmony** (2.4.1 or newer) and **Mod Settings** from the Steam Workshop.
-2. Download the ZIP from the [latest release](https://github.com/timbermods/LateGamePerformance/releases/latest) (currently v0.4.29), under **Assets**, not **Source code**. The [install guide](https://timbermods.github.io/LateGamePerformance/install.html#checksum) has its checksum.
+2. Download the ZIP from the [latest release](https://github.com/timbermods/LateGamePerformance/releases/latest) (currently v0.4.30), under **Assets**, not **Source code**. The [install guide](https://timbermods.github.io/LateGamePerformance/install.html#checksum) has its checksum.
 3. Close Timberborn, delete any older `LateGamePerformance` folder, and extract the ZIP into `Documents\Timberborn\Mods`. It contains one `LateGamePerformance` folder.
 4. Start Timberborn, enable **Late Game Performance** in the mod manager, and restart when prompted. Look for `[LateGamePerformance]` lines in `Player.log` (`%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log`).
 
-Previews are on the same Releases page, marked **Pre-release**; the current one, [v0.4.30](https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.30), has not been played yet, so try it on a copy of a save.
+Previews, when there is one, are on the same Releases page, marked **Pre-release**.
 
 **Multiplayer:** every player installs the same version of the mod and runs the same game version. Nothing else has to match.
 
