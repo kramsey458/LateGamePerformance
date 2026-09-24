@@ -77,13 +77,14 @@ any difference").
   WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on, Reachability on.`
   Incremental garbage collection, thread counts, timing logs and the verify settings may differ between players. All
   co-op players update together.
-- **In-game settings** (Mods > Late Game Performance, main menu or in game; exact labels): **Incremental garbage
-  collection** (the one real player choice: adds `gc-max-time-slice=3` to `Timberborn_Data\boot.config`, backup
-  `boot.config.before-incremental-gc.bak`, restart needed, startup line `GC: incremental=True`); **Diagnostics timers**;
-  **Verify terrain path searches**; **Verify save snapshots**; **Verify every feature (one test session)**; **Measure
-  live memory now (freezes the game for a moment)**; **Write a memory snapshot file (slow, large)** (the last two act
-  once and untick themselves). Nothing on the page affects the simulation. Everything else is in
-  `version-1.1\LateGamePerformance.cfg` (verify keys, thread counts, timing lines, `RecordTimings`).
+- **In-game settings** (the Mods list, main menu or Esc in a game → the settings button beside Late Game Performance;
+  exact labels): **Incremental garbage collection** (the one real player choice: adds `gc-max-time-slice=3` to
+  `Timberborn_Data\boot.config`, backup `boot.config.before-incremental-gc.bak`, restart needed, startup line
+  `GC: incremental=True`); **Diagnostics timers**; **Verify terrain path searches**; **Verify save snapshots**; **Verify
+  every feature (one test session)**; **Measure live memory now (freezes the game for a moment)**; **Write a memory
+  snapshot file (slow, large)** (the last two act once and untick themselves). Nothing on the page affects the
+  simulation. Everything else is in `version-1.1\LateGamePerformance.cfg` (verify keys, thread counts, timing lines,
+  `RecordTimings`).
 - **Dialogs players may meet:** a main-menu notice when incremental collection is off (*Turn it on* / *Not now*, asked
   once), and a dialog if a feature turns itself off after an error, asking every co-op player to restart.
 - **Logs and reporting:** `%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log` (`Player-prev.log` is the

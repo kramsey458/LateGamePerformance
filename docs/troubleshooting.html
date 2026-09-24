@@ -150,7 +150,7 @@
     <summary>The startup line says <code>GC: incremental=False</code></summary>
     <div class="answer">
       <ul>
-        <li><strong>You haven't ticked it.</strong> Tick <strong>Mods → Late Game Performance → Incremental garbage collection</strong> (<a href="install.html#gc">how</a>).</li>
+        <li><strong>You haven't ticked it.</strong> Tick <strong>Incremental garbage collection</strong> in the mod's settings (<a href="install.html#gc">how</a>).</li>
         <li><strong>You ticked it but haven't restarted.</strong> It takes effect the next time the game starts.</li>
         <li><strong>The file couldn't be written.</strong> The log has a line starting <code>GC: could not change</code> or <code>GC: … was not found</code>. Close the game and add the line <code>gc-max-time-slice=3</code> to <code>Timberborn_Data\boot.config</code> in the game's install folder by hand.</li>
         <li><strong>A game update or Steam's file check restored the original file.</strong> If the box is ticked, the mod adds the line again at the next start and logs <code>Putting it back</code>. Restart once more.</li>
@@ -161,7 +161,7 @@
   <details class="q" id="notice">
     <summary>A message about garbage collection appears in the main menu</summary>
     <div class="answer">
-      <p>It says incremental collection is off and offers <strong>Turn it on</strong> or <strong>Not now</strong>. It asks only once. To turn it on later, tick <strong>Mods → Late Game Performance → Incremental garbage collection</strong>.</p>
+      <p>It says incremental collection is off and offers <strong>Turn it on</strong> or <strong>Not now</strong>. It asks only once. To turn it on later, tick <strong>Incremental garbage collection</strong> in the mod's settings (<a href="install.html#gc">how</a>).</p>
     </div>
   </details>
 

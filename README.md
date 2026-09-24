@@ -67,7 +67,7 @@ The full list is on the [website](https://timbermods.github.io/LateGamePerforman
 
 To check it's running, search `%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log` for `[LateGamePerformance]`.
 
-To turn on incremental garbage collection, tick **Mods → Late Game Performance → Incremental garbage collection** and restart the game.
+To turn on incremental garbage collection, open the **Mods** list (main menu, or Esc in a game), press the settings button beside **Late Game Performance**, tick **Incremental garbage collection** and restart the game.
 
 The [install guide](https://timbermods.github.io/LateGamePerformance/install.html) covers previews, updating, uninstalling and [checking the download](https://timbermods.github.io/LateGamePerformance/install.html#checksum).
 
