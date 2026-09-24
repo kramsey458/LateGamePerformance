@@ -81,7 +81,7 @@
     <div class="answer">
       <p>Yes, but none of them change what the game simulates.</p>
       <ul>
-        <li><strong>In the game</strong> (<strong>Mods → Late Game Performance</strong>): <strong>Incremental garbage collection</strong>, the one real choice. Four boxes are for a test session: <strong>Diagnostics timers</strong>, <strong>Verify terrain path searches</strong>, <strong>Verify save snapshots</strong> and <strong>Verify every feature (one test session)</strong>. Two boxes take a memory measurement once and untick themselves: <strong>Measure live memory now (freezes the game for a moment)</strong> and <strong>Write a memory snapshot file (slow, large)</strong>.</li>
+        <li><strong>In the game</strong> (the settings button beside <strong>Late Game Performance</strong> in the <strong>Mods</strong> list): <strong>Incremental garbage collection</strong>, the one real choice. Four boxes are for a test session: <strong>Diagnostics timers</strong>, <strong>Verify terrain path searches</strong>, <strong>Verify save snapshots</strong> and <strong>Verify every feature (one test session)</strong>. Two boxes take a memory measurement once and untick themselves: <strong>Measure live memory now (freezes the game for a moment)</strong> and <strong>Write a memory snapshot file (slow, large)</strong>.</li>
         <li><strong>In <code>version-1.1\LateGamePerformance.cfg</code></strong>: testing switches, thread counts and log lines. Restart after editing.</li>
       </ul>
       <p>Everything that affects the simulation is always on, the same for everyone on the same version. To run without it, disable the mod.</p>
@@ -147,7 +147,7 @@
   <details class="q" id="verify">
     <summary>Can I check it against the game?</summary>
     <div class="answer">
-      <p>Yes. Tick <strong>Mods → Late Game Performance → Verify every feature (one test session)</strong>, play for a while, then untick it. It runs the game's own code beside the mod's and counts any difference. It never changes what the game is told, so one co-op player may use it alone.</p>
+      <p>Yes. Tick <strong>Verify every feature (one test session)</strong> in the mod's <a href="#settings">settings</a>, play for a while, then untick it. It runs the game's own code beside the mod's and counts any difference. It never changes what the game is told, so one co-op player may use it alone.</p>
       <p>In the stats lines look for <code>verify mismatches 0</code>. Any other number is a bug worth <a href="troubleshooting.html#report">reporting</a>. Most features also have their own <code>…Verify</code> key in <code>LateGamePerformance.cfg</code> (<a href="https://github.com/timbermods/LateGamePerformance/blob/main/TECHNICAL.md#settings">list</a>).</p>
     </div>
   </details>

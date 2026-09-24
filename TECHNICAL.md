@@ -735,8 +735,8 @@ collection frame over 50 ms outside of saves. Incremental collection does the sa
 time across many frames.
 
 Unity reads that choice from `boot.config` before any mod loads, so a mod cannot switch it while the game runs.
-**Incremental garbage collection** in this mod's settings page (**Mods > Late Game Performance**) edits the file
-for you:
+**Incremental garbage collection** in this mod's settings page (**Mods** → the settings button beside **Late Game
+Performance**) edits the file for you:
 
 - Ticking it adds the line `gc-max-time-slice=3` to `Timberborn_Data\boot.config` in the game's install folder.
   Unticking it removes that line. Nothing else in the file is touched.
@@ -1780,16 +1780,17 @@ own versions of these only read.
 | `UnityMarkers` | the list above | The engine's profiler counters sampled per frame while `Diagnostics` is on, separated by `;`. |
 | `StatsEveryTicks` | `1000` | Stats line interval. `0` = never. |
 
-Seven settings are on the in-game settings page (**Mods > Late Game Performance**): **Incremental garbage
-collection**, described above, which is there because it is the one decision that is the player's to make (it
-edits a file in the game's folder); since 0.4.19, **Diagnostics timers** and **Verify terrain path searches**,
-plus **Verify save snapshots** since 0.4.22 and **Verify every feature (one test session)** since 0.4.25, the measurements a tester is
-asked to switch on for a session; and since 0.4.25 the two memory measurements, **Measure live memory now** and
-**Write a memory snapshot file**, which act once when ticked and untick themselves. The boxes mirror the
-`Diagnostics`, `TerrainSearchVerify`, `SaveSnapshotVerify` and `VerifyAll` keys in this file: a box starts from the
-file's value and then remembers what was last chosen on the page, so the page wins once it has been used. All can
-be switched while a game is running. Nothing on the page affects the simulation. Up to 0.4.9 the page had other boxes; from 0.4.10 per-component timings are
-`RecordTimings` in this file, the warning asks once and needs no setting, and adaptive pacing is removed.
+Seven settings are on the in-game settings page (**Mods** → the settings button beside **Late Game Performance**):
+**Incremental garbage collection**, described above, which is there because it is the one decision that is the
+player's to make (it edits a file in the game's folder); since 0.4.19, **Diagnostics timers** and **Verify terrain
+path searches**, plus **Verify save snapshots** since 0.4.22 and **Verify every feature (one test session)** since
+0.4.25, the measurements a tester is asked to switch on for a session; and since 0.4.25 the two memory measurements,
+**Measure live memory now** and **Write a memory snapshot file**, which act once when ticked and untick themselves.
+The boxes mirror the `Diagnostics`, `TerrainSearchVerify`, `SaveSnapshotVerify` and `VerifyAll` keys in this file: a
+box starts from the file's value and then remembers what was last chosen on the page, so the page wins once it has
+been used. All can be switched while a game is running. Nothing on the page affects the simulation. Up to 0.4.9 the
+page had other boxes; from 0.4.10 per-component timings are `RecordTimings` in this file, the warning asks once and
+needs no setting, and adaptive pacing is removed.
 
 ## Suggested first test
 
