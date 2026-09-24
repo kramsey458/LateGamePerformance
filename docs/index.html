@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Late Game Performance: fewer lag spikes in big Timberborn colonies</title>
-<meta name="description" content="A Timberborn 1.1 mod that removes work the game repeats in large colonies (hauling, routes, tree searches, saves, memory clean-up) so late-game colonies stutter less. Beavers decide exactly what they would anyway, and it is built for BeaverBuddies co-op.">
+<meta name="description" content="A Timberborn 1.1 mod that removes work the game repeats in big colonies, so late games stutter less. Beavers decide exactly what they would anyway. Built for BeaverBuddies co-op.">
 <meta property="og:title" content="Late Game Performance for Timberborn">
-<meta property="og:description" content="Fewer lag spikes in big colonies. Same decisions, sooner: it changes how quickly the game finds its answers, not what the answers are, and it is built for BeaverBuddies co-op.">
+<meta property="og:description" content="Fewer lag spikes in big colonies. Same decisions, sooner. Built for BeaverBuddies co-op.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#141619">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -37,7 +37,7 @@
     <div>
       <h1>Late Game Performance</h1>
       <p class="pitch">Same decisions, sooner.</p>
-      <p class="lead">A Timberborn 1.1 mod for big colonies that stutter. It removes work the game repeats over and over (hauler job lists, route maps after road changes, tree searches, saves, memory clean-up), so you get fewer lag spikes and shorter freezes.</p>
+      <p class="lead">A Timberborn 1.1 mod for big colonies that stutter. It removes work the game repeats over and over, so you get fewer lag spikes and shorter freezes.</p>
       <ul class="facts">
         <li><svg viewBox="0 0 22 22" aria-hidden="true"><path d="M4 11.5l4.5 4.5L18 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>Your beavers decide exactly what they would anyway.</b> Each speed-up gives the game's own answer, checked against the game's code.</span></li>
         <li><svg viewBox="0 0 22 22" aria-hidden="true"><circle cx="7.5" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="15" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M2 18c.6-3 2.8-4.6 5.5-4.6S12.4 15 13 18M11 14.2c1-.6 2.4-.8 4-.8 2.7 0 4.9 1.6 5.5 4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span><b>Built for BeaverBuddies co-op.</b> Nothing that affects the simulation is a setting, so every player on the same version runs the same code.</span></li>
@@ -56,7 +56,7 @@
           <div class="board-row mod"><span class="k">MOD</span><span class="v">0.24<small>ms</small></span></div>
           <div class="board-row foot"><span>SAME LIST · 0 DIFFERENCES</span></div>
         </div>
-      <figcaption><b>Measured in play,</b> per request, in a 362-beaver colony with <b>Verify every feature</b> on, which runs the game's own code beside the mod's and compares every answer. It is one part of a tick: the overall tick time did not measurably drop in that session.</figcaption>
+      <figcaption><b>Measured in play,</b> per request, in a 362-beaver colony. <b>Verify every feature</b> ran the game's own code beside the mod's and compared every answer. It is one part of a tick: the overall tick time did not measurably drop in that session.</figcaption>
     </figure>
   </div>
 </section>
@@ -68,8 +68,8 @@
       <h2>Big colonies do the same work over and over.</h2>
     </div>
     <div>
-      <p class="big">Every hauler decision, every road you finish and every lumberjack's search for a tree makes the game redo calculations whose results mostly have not changed. In a small colony that costs nothing. With hundreds of beavers it adds up, and you feel it as stutter.</p>
-      <p>This mod keeps answers the game has already worked out, does the heavy parts on other CPU cores, and skips lookups that cannot change the result. Beavers make the same choices they would have made anyway, just sooner.</p>
+      <p class="big">Every hauler decision, finished road and lumberjack's search makes the game redo work whose answer mostly hasn't changed. In a small colony that costs nothing. With hundreds of beavers it adds up, and you feel it as stutter.</p>
+      <p>This mod keeps answers the game has already worked out, does heavy work on other CPU cores, and skips lookups that can't change the result. Beavers make the same choices, just sooner.</p>
     </div>
   </div>
 </section>
@@ -79,39 +79,39 @@
   <div class="wrap">
     <div class="section-head">
       <h2>What it changes in your game</h2>
-      <p>Six jobs the game repeats all the time, each done faster and the game's own way. Every one keeps the game's answer, and most can be checked against it while you play.</p>
+      <p>Six jobs the game repeats all the time, each done faster and the game's own way. Most can be checked against the game while you play.</p>
     </div>
     <div class="pitbox">
       <div class="pitbox-tick"><b>The game's own tick</b><span>Same order, same answers. The mod only shortens the work inside it.</span></div>
       <div class="stations">
         <article class="station">
           <h3>Haulers stop redoing their homework</h3>
-          <p>Every time a hauler looks for work, the game asks every building in the district for its jobs and sorts the whole list. The mod keeps each building's jobs until something that feeds them changes, then sorts the list the game's way.</p>
+          <p>For every hauler looking for work, the game asks every building in the district for its jobs and sorts the list. The mod keeps each building's jobs until something changes, then sorts the list the game's way.</p>
           <dl><dt>Work</dt><dd>Kept, reused until it changes</dd><dt>Checked</dt><dd><code>HaulCacheVerify</code></dd></dl>
         </article>
         <article class="station">
           <h3>Road changes stall the game less</h3>
-          <p>After a path, stair or platform is finished, the game rebuilds the route map of every building with an entrance on the main thread. The mod spreads that over up to 7 worker threads; the maps come out exactly as the game builds them.</p>
+          <p>After a path, stair or platform is finished, the game rebuilds every building's route map on the main thread. The mod spreads that over up to 7 worker threads. The maps come out exactly as the game builds them.</p>
           <dl><dt>Work</dt><dd>Other CPU cores</dd><dt>Checked</dt><dd>Node for node in tests</dd></dl>
         </article>
         <article class="station">
           <h3>Lumberjacks search smarter</h3>
-          <p>To find a tree, the game measures the path to every marked tree, though most are still growing. The mod leaves out the measurements that cannot change the answer. Lumberjacks, gatherers and farmers get the game's own result.</p>
+          <p>To find a tree, the game measures the path to every marked tree, though most are still growing. The mod leaves out the measurements that can't change the answer. Lumberjacks, gatherers and farmers get the game's own result.</p>
           <dl><dt>Work</dt><dd>Skipped where it can't matter</dd><dt>Checked</dt><dd><code>YielderSearchVerify</code></dd></dl>
         </article>
         <article class="station">
           <h3>Saves freeze the game for less</h3>
-          <p>Trees, crops, paths, levees and platforms, nearly all of a big colony, are snapshotted on worker threads, using only parts whose saving code has been read. Beavers and workplaces stay on the main thread. The save is the same file.</p>
+          <p>Trees, crops, paths, levees and platforms, nearly all of a big colony, are saved on worker threads. Beavers and workplaces stay on the main thread. The save file is the same.</p>
           <dl><dt>Work</dt><dd>Other CPU cores</dd><dt>Checked</dt><dd><code>SaveSnapshotVerify</code></dd></dl>
         </article>
         <article class="station">
           <h3>Fewer memory clean-up freezes</h3>
-          <p>The game cleans up memory with everything stopped, which in a big colony can freeze it for most of a second about once a minute. One tick-box switches on incremental collection, which does the same work a few milliseconds at a time.</p>
+          <p>The game cleans up memory with everything stopped. In a big colony that can freeze it for most of a second, about once a minute. One tick-box spreads the same work over many frames.</p>
           <dl><dt>Work</dt><dd>Spread over many frames</dd><dt>Choice</dt><dd>Yours, <a href="install.html#gc">one box</a></dd></dl>
         </article>
         <article class="station">
           <h3>One hitch stays one hitch</h3>
-          <p>After an autosave or a memory clean-up, the game ran everything the long frame missed in the next frames: about a second of stutter per hitch in a logged 354-beaver session. The same ticks still run, in the same order, spread over ordinary frames.</p>
+          <p>After a long frame, such as an autosave, the game crams what it missed into the next few frames. In a logged 354-beaver session, each hitch became about a second of stutter. The mod runs the same ticks, in the same order, over ordinary frames.</p>
           <dl><dt>Work</dt><dd>Paced, not dropped</dd><dt>Checked</dt><dd>Same ticks, same order</dd></dl>
         </article>
       </div>
@@ -121,13 +121,13 @@
       <h3>And the rest of the crew</h3>
     </div>
     <dl class="roster">
-      <div><dt>Entities with nothing to tick <span class="where">skipped</span></dt><dd>Ten thousand trees, crops and paths are visited every tick though their only tick part is switched off. The mod ticks only entities with a part switched on, in the game's own order.</dd></div>
-      <div><dt>Beavers off the roads <span class="where">kept</span></dt><dd>A beaver in a field weighing up where to eat or rest asks for a terrain path from itself and from every building it considers. Up to 32 of those searches are kept by start tile and continued instead of started again. The distances are the game's.</dd></div>
-      <div><dt>Plant water, soil and the water map <span class="where">other cores</span></dt><dd>Each plant's water level is read on the water worker, the changed soil cells are listed by the soil workers, and the water map is copied on a worker thread.</dd></div>
+      <div><dt>Entities with nothing to tick <span class="where">skipped</span></dt><dd>The game visits ten thousand trees, crops and paths every tick, though they have nothing to do. The mod ticks only the ones that do, in the game's own order.</dd></div>
+      <div><dt>Beavers off the roads <span class="where">kept</span></dt><dd>A beaver in a field choosing where to eat or rest makes the game search the terrain again for every building it considers. The mod keeps up to 32 searches and continues them instead. The distances are the game's.</dd></div>
+      <div><dt>Plant water, soil and the water map <span class="where">other cores</span></dt><dd>Plant water levels, changed soil cells and the water map copy are worked out on worker threads.</dd></div>
       <div><dt>District counts and homes <span class="where">kept</span></dt><dd>Each district's resource count and the every-tick search for a beaver to move into a home stop redoing unchanged work.</dd></div>
-      <div><dt>"Can a beaver reach that?" <span class="where">leaner</span></dt><dd>After a road change the game answers this for every beaver by flooding the whole walkable colony. The mod floods the same way without clearing a flag for every tile of the map first.</dd></div>
+      <div><dt>"Can a beaver reach that?" <span class="where">leaner</span></dt><dd>After a road change the game floods the whole walkable colony to answer this. The mod floods it the same way, without first resetting every tile of the map.</dd></div>
       <div><dt>Terrain route maps <span class="where">other cores</span></dt><dd>Built on worker threads alongside the road ones, with the game's contents.</dd></div>
-      <div><dt>Per-frame chores <span class="where">less often</span></dt><dd>The audio listener, the alert lists, the selected entity's panel, far and off-screen animation, the physics sync and water rendering stop redoing work every frame. None of it touches the simulation.</dd></div>
+      <div><dt>Per-frame chores <span class="where">less often</span></dt><dd>The audio listener, the alert lists, the selection panel, far and off-screen animation, the physics sync and water rendering stop redoing work every frame. None of it touches the simulation.</dd></div>
       <div><dt>Timing lines in the log <span class="where">yours to read</span></dt><dd>Ticks per second, where the main thread's time goes, the longest frame, memory clean-ups and saves, so you can <a href="faq.html#timing">measure your own colony</a>.</dd></div>
     </dl>
   </div>
@@ -156,17 +156,16 @@
     </figure>
     <div>
       <h2>Built for BeaverBuddies co-op</h2>
-      <p class="big">In multiplayer every player's game must calculate exactly the same thing. A performance mod that changed even one answer would be worse than no mod, so keeping BeaverBuddies games in step has come before every speed-up.</p>
+      <p class="big">In multiplayer every player's game must calculate exactly the same thing. A mod that changed even one answer would be worse than no mod. So keeping co-op games in step comes before every speed-up.</p>
       <ul class="checks">
-        <li><strong>The game's own answers.</strong> Hauling lists and tree searches are the game's results, and route maps have exactly the game's contents. Tests compare them against the game's own code.</li>
-        <li><strong>Same version, same code.</strong> Nothing that affects the simulation is a setting, so two players cannot drift apart by editing a settings file.</li>
+        <li><strong>The game's own answers.</strong> Hauling lists, tree searches and route maps match the game's own. Tests compare them with the game's code.</li>
+        <li><strong>Same version, same code.</strong> Nothing that affects the simulation is a setting, so two players can't drift apart by editing a settings file.</li>
         <li><strong>Never tied to one player's screen.</strong> Which route maps get built never depends on what a single player looked at.</li>
-        <li><strong>Other mods go first.</strong> Its hooks into the game run at Harmony's last priority, so other mods' hooks on the same methods run first, on every computer alike.</li>
         <li><strong>Played in multiplayer</strong> on two computers, including a 35-minute session logged on both. Larger groups haven't been reported yet.</li>
       </ul>
       <div class="differ">
         <h3>What may differ between players</h3>
-        <p>Incremental garbage collection, thread counts, timing logs and the verify settings. They don't affect the simulation, so each player can choose them. Everything else only needs <strong>the same mod version and the same game version</strong>, updated together.</p>
+        <p>Incremental garbage collection, thread counts, timing logs and the verify settings. They don't affect the simulation, so each player can choose them. Everything else needs <strong>the same mod version and the same game version</strong>, updated together.</p>
       </div>
     </div>
   </div>
@@ -178,10 +177,9 @@
     <div>
       <h2>What it always does</h2>
       <ul class="checks">
-        <li>Can be checked against the game: verify settings run the game's own code alongside and log any difference, while the game keeps the mod's result, so a player with them on stays in step with the others.</li>
-        <li>Switches a feature off for the rest of the session if it hits an error, lets the game's own code run instead, and shows a dialog on that computer asking every player to restart. A route map that fails on a worker thread is first built again on the main thread.</li>
-        <li>Leaves a feature off if a game method it needs is missing, for example after a game update.</li>
-        <li>Behaves the same for everyone on the same version.</li>
+        <li>Can be checked against the game. The verify settings run the game's own code alongside and log any difference, without changing what the game is told.</li>
+        <li>Switches a feature off if it hits an error, and lets the game's own code run instead. A dialog then asks every co-op player to restart.</li>
+        <li>Leaves a feature off if a game update changed something it needs.</li>
         <li>Stores nothing in your saves.</li>
       </ul>
     </div>
@@ -189,9 +187,8 @@
       <h2>What it never does</h2>
       <ul class="checks never">
         <li>Approximate. It skips work only when the answer cannot change.</li>
-        <li>Change what your beavers decide on purpose. The one known difference is explained in the <a href="faq.html#same-results">FAQ</a>.</li>
-        <li>Touch a game file, unless you tick the incremental memory clean-up box.</li>
-        <li>Let a settings file put two players out of step.</li>
+        <li>Change what your beavers decide on purpose. The known difference is explained in the <a href="faq.html#same-results">FAQ</a>.</li>
+        <li>Touch a game file, unless you tick <strong>Incremental garbage collection</strong>.</li>
         <li>Need anything besides Harmony and Mod Settings.</li>
       </ul>
     </div>
@@ -203,7 +200,7 @@
   <div class="wrap">
     <div class="section-head">
       <h2>What the numbers say</h2>
-      <p>Every figure says where it was measured and what it doesn't promise. None of them is a promise about your colony: the gain depends on its size, its shape and your computer. There is no controlled frame-rate benchmark yet.</p>
+      <p>Every figure says where it was measured and what it doesn't promise. Your gain depends on your colony and your computer. There is no controlled frame-rate benchmark yet.</p>
     </div>
     <div class="sheets">
       <div class="sheet chart-card">
@@ -267,7 +264,7 @@
             </tbody>
           </table>
         </details>
-        <p class="limit">In the game the workers run alongside the tick, and the main thread still builds a map itself if it needs one before a worker has reached it.</p>
+        <p class="limit">In the game the workers run alongside the tick. The main thread still builds a map itself if it needs one before a worker gets to it.</p>
       </div>
 
       <div class="sheet wide">
@@ -287,7 +284,7 @@
 
       <div class="sheet wide">
         <h3>The same colony, now and before</h3>
-        <p class="src"><b>Played:</b> the colony at 362 beavers, against a recording of it at 359 beavers made on an <b>earlier build of this mod</b>. So these show what the newest work added, not the whole gain over the unmodded game.</p>
+        <p class="src"><b>Played:</b> the colony at 362 beavers, against a recording of it at 359 beavers made on an <b>earlier build of this mod</b>. So these show what the newer work added, not the whole gain over the unmodded game.</p>
         <div class="table-scroll">
           <table class="timing">
             <thead><tr><th scope="col">Measure</th><th scope="col" class="num">Earlier build</th><th scope="col" class="num">Now</th><th scope="col">Change</th></tr></thead>
@@ -300,7 +297,7 @@
             </tbody>
           </table>
         </div>
-        <p class="limit">One session each, one computer. The hauler job list is compared with the game's own code in the sheet above. The overall tick time did not measurably drop in that session.</p>
+        <p class="limit">One session each, one computer. The overall tick time did not measurably drop in that session.</p>
       </div>
 
       <div class="sheet">
@@ -344,25 +341,25 @@
         <h3>Tested</h3>
         <h4>In play</h4>
         <ul class="checks">
-          <li>A late-game save of about 350 beavers: noticeably fewer lag spikes, and as the mod grew, reported as "working well" and then "working amazingly well".</li>
+          <li>A late-game save of about 350 beavers: noticeably fewer lag spikes, then "working well" and "working amazingly well".</li>
           <li>A 362-beaver colony with <strong>Verify every feature</strong> on: every verify setting reported 0 differences from the game's own code, including the save snapshot at an autosave.</li>
           <li>Multiplayer on two computers, including a 35-minute session logged on both.</li>
         </ul>
         <h4>Against the game's code</h4>
         <ul class="checks">
           <li>523 automated checks pass against the installed game's own assemblies, including 131 patch targets.</li>
-          <li>Rebuilt route maps are identical to the game's, node for node, whoever built them, and every map is complete when it is asked for.</li>
-          <li>The tree and plant search gives the game's answer in 4,000 random forests, with unreachable, dead and destroyed plants and ties.</li>
-          <li>The tick loop, the save snapshot, the plant water levels, the soil lists and the water map copy are each tested against the game's real classes: the same ticks in the same order, the same save, the same levels, the same cells, the same bytes.</li>
-          <li>Resumed terrain searches: every search from scratch is identical node for node, and 1,200 searches all give the game's distance. With searches kept by start tile, the need-pick pattern explored 59% fewer tiles, every distance the game's.</li>
-          <li>Nothing that affects the simulation can be changed from a file.</li>
+          <li>Rebuilt route maps are identical to the game's, node for node.</li>
+          <li>The tree and plant search gives the game's answer in 4,000 random forests.</li>
+          <li>The tick loop, saves, plant water, soil and the water map copy each match the game's own code.</li>
+          <li>Resumed terrain searches give the game's distance in every test.</li>
         </ul>
       </div>
       <div class="open-col">
         <h3>Not yet</h3>
         <ul class="checks open">
-          <li>This release's numbers. It has been played, but the logs of that session have not been read, so its effect on the slow need picks is not measured yet.</li>
-                    <li>The frames that get slower each evening. They are still unexplained.</li>
+          <li>This release's numbers. It has been played, but the logs of that session haven't been read yet.</li>
+          <li>The frames that get slower each evening. They are still unexplained.</li>
+          <li>A verify session longer than about twenty minutes of play.</li>
           <li>A before-and-after of each feature in the same save. The improvement is reported from play and logs.</li>
           <li>A controlled frame-rate benchmark.</li>
           <li>A co-op game where one player has the verify settings on and another has them off.</li>

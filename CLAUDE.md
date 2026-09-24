@@ -22,6 +22,24 @@ notes. There is no CHANGELOG file and no CI (`.github/workflows/` doesn't exist)
   update happens when a version becomes Latest, after Kyler has played it, with the docs saying it was played.
 - Nothing that affects the simulation is ever a setting (co-op safety); don't write copy that implies otherwise.
 
+## Writing README and website text
+
+Kyler, 2026-09-24: "simplicity and elegance is effective and desirable." Every change to the README, the website
+text and the player docs follows these rules.
+
+- **Write for a Timberborn player** who wants to download, install and use the mod. Developer detail goes in
+  TECHNICAL.md or the release notes; link to it rather than repeating it.
+- **Short.** One idea per sentence, most under about 20 words. A paragraph or FAQ answer is one to three sentences,
+  a troubleshooting answer a few numbered steps.
+- **Lead with the action.** Menu paths as arrow chains; on-screen labels in bold, exactly as in game.
+- **Say each thing once**, where a player would look for it; link to it elsewhere.
+- **Plain words.** No internals (class names, ids, formats) unless the player needs them to act.
+- **Cut** filler, repeated caveats, edge cases a player won't meet, and history ("since …", "no longer", older
+  builds). Describe the mod as it is now.
+- **Check every fact against the code** before writing it; changelogs lag.
+- **Keep, briefly:** credits, the unofficial line, the status, and safety facts.
+- **Reread as a new player before publishing.** Every step works as written, and nothing is said twice.
+
 ## Website
 
 - **Where:** `docs/`: `index.html`, `install.html`, `troubleshooting.html`, `faq.html`, `404.html`; shared
@@ -90,6 +108,7 @@ notes. There is no CHANGELOG file and no CI (`.github/workflows/` doesn't exist)
 
 ### Content rules
 
+- Every word follows *Writing README and website text* above; the rules below add the site's specifics.
 - Describe the mod as it is now. No "New in <version>", "added in …" or version history on player pages; that belongs
   in the release notes and TECHNICAL.md. Only upgrade facts players need stay (close the game, delete the old folder,
   co-op updates together, old `.cfg` keys are ignored, 0.4.3 crashes on load).
@@ -130,14 +149,15 @@ When asked to "update the website for the latest release, consistent with the de
      `faq.html#co-op-tested`, all matching README's "What to expect" and "Tested".
    - Test counts (523 / 131 today): `index.html` `.proofs` and the `#status` list.
    - Startup line (12 features today): the tower `<ol>` in `index.html#coop`, the full `Simulation features:` line in
-     `install.html#verify` and `#multiplayer`, `faq.html#co-op` and the `troubleshooting.html#log` table. If features
+     `install.html#verify` and the `troubleshooting.html#log` table. If features
      change, update the count everywhere: site.js's comment, DESIGN.md (tower), PRODUCT.md, the surface brief.
    - Features: a simulation feature goes into the pit box only if it is one of the six headline jobs; otherwise a new
      `dl.roster` item. Settings: `faq.html#settings`, `install.html#gc`, troubleshooting `#slower`/`#ignored`.
    - Requirements and game version: `install.html#requirements`, `troubleshooting.html#needs-mods`, `faq.html#game-version`.
    - Numbers: the `#results` timing sheets and the hero board, only with a new measured, sourced figure.
    - `<meta name="description">` / `og:*` on each page; PRODUCT.md's Operating Context and Honest status.
-3. Put new content into the existing components (above). Don't restyle anything.
+3. Put new content into the existing components (above). Don't restyle anything. Write it by *Writing README and
+   website text*.
 4. Test: no site test exists. Check by hand: `sha1sum docs/release.js` is `f771fa55…`, no `grep -rn "New in\|added
    in" docs`, every README-linked id still resolves. For mod changes, `dotnet run --project tests -c Release` must
    print `ALL PASSED` with the counts the site quotes.

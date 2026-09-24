@@ -1850,6 +1850,20 @@ switched off, so that benchmark never measures this mod. With `-SaveCount N` it 
 after the warm-up the game saves N times into memory, writes the average, median, 90th percentile, minimum and maximum
 to `Player.log` and quits; the Save timing line splits each of those saves.
 
+### What the tests check
+
+The headline results, as of 0.4.30 (moved here from the README, which now gives a short summary):
+
+- 523 automated checks pass against the installed game's assemblies, including 131 patch targets.
+- Rebuilt route maps are identical to the game's, node for node (9.5 million compared), and every map is complete
+  when it is asked for.
+- The tree and plant search matches a model of the game's search in 4,000 random forests, with 0 differences.
+- Resumed terrain searches run against the game's real search classes on a random terrain: every search from scratch
+  is identical node for node, and 1,200 searches in pricing runs all give the game's distance (88% bit for bit, the
+  rest within rounding), exploring half the tiles. With searches kept for up to 32 start tiles, the need-pick pattern
+  (5,280 questions with 48 terrain changes) explored 59% fewer tiles, with every distance the game's (4,817 bit for
+  bit, 463 within rounding).
+
 ## Uninstall
 
 Disable the mod and restart. It stores nothing in saves.
