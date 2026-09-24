@@ -82,7 +82,7 @@ namespace LateGamePerformance
                       "time the game starts; if the game has been restarted since, this Unity build ignores it."
                     : "GC: every collection stops the whole game until it is done, and in a large colony that is " +
                       "most of a second, about once a minute. Tick 'Incremental garbage collection' in this mod's " +
-                      "settings (Mods > Late Game Performance) and restart the game, or add the line " +
+                      "settings (the settings button beside it in Mods) and restart the game, or add the line " +
                       $"'{BootConfig.Line}' to {bootConfig} yourself (Steam 'verify files' reverts it).");
             }
             catch (Exception exception)
