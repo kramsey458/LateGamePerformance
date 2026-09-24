@@ -30,8 +30,8 @@ recorded on 2026-09-21 23:13 (0.4.23, deep profile, 10 minutes at speed 7) unles
   --prerelease --title "X.Y.Z preview" --notes-file <notes>`; `.\build.ps1` builds and zips; `packaging/manifest.json` and
   `source/LateGamePerformance.csproj` carry the version). Decompiled game source: `%TEMP%\tb-src` (ilspycmd; regenerate
   with `ilspycmd -p -o %TEMP%\tb-src <Managed>\Timberborn.*.dll` if missing). Game 1.1.2.4, Unity 6000.5, Mono. The owner's
-  other repositories (`BeaverBuddies-MultiColony`, `BeaverBuddies-Stability-Fork`, `PerformanceLog`,
-  `MixedStorage`, `OptimizedLocalHousing`, `HungryPathing`) may be read; the running BeaverBuddies is MultiColony 1.4.0-beta2
+  other repositories (`TimberTogether`, `BeaverBuddies-Stability-Fork`, `PerformanceLog`,
+  `MixedStorage`, `OptimizedLocalHousing`, `HungryPathing`) may be read; the running BeaverBuddies is Timber Together 1.4.0-beta2
   or later (its worktrees hold the newest code; `git worktree list` in that repo). `TECHNICAL.md` in this repo documents every
   feature; the memory file of this project's Claude sessions has the history.
 - **Measurement.** Performance Log writes one folder per session to `Documents\Timberborn\PerformanceLog\<date>` (`summary.md`

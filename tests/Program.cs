@@ -13,8 +13,13 @@ internal static class Program
 {
     private const string ModSettingsDirectory =
         @"C:\Program Files (x86)\Steam\steamapps\workshop\content\1062090\3283831040\version-1.1\Scripts";
-    // The owner's BeaverBuddies MultiColony fork, under Documents; its ColonyStamp is on the snapshot list.
-    private const string BeaverBuddiesDll = @"Timberborn\Mods\BeaverBuddies-MultiColony\version-1.1\BeaverBuddies.dll";
+    // The owner's Timber Together install, under Documents; its ColonyStamp is on the snapshot list. Its folder, then
+    // the folder of an install from before the mod had its own (whichever is there).
+    private static readonly string[] BeaverBuddiesDlls =
+    {
+        @"Timberborn\Mods\TimberTogether\version-1.1\BeaverBuddies.dll",
+        @"Timberborn\Mods\BeaverBuddies-MultiColony\version-1.1\BeaverBuddies.dll",
+    };
 
     private static int _failures;
     private static string _managed;
@@ -109,8 +114,9 @@ internal static class Program
                 // Not a managed assembly this runtime can load; nothing on the list lives there.
             }
         }
-        string fork = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), BeaverBuddiesDll);
-        if (File.Exists(fork))
+        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        string fork = BeaverBuddiesDlls.Select(dll => Path.Combine(documents, dll)).FirstOrDefault(File.Exists);
+        if (fork != null)
         {
             try
             {
@@ -577,7 +583,7 @@ internal static class Program
     // A prefix that returns bool can skip the game's method, and Harmony then skips every prefix after it that could
     // change the call (a ref argument, a bool result). Equal priorities run in the order the mods were loaded, which is
     // each computer's own mod manager setting. So a skipping prefix of this mod that ran first would, on one computer,
-    // answer before another mod's prefix narrowed the arguments (MultiColony's colony filter on
+    // answer before another mod's prefix narrowed the arguments (Timber Together's colony filter on
     // YielderFinder.FindLivingYielderWithoutAccessible), and on another after it: two players, two answers. Every
     // skipping prefix therefore carries [HarmonyPriority(Priority.Last)]. Found from the declared patches, not a list,
     // and checked the way Harmony will use it: the attribute as Feature.Apply's HarmonyMethod reads it, then Harmony's
