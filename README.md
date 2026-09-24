@@ -59,7 +59,7 @@ Not yet done: the logs of the 0.4.30 session have not been read, so its effect o
 ## Install
 
 1. Install **Harmony** (2.4.1 or newer) and **Mod Settings** from the Steam Workshop.
-2. Download the ZIP from the [latest release](https://github.com/timbermods/LateGamePerformance/releases/latest) (currently v0.4.30), under **Assets**, not **Source code**. The [install guide](https://timbermods.github.io/LateGamePerformance/install.html#checksum) has its checksum.
+2. Download the ZIP from the [latest release](https://github.com/timbermods/LateGamePerformance/releases/latest) (currently v0.4.30), under **Assets**, not **Source code**. The [install guide](https://timbermods.github.io/LateGamePerformance/install.html#checksum) has its checksum. <!-- latest -->
 3. Close Timberborn, delete any older `LateGamePerformance` folder, and extract the ZIP into `Documents\Timberborn\Mods`. It contains one `LateGamePerformance` folder.
 4. Start Timberborn, enable **Late Game Performance** in the mod manager, and restart when prompted. Look for `[LateGamePerformance]` lines in `Player.log` (`%USERPROFILE%\AppData\LocalLow\Mechanistry\Timberborn\Player.log`).
 
