@@ -44,10 +44,10 @@
         <li><svg viewBox="0 0 22 22" aria-hidden="true"><path d="M3 18h16M5 18V11M9 18V7M13 18V9M17 18V4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span><b>For big colonies.</b> Hundreds of beavers late in a game. A small colony has little repeated work to remove.</span></li>
       </ul>
       <div class="btn-row">
-        <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v10M4.5 7.5L9 12l4.5-4.5M3 15.5h12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download <span data-release="tag">v0.4.29</span></span></a>
+        <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v10M4.5 7.5L9 12l4.5-4.5M3 15.5h12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download <span data-release="tag">v0.4.30</span></span></a>
         <a class="btn btn-ghost" href="install.html">Install guide</a>
       </div>
-      <p class="status-note" role="note" data-release-pinned="0.4.29"><strong>Played in late-game colonies of 350+ beavers,</strong> as the build before this one (one walking change since removed). Needs Harmony and Mod Settings; try it on a copy of a save. <a href="#status">What is tested, and what isn't</a></p>
+      <p class="status-note" role="note" data-release-pinned="0.4.30"><strong>Played in late-game colonies of 350+ beavers,</strong> most recently as this release. Needs Harmony and Mod Settings; try it on a copy of a save. <a href="#status">What is tested, and what isn't</a></p>
     </div>
     <figure class="pitboard">
         <div class="board" role="img" aria-label="Pit board: hauler job list, per request. The game's own: 0.94 milliseconds. The mod: 0.24 milliseconds. Same list, 0 differences.">
@@ -122,7 +122,7 @@
     </div>
     <dl class="roster">
       <div><dt>Entities with nothing to tick <span class="where">skipped</span></dt><dd>Ten thousand trees, crops and paths are visited every tick though their only tick part is switched off. The mod ticks only entities with a part switched on, in the game's own order.</dd></div>
-      <div><dt>Beavers off the roads <span class="where">kept</span></dt><dd>A beaver in a field weighing up where to eat or rest continues the previous terrain search instead of starting again from the same tile. The distances are the game's.</dd></div>
+      <div><dt>Beavers off the roads <span class="where">kept</span></dt><dd>A beaver in a field weighing up where to eat or rest asks for a terrain path from itself and from every building it considers. Up to 32 of those searches are kept by start tile and continued instead of started again. The distances are the game's.</dd></div>
       <div><dt>Plant water, soil and the water map <span class="where">other cores</span></dt><dd>Each plant's water level is read on the water worker, the changed soil cells are listed by the soil workers, and the water map is copied on a worker thread.</dd></div>
       <div><dt>District counts and homes <span class="where">kept</span></dt><dd>Each district's resource count and the every-tick search for a beaver to move into a home stop redoing unchanged work.</dd></div>
       <div><dt>"Can a beaver reach that?" <span class="where">leaner</span></dt><dd>After a road change the game answers this for every beaver by flooding the whole walkable colony. The mod floods the same way without clearing a flag for every tile of the map first.</dd></div>
@@ -322,7 +322,7 @@
         <h3>Checked against the game's code</h3>
         <p class="src"><b>Test harness,</b> run against the installed game's own assemblies.</p>
         <ul class="proofs">
-          <li><b>509 checks</b><span>pass, including 129 patch targets</span></li>
+          <li><b>523 checks</b><span>pass, including 131 patch targets</span></li>
           <li><b>9.5 million</b><span>route map nodes compared: every one identical</span></li>
           <li><b>4,000 forests</b><span>random, with 0 differences from the game's tree search</span></li>
           <li><b>1,200 searches</b><span>resumed terrain searches, all at the game's distance</span></li>
@@ -335,10 +335,9 @@
 <!-- ============ status ============ -->
 <section id="status">
   <div class="wrap">
-    <div class="section-head" data-release-pinned="0.4.29">
+    <div class="section-head" data-release-pinned="0.4.30">
       <h2>What is tested, and what isn't</h2>
       <p>Tested extensively, but still a young mod, so here is the honest picture. Try it on a copy of a save first.</p>
-      <p>A preview, <a href="https://github.com/timbermods/LateGamePerformance/releases">0.4.30</a>, is on the Releases page marked <strong>Pre-release</strong>. It keeps more terrain searches for the beavers' need picks and has not been played at all yet.</p>
     </div>
     <div class="status-grid">
       <div>
@@ -346,25 +345,24 @@
         <h4>In play</h4>
         <ul class="checks">
           <li>A late-game save of about 350 beavers: noticeably fewer lag spikes, and as the mod grew, reported as "working well" and then "working amazingly well".</li>
-          <li>A 362-beaver colony with <strong>Verify every feature</strong> on: every verify setting that ran reported 0 differences from the game's own code.</li>
+          <li>A 362-beaver colony with <strong>Verify every feature</strong> on: every verify setting reported 0 differences from the game's own code, including the save snapshot at an autosave.</li>
           <li>Multiplayer on two computers, including a 35-minute session logged on both.</li>
         </ul>
         <h4>Against the game's code</h4>
         <ul class="checks">
-          <li>509 automated checks pass against the installed game's own assemblies, including 129 patch targets.</li>
+          <li>523 automated checks pass against the installed game's own assemblies, including 131 patch targets.</li>
           <li>Rebuilt route maps are identical to the game's, node for node, whoever built them, and every map is complete when it is asked for.</li>
           <li>The tree and plant search gives the game's answer in 4,000 random forests, with unreachable, dead and destroyed plants and ties.</li>
           <li>The tick loop, the save snapshot, the plant water levels, the soil lists and the water map copy are each tested against the game's real classes: the same ticks in the same order, the same save, the same levels, the same cells, the same bytes.</li>
-          <li>Resumed terrain searches: every search from scratch is identical node for node, and 1,200 searches all give the game's distance.</li>
+          <li>Resumed terrain searches: every search from scratch is identical node for node, and 1,200 searches all give the game's distance. With searches kept by start tile, the need-pick pattern explored 59% fewer tiles, every distance the game's.</li>
           <li>Nothing that affects the simulation can be changed from a file.</li>
         </ul>
       </div>
       <div class="open-col">
         <h3>Not yet</h3>
         <ul class="checks open">
-          <li>This release itself. It was played as the build before it, which had one more change (a walking replacement that gained nothing and was removed), in two sessions in one colony.</li>
-          <li>The save snapshot check in the game. It needs an autosave with its verify box on.</li>
-          <li>The frames that get slower each evening. They are still unexplained.</li>
+          <li>This release's numbers. It has been played, but the logs of that session have not been read, so its effect on the slow need picks is not measured yet.</li>
+                    <li>The frames that get slower each evening. They are still unexplained.</li>
           <li>A before-and-after of each feature in the same save. The improvement is reported from play and logs.</li>
           <li>A controlled frame-rate benchmark.</li>
           <li>A co-op game where one player has the verify settings on and another has them off.</li>
@@ -388,7 +386,7 @@
       </ol>
     </div>
     <div class="btn-row">
-      <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.29</span></span></a>
+      <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.30</span></span></a>
       <a class="btn btn-ghost" href="install.html">Install guide</a>
       <a class="btn btn-ghost" href="https://github.com/timbermods/LateGamePerformance/issues/new">Report a problem</a>
     </div>
