@@ -54,8 +54,8 @@ namespace LateGamePerformance
                                 "and in multiplayer the other player waits or you fall behind.\n\n" +
                                 "Turning it on adds one line to boot.config in the game's folder (a backup is kept) " +
                                 "and takes effect the next time the game starts. It does not change the simulation.\n\n" +
-                                "You will not be asked again. It can be changed at any time under Mods > Late Game " +
-                                "Performance.")
+                                "You will not be asked again. To change it later, open Mods and press the settings button " +
+                                "beside Late Game Performance.")
                     .SetConfirmButton(TurnOn, "Turn it on")
                     .SetCancelButton(Decline, "Not now")
                     .Show();
@@ -86,7 +86,7 @@ namespace LateGamePerformance
             {
                 _settings.SetBool(DeclinedKey, true);
                 Log.Info("GC: incremental garbage collection was declined in the main menu; not asking again. It can " +
-                         "be turned on under Mods > Late Game Performance.");
+                         "be turned on with the settings button beside Late Game Performance in Mods.");
             }
             catch (Exception exception)
             {
