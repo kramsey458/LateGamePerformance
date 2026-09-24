@@ -17,7 +17,7 @@ notes. There is no CHANGELOG file and no CI (`.github/workflows/` doesn't exist)
 ## Standing rules
 
 - Never launch or drive Timberborn, and never touch installed mods or saves. The maintainer (Kyler) playtests himself.
-- Commit on a branch and open a PR. Merge only when Kyler says so in the chat.
+- Commit on a branch and open a PR. Kyler has said to merge PRs automatically: merge, then check the page live.
 - Release loop (PLAN.md §6): a GitHub pre-release ("preview") first; the site gets only a mention of it. The full site
   update happens when a version becomes Latest, after Kyler has played it, with the docs saying it was played.
 - Nothing that affects the simulation is ever a setting (co-op safety); don't write copy that implies otherwise.
@@ -29,6 +29,11 @@ notes. There is no CHANGELOG file and no CI (`.github/workflows/` doesn't exist)
   https://timbermods.github.io/LateGamePerformance/.
 - **Published:** GitHub Pages (legacy build) serves `main:/docs`, so merging to main publishes (about a minute).
   `docs/.nojekyll` must stay. No build step.
+- **Latest releases update themselves:** when a release becomes GitHub's Latest, `.github/workflows/latest-release.yml`
+  (the shared timbermods workflow) appends the standard footer to its notes, sets the site's
+  `data-release="version|tag|asset-name"` fallback text and the README lines ending in `<!-- latest -->` to the new
+  version, runs the site checks and commits to main. Pre-releases change nothing. Descriptions, status lists and FAQs
+  stay manual (the checklist below). Dry run: Actions → Latest release → Run workflow.
 - **Look:** "Pit Crew". A pit lane at dusk: the race and car are the game's, the crew (the mod) only makes every stop
   shorter. Concrete by day, asphalt by night, painted yellow structure, purple for the mod's result. The look is
   fixed: updates extend it and never restyle it.
