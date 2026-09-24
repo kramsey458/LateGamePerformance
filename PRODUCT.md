@@ -51,7 +51,7 @@ are the same for every player, which is why they are always on rather than setti
 Versus neighbouring mods, truthfully: it is built to run under **BeaverBuddies** co-op (the README links thomaswp's
 original; the repo does not document the Stability Fork separately, so the site should not claim Fork-specific
 testing): its prefixes run last so other mods' prefixes on the same methods run first on every computer, and it has
-reviewed and accepted **BeaverBuddies MultiColony**'s saving code and **MixedStorage**'s capacity rule so those stay on
+reviewed and accepted **Timber Together**'s saving code and **MixedStorage**'s capacity rule so those stay on
 worker threads. It does not claim to beat or replace any other performance mod, and the site should make no such
 comparison. On the rendering side it only trims a few chores (water rendering uploads, audio listener, UI refresh,
 off-screen and far animation, physics sync); Unity's own rendering work is most of a late-game frame and is untouched,
@@ -62,7 +62,7 @@ any difference").
 
 - **Current release:** **0.4.30**, the Latest release (made Latest 2026-09-23). It is 0.4.29 plus terrain searches kept
   per start tile (up to 32, capped at 32 MB) for the ~100 ms need-pick hitches, a compiled search loop, and acceptance
-  of MultiColony 1.4.0-beta12's `ColonyStamp.Save`; 0.4.29 is 0.4.28 without the walking replacement (PathFollow).
+  of Timber Together 1.4.0-beta12's `ColonyStamp.Save`; 0.4.29 is 0.4.28 without the walking replacement (PathFollow).
   There is no preview at the moment. Previews live on the same Releases page marked **Pre-release**.
 - **Game:** built against Timberborn **1.1.2.4** (`MinimumGameVersion` 1.1.2.4). If a game update moves a method a
   feature needs, that feature does not start, the game runs its own code, and the startup line says OFF.

@@ -52,7 +52,7 @@ namespace LateGamePerformance
         // serializers, each with a hash of its Save method as compiled (the IL bytes). A type is used only while
         // its Save is still the one that was read: a game or mod update that changes it leaves the type on the main
         // thread, with a log line, until it is read again and its hash renewed (`dotnet run --project tests --
-        // --hashes` prints the current hashes). Read in the game's 1.1.2.4 source and BeaverBuddies MultiColony
+        // --hashes` prints the current hashes). Read in the game's 1.1.2.4 source and Timber Together
         // 1.4.0-beta2; a type not here keeps its entity on the main thread.
         internal static readonly Dictionary<string, string> Allowed = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -151,7 +151,7 @@ namespace LateGamePerformance
             // time), set into its own entity; the same Save as AreaNeedApplier's and the same read as Growable's.
             { "Timberborn.NeedApplication.WorkshopRandomNeedApplier", "a6fa1368d111df5c" },
             { "Timberborn.FireworkSystem.FireworkLauncher", "3845e4dd4e324f72" },
-            // Several reviewed versions may be listed, separated by '|'. BeaverBuddies MultiColony 1.4.0-beta2 to -beta5:
+            // Several reviewed versions may be listed, separated by '|'. Timber Together 1.4.0-beta2 to -beta5:
             // `if (slot >= 0) Set(...)`; -beta12 adds `ColonyModeService.IsSeparateColonies &&`, a static bool read
             // (`separateNow`), still nothing but its own field and a plain static read (reviewed 2026-09-22).
             { "BeaverBuddies.Colonies.ColonyStamp", "ae23955dc80c940f|cb81466cba22c084" },
@@ -667,7 +667,7 @@ namespace LateGamePerformance
             {
                 // The game's own Create runs next and saves every singleton once more from the start, so those saved
                 // before one threw here have saved twice (the first world is thrown away). Read for 0.4.28: every
-                // singleton Save in the game (51) and in the installed mods (BeaverBuddies MultiColony's 8, Optimized
+                // singleton Save in the game (51) and in the installed mods (Timber Together's 8, Optimized
                 // Local Housing's 1) only reads its own state and writes into the world being built. The one exception,
                 // DateSalter, draws two random numbers for the save's salt: BeaverBuddies keeps that draw off the game's
                 // random sequence in co-op (its DateSalterPatcher marks it as not part of the game), and in a game

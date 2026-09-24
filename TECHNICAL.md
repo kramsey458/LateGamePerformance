@@ -163,7 +163,7 @@ compiler-made closure or iterator class left.
 - `YielderSearchVerify = true` runs the game's own search as well, compares, and logs and counts any difference;
   the game is handed the mod's result either way (up to 0.4.26 it was handed the game's, see Settings for why that
   changed). It is slower than no mod and only for testing.
-- The prefix runs at Harmony's last priority. BeaverBuddies MultiColony has a prefix on the same method that narrows
+- The prefix runs at Harmony's last priority. Timber Together has a prefix on the same method that narrows
   the candidates to the worker's own colony, and Harmony skips such a prefix once one before it has answered; with
   equal priorities the order is the mod load order, which each computer sets for itself. Up to 0.4.25 the filter ran
   first only because BeaverBuddies happened to load first.
@@ -1072,7 +1072,7 @@ would have written; only the thread that wrote part of it down differs.
   `Manufactory`, `GoodConsumingBuilding`, `FarmHouse`, `Forester`, `Floodgate`, `WaterInput`, `WaterMover`, the
   valves, gauges and sensors, the automation buildings, `Deteriorable`, `Wonder`, `Hive`, `FixedStockpile`,
   `GoodObtainer`, `GoodSupplier`, `DistrictDistributionSetting`, `PopulationDistributor`, `BreedingPod`, the need
-  appliers and more; the file lists them all), and the `ColonyStamp` of the owner's BeaverBuddies MultiColony fork
+  appliers and more; the file lists them all), and the `ColonyStamp` of the owner's Timber Together fork
   (a slot number from a field). In the 0.4.23 session 2,975 entities were kept on the main thread by that stamp
   alone. Beavers stay on the main thread (`Character` reads a transform, `MovementAnimator` reads Unity's time,
   `BehaviorManager` and everything else using the reference serializer), as does anything with a component the
@@ -1135,7 +1135,7 @@ would have written; only the thread that wrote part of it down differs.
 - If a worker throws for any reason, the results are discarded, the game's own `Create` runs, and the feature is
   off for the session. The same happens if a singleton's `Save` throws; the game's `Create` then saves every
   singleton once more from the start. That is harmless: every singleton `Save` in the game (51) and in the installed
-  mods (BeaverBuddies MultiColony's 8, Optimized Local Housing's 1) only reads its own state and writes into the
+  mods (Timber Together's 8, Optimized Local Housing's 1) only reads its own state and writes into the
   world being built, except `DateSalter`'s two random draws for the save's salt, which BeaverBuddies keeps off the
   game's random sequence in co-op; alone it only picks another salt. (BackgroundSave's fallback after a failed
   preparation runs the snapshot twice the same way.)
@@ -1253,7 +1253,7 @@ picked up within a fraction of a second. The `SoundListener:` stats line says in
   frames apart from the lists above so the two never share a frame. Its lists are read only by the alert panel's
   rows (count, value, blinking and the warning sound) and by the alert button that selects the next subject; adding
   a status and removing a subject still update them at once, and the value a row shows is read live from the status.
-  BeaverBuddies MultiColony's colony filter is a postfix on the aggregators' `IsVisible`, which runs on the frames
+  Timber Together's colony filter is a postfix on the aggregators' `IsVisible`, which runs on the frames
   that rebuild.
 - `EntityPanel.UpdateSingleton` refreshes every fragment of the selected entity's panel every frame, the largest
   single source of garbage among the game's systems at about 120 KB/s. It runs every second frame now, and always
@@ -1830,7 +1830,7 @@ game's method (one that returns `bool` or takes `ref bool __runOriginal`) must c
 `[HarmonyPriority(Priority.Last)]`, because once one has skipped it Harmony skips every later prefix that could
 change the call (one returning `bool`, or with a `ref`, `out` or reference-type argument): the tests find them all in
 the declared patches, sort each with Harmony's own sorter against another mod's ordinary prefix registered after it,
-and require it to come last, so that other mods' prefixes on the same methods (BeaverBuddies', MultiColony's colony
+and require it to come last, so that other mods' prefixes on the same methods (BeaverBuddies', Timber Together's colony
 filter) run first on every computer whatever the mod load order. They also build a road
 network with the game's own navigation classes and check that parallel route map rebuilds are identical to the
 game's one-by-one rebuilds, that only thrown-away, in-use maps are rebuilt, and that a failing worker is
@@ -1838,7 +1838,7 @@ contained: the maps a failing build leaves do not depend on the worker count, an
 are busy: every map must be complete and correct at the moment it is asked for. They do not run the game.
 
 `dotnet run --project tests -c Release -- --hashes` prints the current hash of every listed snapshot component's
-`Save` (game and, when installed, the BeaverBuddies MultiColony fork), of the shared saving helpers and of the
+`Save` (game and, when installed, the Timber Together fork), of the shared saving helpers and of the
 game's `SaveSingletons` loop, ready to paste into `SaveSnapshot.Allowed`, `SaveGuard.HelpersHash` and
 `SaveSnapshot.SingletonLoopHash` after an update; the ordinary run checks every listed hash against what is
 installed.
