@@ -198,7 +198,8 @@
       <p>It is built to. It needs Harmony and Mod Settings, and beyond that:</p>
       <ul>
         <li>Where another mod changes the same game code, that mod's change runs first, on every computer alike.</li>
-        <li>If another mod changes what the hauling cache or saving relies on, that part is done the slower, safe way unless the change has been reviewed. Timber Together's and MixedStorage's have been reviewed.</li>
+        <li>If another mod changes what the hauling cache or saving relies on, that part is done the slower, safe way unless the change has been reviewed. MixedStorage's has been.</li>
+        <li>Timber Together adds its own part to a save. It is saved on worker threads only with a Timber Together version whose saving code was reviewed; otherwise it is saved on the main thread, as the game does.</li>
       </ul>
       <p>Keep a copy of your save when combining mods.</p>
     </div>
