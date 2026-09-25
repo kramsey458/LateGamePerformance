@@ -154,6 +154,52 @@ run on the main thread and never inside one another; should one ever start insid
 own code. The harness checks that a walk reused 1000 times allocates nothing and that the feature has no
 compiler-made closure or iterator class left.
 
+**No grown tree in reach (new in 0.4.31).** In the 0.4.28 session the full-building stop fired 0 times: the flags
+had room, and the searches still walked every candidate (about 1,100) only to end with nothing to take, because no
+grown tree was in reach. The game's finder hands out a plant only if it is yielding and reached. Once its "found
+something" flag is set, a plant that is not yielding cannot change the answer. So if no marked tree that is yielding
+stands inside the box of the building's terrain route map (every tile the map reaches is inside it, see the reach
+box above), nothing after the plant that found something can change the answer, and the walk ends there, as for a
+full building. The answer is the game's "nothing to take".
+
+To know that without walking, the mod keeps the grown marked trees counted on a grid of the map (`GrownTrees`, a
+two-dimensional Fenwick tree: a few dozen additions per question, whatever the size of the box or the forest):
+
+- The marked trees are mirrored key by key from the game's own list (`TreeCuttingArea._yieldersInArea`). Only
+  `AddYielder` and `RemoveYielder` write it, and after each (a finalizer, so a throw is followed too) the mirror reads
+  the game's entry for that key and follows it. A lumberjack's candidates are this list through the game's `!Reserved`
+  filter and Timber Together's colony filter, which only leave trees out, so counting the whole list only ever
+  counts more.
+- Whether a tree is yielding: `Yielder.IsYielding` is "switched on and yield above 0". The yield is written only by
+  `Yielder`'s own `Initialize`, `ResetYield`, `DecreaseYield`, `SetYieldToZero` and `Load`, and a component is switched
+  on and off only through `BaseComponent.EnableComponent` and `DisableComponent`. Each is hooked and asks the tree
+  again.
+- Where a tree is: the tile of its `CenterPosition`, as the reach box reads it. Only `BlockObjectCenter.UpdateCenter`
+  (on placement) sets it, and it is hooked too. Height is left out, which only counts a tree that is not in the box,
+  never the other way round. Trees off the grid (a map wider than 1,024 tiles) are counted in every box.
+- It is only asked for a lumberjack's search (`LumberjackFlagWorkplaceBehavior.FindCuttable`) of the area the mirror
+  follows, with a reach box the pre-filter trusts. Gatherers and farmers walk as before.
+- It stands down for the session, with one log line, if the code it rests on is not the code that was read (a hash of
+  every method of `Yielder`, `TreeCuttingArea` and `BlockObjectCenter`, the lumberjack's search and the two component
+  switches, game 1.1.2.4), if another mod patches any of those methods, or if a game scene has more than one tree
+  cutting area. That is judged at the first search. If anything throws, it is off for the session and the search walks
+  every candidate, which is the game's result.
+- With `YielderSearchVerify` (or **Verify every feature**), every lumberjack search also counts the game's own list
+  tree by tree and compares it with the grid. A difference is logged as `GrownTrees verify:` and counted in the
+  `GrownTrees:` line; the search is handed the same answer either way.
+
+The tests run the stop on a model of the game's search in 4,000 random forests with positions, reach boxes and marked
+trees the filters leave out, and require the game's answer, that no plant is fetched after the one that found something
+when none is grown in reach, and that every candidate is walked when one is. The grid answers 1,000 random boxes like a
+count over every tree through 20,000 random changes. Against the game's real classes, the tests read `Yielder`'s code
+for every write of its yield (exactly the five hooked methods), `BaseComponent`'s for the switches, `TreeCuttingArea`'s
+for every change to its list (only `AddYielder` and `RemoveYielder`) and `BlockObjectCenter`'s for the centre (only
+`UpdateCenter`). They drive the glue with the game's own `TreeCuttingArea`, `Yielder` and lumberjack behaviour: growing,
+cutting and switching a tree off change the answer as `IsYielding` does, and the verify mode catches a tree switched on
+behind the hooks' back. They also check that another mod's patch on any of the 71 methods stands the stop down and that
+every hooked method is above Mono's inlining limit. The measured case: a flag with no grown tree in reach among 1,100
+marked trees walks 31 of them instead of 1,100.
+
 - The first lookup of a search is still made, whatever the plant: it is also what fills the building's terrain
   route map, and the game reads whether a cached map is filled without filling it when a walker asks for a path
   (`PathfindingService.FindTerrainPathIfCached`, through `AccessFlowField.FoundPath`), so a map filled a tick
@@ -1537,6 +1583,29 @@ From 0.4.30 the one-destination searches from `PathfindingService.FindTerrainPat
 kept searches without calling `FillFlowFieldWithPath`; each reports to the terrain A* timer itself, so the figures
 still count every terrain search.
 
+From 0.4.31 the walker paths are split into their parts, because the 0.4.28 verify session measured 1.8 ms per tick
+of walker paths with only about 0.12 ms of it in the A* searches:
+
+```
+walker paths 12784 in 1800.0 ms (longest 34.00 ms) = path starts 12784 in 40.0 ms (longest 0.20 ms) + destination
+searches 12784 in 1200.0 ms (longest 33.00 ms) (of which paths read out of a map 12700 in 500.0 ms (longest 2.00 ms))
++ paths handed to the follower 12500 in 90.0 ms (longest 0.30 ms) + path bounds 12500 in 30.0 ms (longest 0.10 ms)
++ new path events 12500 in 20.0 ms (longest 0.10 ms) + the rest
+```
+
+"path starts" is `WalkerPathStart.GetPathStart` (where the walk begins, for a beaver inside a building its door);
+"destination searches" is `AccessibleDestination.FindPath` and `PositionDestination.FindPath`, which hold the route
+map lookups, fills and A* searches; "paths read out of a map" is `FlowFieldPathFinder.FindPathInFlowField` inside them
+(all five overloads), building the path's corners; then `PathFollower.StartMovingAlongPath`, `Walker.RecalculatePathBounds`
+and `RunningStateUpdater.OnStartedNewPath`, the one `StartedNewPath` subscriber. Parts are timed only inside a
+`Walker.FindPath`, on the thread running it; "the rest" is the difference. (The numbers above are an illustration.)
+
+The line also times every post on the game's `EventBus` on the main thread, by event type: `event posts N in X ms
+(longest Y ms), M inside another post; most time: <the six event types that took longest>`. Each post calls every
+subscriber through reflection (`MethodInfo.Invoke` with a new argument array), so the figure says whether replacing
+that with compiled delegates is worth a change. Times are inclusive: a post made inside another counts in both types,
+and only the outer one in the total.
+
 ### Walking: PathFollow (0.4.28 only, removed in 0.4.29)
 
 0.4.28 replaced `PathFollower.MoveAlongPath` with a copy that kept the walking beaver's position in a variable between
@@ -1697,6 +1766,16 @@ A third reports the tree and plant search:
 32640 distance lookups, 1247360 left out (97%); 410.0 ms in total (0.641 ms each)
 ```
 
+From 0.4.31 it ends with `; N lumberjack searches stopped at the first tree found because no grown marked tree was in
+reach (M candidates walked in them)`, and a line of its own reports the grown tree count:
+
+```
+[LateGamePerformance] Last 1000 ticks. GrownTrees: 6263 marked trees, 55 grown
+```
+
+With a verify setting on it adds `; verify checks N, mismatches M`; when the count stood down it adds
+`(lumberjack searches walk every candidate: <why>)`.
+
 (The numbers in these examples are illustrations, not measurements. 0.4.6 and 0.4.7 also printed what the mod's
 own work allocated; the game's runtime turned out not to keep the counter that needs, so those figures were never
 shown and the code is gone. A separate per-entity profile put the whole simulation at under a tenth of all
@@ -1750,7 +1829,7 @@ own versions of these only read.
 | `RouteMapsBackground` | `true` | Rebuild in the background; `false` = main thread waits for the whole batch. May differ between peers. |
 | `RouteMapsMinFields` | `4` | Fewer unbuilt maps than this are built directly on the main thread instead of on workers. May differ between peers. |
 | `RouteMapsWorkers` | `0` | Worker threads; `0` = automatic, up to 7. May differ between peers. |
-| `YielderSearchVerify` | `false` | Run the game's own search as well and compare; logs and counts mismatches, the game still gets the mod's result. Slower than no mod. For testing. |
+| `YielderSearchVerify` | `false` | Run the game's own search as well and compare, and count the grown marked trees one by one against the grid; logs and counts mismatches, the game still gets the mod's result. Slower than no mod. For testing. |
 | `Timing` | `true` | The timing stats line. |
 | `SaveTiming` | `true` | One line per save with the time of each stage; also lets the timing line report saves separately. Measurement only. |
 | `RecordTimings` | `false` | A profiling tool: switch on the game's per-component tick timers and write their report. Slows the game a little. |
@@ -1853,12 +1932,15 @@ to `Player.log` and quits; the Save timing line splits each of those saves.
 
 ### What the tests check
 
-The headline results, as of 0.4.30 (moved here from the README, which now gives a short summary):
+The headline results, as of 0.4.31 (moved here from the README, which now gives a short summary):
 
-- 523 automated checks pass against the installed game's assemblies, including 131 patch targets.
+- 543 automated checks pass against the installed game's assemblies, including 154 patch targets. (With a Timber
+  Together build newer than the one reviewed installed, the three save-snapshot checks on `ColonyStamp` fail until its
+  code is read; that depends on the computer, not on the mod.)
 - Rebuilt route maps are identical to the game's, node for node (9.5 million compared), and every map is complete
   when it is asked for.
-- The tree and plant search matches a model of the game's search in 4,000 random forests, with 0 differences.
+- The tree and plant search matches a model of the game's search in 4,000 random forests, with 0 differences, and
+  so does the stop for a lumberjack with no grown tree in reach in another 4,000.
 - Resumed terrain searches run against the game's real search classes on a random terrain: every search from scratch
   is identical node for node, and 1,200 searches in pricing runs all give the game's distance (88% bit for bit, the
   rest within rounding), exploring half the tiles. With searches kept for up to 32 start tiles, the need-pick pattern

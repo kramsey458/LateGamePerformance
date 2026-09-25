@@ -61,7 +61,7 @@ internal static class Program
                      "Timberborn.SimulationSystem", "Timberborn.Common", "Timberborn.Multithreading", "Timberborn.BehaviorSystem",
                      "Timberborn.TimeSystem", "Timberborn.EnterableSystem", "Timberborn.CharacterMovementSystem", "Timberborn.BehaviorSystemUI",
                      "Timberborn.Physics", "Timberborn.SelectionSystem", "Timberborn.ModularShafts", "Timberborn.MechanicalSystem",
-                     "Timberborn.Reproduction", "Timberborn.SimpleOutputBuildings" })
+                     "Timberborn.Reproduction", "Timberborn.SimpleOutputBuildings", "Timberborn.Forestry", "Timberborn.Cutting" })
         {
             Assembly.LoadFrom(Path.Combine(managed, name + ".dll"));
         }
@@ -184,7 +184,7 @@ internal static class Program
             TerrainReach.CreateFeature(), MapChanges.CreateFeature(), BehaviorLog.CreateFeature(), WalkerMove.CreateFeature(),
             PhysicsSync.CreateFeature(), ShaftAnimators.CreateFeature(),
             Plugin.CreateTickFeature(), ParallelTickWait.CreateFeature(),
-            Reachability.CreateFeature(new Config())
+            Reachability.CreateFeature(new Config()), GrownTrees.CreateFeature()
         };
         int patchCount = 0;
         foreach (Feature feature in features)
@@ -199,7 +199,7 @@ internal static class Program
         }
         Check(PatchValidator.HasExceptionFilter(Reflect.Method("Timberborn.GameSaveRuntimeSystem.GameSaver", "Save")),
             "validator: recognises an exception filter (GameSaver.Save, which crashed 0.4.3 when patched)");
-        Check(patchCount == 131, $"131 patches declared (found {patchCount})");
+        Check(patchCount == 154, $"154 patches declared (found {patchCount})");
         TestReplacingPrefixesRunLast(features);
         TestSettingsPage();
         TestHaulCacheFlush();
@@ -215,6 +215,7 @@ internal static class Program
         HomeSearchTests.Run(Check);
         RenderingTests.Run(Check);
         ReachabilityTests.Run(Check);
+        GrownTreesTests.Run(Check);
         TestTurnedOff();
         string[] expectedWarnings =
         {
@@ -234,7 +235,7 @@ internal static class Program
             "ParallelTickWait: one of the game's parallel tasks has failed", "ParallelTickWait: the game's parallel tick was still running after",
             "HomeSearch verify: the mod moves in", "HomeSearch verify: the kept answer for", "HomeSearch failed",
             "PhysicsSync failed", "AnimatorCulling failed", "ShaftAnimators failed",
-            "Reachability verify: node", "Reachability failed"
+            "Reachability verify: node", "Reachability failed", "GrownTrees verify: the index has"
         };
         bool asExpected = warnings.Count == expectedWarnings.Length;
         for (int i = 0; asExpected && i < expectedWarnings.Length; i++)
@@ -1052,6 +1053,7 @@ internal static class Program
         Check(blocked.Lookups == 2000, "yielder search: with nothing reachable nothing can be left out");
 
         TestFullBuildingStop(random);
+        TestNoneGrownStop(random);
         YielderSearchTests.Run(Check);
     }
 
@@ -1163,6 +1165,109 @@ internal static class Program
             plant => false, null, true), good => false);
         Check(nothing == "nothing in range" && none.Pulled == 1300,
             "yielder search: a full building with nothing reachable still walks every candidate and finds nothing in range");
+    }
+
+    // A lumberjack's search with no grown marked tree in reach (0.4.31): the walk stops right after the candidate that
+    // found something, and the answer is the game's. The candidates are part of the marked trees (the game's `!Reserved`
+    // filter and the colony filter only leave trees out); the index counts every marked tree that is yielding, by tile,
+    // and the search asks it about the reach box. Every plant the game's lookup reaches is inside the box (TerrainReach);
+    // the pre-filter is the box itself, as in the game.
+    private static void TestNoneGrownStop(Random random)
+    {
+        int differences = 0, notRightAfter = 0, walkedAll = 0, countedWrong = 0, stoppedSearches = 0, indexWrong = 0;
+        long notWalked = 0;
+        for (int round = 0; round < 4000; round++)
+        {
+            int count = random.Next(0, 60);
+            int side = 8 + random.Next(30);
+            int minX = random.Next(side), minY = random.Next(side);
+            int maxX = minX + random.Next(side / 2), maxY = minY + random.Next(side / 2);
+            // Grown trees rare, rare in the box, or anywhere, so that both answers of the index come up often.
+            double yielding = round % 3 == 0 ? 0 : random.NextDouble() * (round % 3 == 1 ? 0.2 : 1);
+            bool grownOnlyOutside = round % 4 == 1;
+            double alive = random.NextDouble(), reachable = round % 5 == 0 ? 0.05 : random.NextDouble();
+            var room = new Dictionary<string, bool> { ["Log"] = random.Next(3) > 0, ["Pine"] = random.Next(3) > 0 };
+            var marked = new GrownTrees.Index<int, Plant>();
+            var tiles = new Dictionary<Plant, (int X, int Y)>();
+            List<Plant> plants = new List<Plant>();
+            int key = 0;
+            for (int i = 0; i < count + random.Next(10); i++)
+            {
+                int x = random.Next(-2, side + 2), y = random.Next(-2, side + 2);
+                bool inBox = x >= minX && x <= maxX && y >= minY && y <= maxY;
+                Plant plant = new Plant
+                {
+                    Exists = random.NextDouble() > 0.03, Yielding = random.NextDouble() < yielding && !(grownOnlyOutside && inBox),
+                    Alive = random.NextDouble() < alive, Reachable = inBox && random.NextDouble() < reachable,
+                    Good = random.Next(3) == 0 ? "Pine" : "Log", Distance = random.Next(1, 8), Order = i
+                };
+                tiles[plant] = (x, y);
+                marked.Put(key++, plant, x, y, plant.Yielding);
+                // The rest are marked trees the filters left out (reserved by another lumberjack, another colony's).
+                if (i < count)
+                {
+                    plants.Add(plant);
+                }
+            }
+            bool noneGrown = marked.GrownIn(minX, minY, maxX, maxY) == 0;
+            if (noneGrown != (marked.GrownInByWalking(minX, minY, maxX, maxY) == 0)) indexWrong++;
+            Func<Plant, Plant> lookUp = plant => plant.Reachable ? plant : null;
+            Func<Plant, bool> mayReach = plant =>
+            {
+                (int x, int y) = tiles[plant];
+                return x >= minX && x <= maxX && y >= minY && y <= maxY;
+            };
+            int first = plants.FindIndex(plant => plant.Exists && plant.Reachable && (plant.Yielding || plant.Alive));
+            string games = GamesResult(plants.Select(lookUp), good => room[good]);
+            CountedPlants counted = new CountedPlants(plants);
+            var stopping = new YielderSearch.Counters();
+            string mods = GamesResult(YielderSearch.LazyCandidates(counted.Tracked(), plant => plant.Exists, plant => plant.Yielding,
+                plant => plant.Alive, lookUp, reached => reached != null, stopping, plant => room[plant.Good], mayReach, false, noneGrown),
+                good => room[good]);
+            if (games != mods) differences++;
+            if (noneGrown && first >= 0)
+            {
+                stoppedSearches++;
+                if (counted.Pulled != first + 1) notRightAfter++;
+                if (stopping.NoneGrownStopped != 1 || stopping.WalkedInNoneGrownStopped != first + 1 || stopping.Stopped != 0) countedWrong++;
+            }
+            else
+            {
+                if (counted.Pulled != plants.Count) walkedAll++;
+                if (stopping.NoneGrownStopped != 0) countedWrong++;
+            }
+            notWalked += plants.Count - counted.Pulled;
+        }
+        Check(indexWrong == 0, $"grown trees: the index's count in the box agrees with a count over every tree in 4000 random forests ({indexWrong} wrong)");
+        Check(differences == 0, $"yielder search: with no grown marked tree in reach the search gets the game's answer in 4000 random " +
+                                $"forests when the walk stops at the first tree found ({differences} differences)");
+        Check(notRightAfter == 0 && walkedAll == 0,
+            $"yielder search: with no grown tree in reach the walk asks for no tree after the one that found something, and with one " +
+            $"it walks every candidate ({notRightAfter} walks went on, {walkedAll} stopped short)");
+        Check(countedWrong == 0 && stoppedSearches > 300 && notWalked > 5000,
+            $"yielder search: the stops for no grown tree in reach are counted apart from the full-building stops ({stoppedSearches} " +
+            $"searches stopped, {notWalked} candidates not walked, {countedWrong} counted wrong)");
+
+        // The measured case: 1,100 marked trees, none grown in the flag's reach (plenty grown elsewhere), the first 30 out
+        // of reach. The walk ends at the first tree in reach.
+        List<Plant> forest = new List<Plant>();
+        var area = new GrownTrees.Index<int, Plant>();
+        for (int i = 0; i < 1100; i++)
+        {
+            bool inReach = i >= 30 && i % 2 == 0;
+            Plant plant = new Plant { Yielding = !inReach && i % 3 == 0, Alive = true, Reachable = inReach, Distance = i % 53, Order = i };
+            forest.Add(plant);
+            area.Put(i, plant, inReach ? 10 : 100, 10, plant.Yielding);
+        }
+        CountedPlants flag = new CountedPlants(forest);
+        bool none = area.GrownIn(0, 0, 20, 20) == 0;
+        string answer = GamesResult(YielderSearch.LazyCandidates(flag.Tracked(), plant => plant.Exists, plant => plant.Yielding,
+            plant => plant.Alive, plant => plant.Reachable ? plant : null, reached => reached != null, new YielderSearch.Counters(),
+            plant => true, plant => plant.Reachable, false, none), good => true);
+        Check(none && area.Grown > 150 && answer == "nothing to take" && answer == GamesResult(forest.Select(plant => plant.Reachable ? plant : null), good => true) &&
+              flag.Pulled == 31,
+            $"yielder search: a flag with no grown tree in reach among 1100 marked trees ({area.Grown} grown elsewhere) walks {flag.Pulled} " +
+            "of them instead of 1100, and the answer is the game's");
     }
 
     // A verify key is each player's own (the .cfg, the settings page), so it must not change what the game is handed:

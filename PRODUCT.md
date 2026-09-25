@@ -63,7 +63,10 @@ any difference").
 - **Current release:** **0.4.30**, the Latest release (made Latest 2026-09-23). It is 0.4.29 plus terrain searches kept
   per start tile (up to 32, capped at 32 MB) for the ~100 ms need-pick hitches, a compiled search loop, and acceptance
   of Timber Together 1.4.0-beta12's `ColonyStamp.Save`; 0.4.29 is 0.4.28 without the walking replacement (PathFollow).
-  There is no preview at the moment. Previews live on the same Releases page marked **Pre-release**.
+  **0.4.31 is a preview** (a GitHub pre-release, not played yet): lumberjack searches with no grown marked tree in
+  reach stop at the first tree found (`GrownTrees`, exact), and the Diagnostics timers split walker paths into their
+  parts and time EventBus posts by event type. The site mentions it only in `index.html#status`. Previews live on the
+  same Releases page marked **Pre-release**.
 - **Game:** built against Timberborn **1.1.2.4** (`MinimumGameVersion` 1.1.2.4). If a game update moves a method a
   feature needs, that feature does not start, the game runs its own code, and the startup line says OFF.
 - **Requires:** **Harmony 2.4.1+** and **Mod Settings** (`eMka.ModSettings` 1.1.0.0+), both from the Steam Workshop.

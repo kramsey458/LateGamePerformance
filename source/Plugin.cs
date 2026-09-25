@@ -149,6 +149,11 @@ namespace LateGamePerformance
             if (TerrainReach.CreateFeature().Apply(HarmonyId))
             {
                 TerrainReach.Activate();
+                // The grown tree count answers for the reach box, and only the tree search asks it.
+                if (yielderSearch && GrownTrees.CreateFeature().Apply(HarmonyId))
+                {
+                    GrownTrees.Activate();
+                }
             }
             if (BehaviorLog.CreateFeature().Apply(HarmonyId))
             {
@@ -399,7 +404,7 @@ namespace LateGamePerformance
                              SoundListenerSkip.TakeStatsLine(), UiThrottle.TakeStatsLine(), AnimatorCulling.TakeStatsLine(),
                              PhysicsSync.TakeStatsLine(), ShaftAnimators.TakeStatsLine(),
                              TerrainSearch.TakeStatsLine(), IdleEntities.TakeStatsLine(), HomeSearch.TakeStatsLine(),
-                             TerrainReach.TakeStatsLine(), BehaviorLog.TakeStatsLine(), WalkerMove.TakeStatsLine(),
+                             TerrainReach.TakeStatsLine(), GrownTrees.TakeStatsLine(), BehaviorLog.TakeStatsLine(), WalkerMove.TakeStatsLine(),
                              TickWorkers.TakeStatsLine(), SaveSnapshot.TakeStatsLine(), SaveSnapshot.TakeUnlistedLine(),
                              ParallelTickWait.TakeStatsLine(), Reachability.TakeStatsLine()
                          })
@@ -444,6 +449,7 @@ namespace LateGamePerformance
             PlantWater.SceneCreated();
             SoilScans.SceneCreated();
             HomeSearch.SceneCreated();
+            GrownTrees.SceneCreated();
             SaveSnapshot.SceneCreated();
             DistrictCounts.SceneCreated();
             _ticksSinceReport = 0;

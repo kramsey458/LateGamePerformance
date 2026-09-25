@@ -9,7 +9,7 @@ notes. There is no CHANGELOG file and no CI (`.github/workflows/` doesn't exist)
 - Build: `.\build.ps1` (dotnet build + ZIP into `dist/`). Never use `-Install` (it writes into the game's Mods folder).
 - Test: `dotnet run --project tests -c Release` → must end `ALL PASSED`. It loads the installed game's assemblies from
   Steam and never starts the game (about a minute). Counts: 0.4.29 = 509 checks / 129 patch targets, 0.4.30 = 523 /
-  131. It also hashes whatever Timber Together is *installed on this machine* (`ColonyStamp.Save`), so the
+  131, 0.4.31 = 543 / 154. It also hashes whatever Timber Together is *installed on this machine* (`ColonyStamp.Save`), so the
   result is machine-specific: with a Timber Together build newer than the one reviewed, 3 save-snapshot checks fail (seen
   on 2026-09-23) until that code is read and its hash added (`-- --hashes` prints it). That is not a repo defect.
   The harness never reads `docs/`.
