@@ -22,8 +22,8 @@ In a big colony the game does the same work again and again, and you feel it as 
 
 ## What to expect
 
-- **0.4.30 is the latest release** and the recommended download. It has been played on a second computer, but the logs of that session have not been read yet.
-- **0.4.31 is a preview**, not played yet. A lumberjack with no grown tree in reach stops looking sooner, with the same result. The **Diagnostics timers** also time each part of a beaver's path search and every game event.
+- **0.4.31 is the latest release** and the recommended download. It hasn't been played yet. A lumberjack with no grown tree in reach stops looking sooner, with the same result. The **Diagnostics timers** also time each part of a beaver's path search and every game event.
+- 0.4.30 has been played on a second computer, but the logs of that session have not been read yet.
 - 0.4.28 was played in two sessions in a 362-beaver colony. Saves froze for 325 to 430 ms, against 0.8 to 1.3 s on an earlier build of this mod. The overall tick time did not measurably drop in that short session.
 - With **Verify every feature** ticked in that colony, every verify setting reported 0 differences from the game's own code, the save snapshot included. The hauling list took 0.24 ms per request against the game's 0.94 ms.
 - Earlier builds were played in a late-game save of about 350 beavers: noticeably fewer lag spikes, then "working well" and "working amazingly well".
@@ -43,15 +43,15 @@ One difference from the unmodded game is known. Route maps are ready before the 
 
 ## Tested
 
-- 523 automated checks pass against the installed game's own code, including 131 patch targets.
-- Rebuilt route maps match the game's node for node. The tree and plant search matches a model of the game's search in 4,000 random forests. Resumed terrain searches give the game's distances.
+- 543 automated checks pass against the installed game's own code, including 154 patch targets.
+- Rebuilt route maps match the game's node for node. The tree and plant search matches a model of the game's search in 4,000 random forests, and the lumberjack's early stop in 4,000 more. Resumed terrain searches give the game's distances.
 - Played in multiplayer on two computers. Larger groups haven't been reported.
 
 [TECHNICAL.md](TECHNICAL.md#what-the-tests-check) lists what the tests check.
 
 Not yet done:
 
-- The logs of the 0.4.30 session haven't been read, so its gain isn't measured.
+- 0.4.31 hasn't been played, and the logs of the 0.4.30 session haven't been read, so neither gain is measured.
 - The frames that get slower each evening are still unexplained.
 - The verify session covered about twenty minutes of play.
 
@@ -60,7 +60,7 @@ The full list is on the [website](https://timbermods.github.io/LateGamePerforman
 ## Install
 
 1. Install **Harmony** (2.4.1 or newer) and **Mod Settings** from the Steam Workshop.
-2. Download the ZIP from the [latest release](https://github.com/timbermods/LateGamePerformance/releases/latest) (currently v0.4.30), under **Assets**, not **Source code**. <!-- latest -->
+2. Download the ZIP from the [latest release](https://github.com/timbermods/LateGamePerformance/releases/latest) (currently v0.4.31), under **Assets**, not **Source code**. <!-- latest -->
 3. Close Timberborn. Delete any older `LateGamePerformance` folder, then extract the ZIP into `Documents\Timberborn\Mods`. You should get one `LateGamePerformance` folder.
 4. Start Timberborn, enable **Late Game Performance** in the Mods menu, and restart when asked.
 

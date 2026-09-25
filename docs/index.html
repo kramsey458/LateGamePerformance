@@ -44,10 +44,10 @@
         <li><svg viewBox="0 0 22 22" aria-hidden="true"><path d="M3 18h16M5 18V11M9 18V7M13 18V9M17 18V4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span><b>For big colonies.</b> Hundreds of beavers late in a game. A small colony has little repeated work to remove.</span></li>
       </ul>
       <div class="btn-row">
-        <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v10M4.5 7.5L9 12l4.5-4.5M3 15.5h12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download <span data-release="tag">v0.4.30</span></span></a>
+        <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v10M4.5 7.5L9 12l4.5-4.5M3 15.5h12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download <span data-release="tag">v0.4.31</span></span></a>
         <a class="btn btn-ghost" href="install.html">Install guide</a>
       </div>
-      <p class="status-note" role="note" data-release-pinned="0.4.30"><strong>Played in late-game colonies of 350+ beavers,</strong> most recently as this release. Needs Harmony and Mod Settings; try it on a copy of a save. <a href="#status">What is tested, and what isn't</a></p>
+      <p class="status-note" role="note" data-release-pinned="0.4.31"><strong>Played in late-game colonies of 350+ beavers,</strong> most recently as 0.4.30. This release hasn't been played yet. Needs Harmony and Mod Settings; try it on a copy of a save. <a href="#status">What is tested, and what isn't</a></p>
     </div>
     <figure class="pitboard">
         <div class="board" role="img" aria-label="Pit board: hauler job list, per request. The game's own: 0.94 milliseconds. The mod: 0.24 milliseconds. Same list, 0 differences.">
@@ -96,7 +96,7 @@
         </article>
         <article class="station">
           <h3>Lumberjacks search smarter</h3>
-          <p>To find a tree, the game measures the path to every marked tree, though most are still growing. The mod leaves out the measurements that can't change the answer. Lumberjacks, gatherers and farmers get the game's own result.</p>
+          <p>To find a tree, the game measures the path to every marked tree, though most are still growing. The mod leaves out the measurements that can't change the answer, and a lumberjack with no grown tree in reach stops at the first tree. Lumberjacks, gatherers and farmers get the game's own result.</p>
           <dl><dt>Work</dt><dd>Skipped where it can't matter</dd><dt>Checked</dt><dd><code>YielderSearchVerify</code></dd></dl>
         </article>
         <article class="station">
@@ -319,7 +319,7 @@
         <h3>Checked against the game's code</h3>
         <p class="src"><b>Test harness,</b> run against the installed game's own assemblies.</p>
         <ul class="proofs">
-          <li><b>523 checks</b><span>pass, including 131 patch targets</span></li>
+          <li><b>543 checks</b><span>pass, including 154 patch targets</span></li>
           <li><b>9.5 million</b><span>route map nodes compared: every one identical</span></li>
           <li><b>4,000 forests</b><span>random, with 0 differences from the game's tree search</span></li>
           <li><b>1,200 searches</b><span>resumed terrain searches, all at the game's distance</span></li>
@@ -332,10 +332,10 @@
 <!-- ============ status ============ -->
 <section id="status">
   <div class="wrap">
-    <div class="section-head" data-release-pinned="0.4.30">
+    <div class="section-head" data-release-pinned="0.4.31">
       <h2>What is tested, and what isn't</h2>
       <p>Tested extensively, but still a young mod, so here is the honest picture. Try it on a copy of a save first.</p>
-      <p><a href="https://github.com/timbermods/LateGamePerformance/releases/tag/v0.4.31">Preview 0.4.31</a> is out for testing, not played yet. A lumberjack with no grown tree in reach stops looking sooner, with the same result.</p>
+      <p>This release, 0.4.31, hasn't been played yet. Everything under <b>In play</b> is from earlier builds.</p>
     </div>
     <div class="status-grid">
       <div>
@@ -348,9 +348,9 @@
         </ul>
         <h4>Against the game's code</h4>
         <ul class="checks">
-          <li>523 automated checks pass against the installed game's own assemblies, including 131 patch targets.</li>
+          <li>543 automated checks pass against the installed game's own assemblies, including 154 patch targets.</li>
           <li>Rebuilt route maps are identical to the game's, node for node.</li>
-          <li>The tree and plant search gives the game's answer in 4,000 random forests.</li>
+          <li>The tree and plant search gives the game's answer in 4,000 random forests, and the lumberjack's early stop in 4,000 more.</li>
           <li>The tick loop, saves, plant water, soil and the water map copy each match the game's own code.</li>
           <li>Resumed terrain searches give the game's distance in every test.</li>
         </ul>
@@ -358,7 +358,7 @@
       <div class="open-col">
         <h3>Not yet</h3>
         <ul class="checks open">
-          <li>This release's numbers. It has been played, but the logs of that session haven't been read yet.</li>
+          <li>This release in play. 0.4.30 was played, but the logs of that session haven't been read yet.</li>
           <li>The frames that get slower each evening. They are still unexplained.</li>
           <li>A verify session longer than about twenty minutes of play.</li>
           <li>A before-and-after of each feature in the same save. The improvement is reported from play and logs.</li>
@@ -384,7 +384,7 @@
       </ol>
     </div>
     <div class="btn-row">
-      <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.30</span></span></a>
+      <a class="btn btn-primary" href="https://github.com/timbermods/LateGamePerformance/releases/latest" data-release-href="download"><span>Download <span data-release="tag">v0.4.31</span></span></a>
       <a class="btn btn-ghost" href="install.html">Install guide</a>
       <a class="btn btn-ghost" href="https://github.com/timbermods/LateGamePerformance/issues/new">Report a problem</a>
     </div>
