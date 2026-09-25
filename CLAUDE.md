@@ -138,7 +138,7 @@ When asked to "update the website for the latest release, consistent with the de
    `gh release view <tag> -R timbermods/LateGamePerformance`, README, TECHNICAL.md, PRODUCT.md. List every
    player-facing change. A new **preview** gets only the `#status` mention (step 2); a new **Latest** gets all of it.
 2. Update every place the site states a changed fact:
-   - Static release fallbacks: `grep -rn "0\.4\.30\|3393e5ab" docs` (today's Latest is 0.4.30): `data-release="tag"`
+   - Static release fallbacks: `grep -rn "0\.4\.31\|1de66eb6" docs` (today's Latest is 0.4.31): `data-release="tag"`
      on both index Download buttons; `data-release="asset-name"` in install step 3 and `#checksum`; the
      `data-release="sha256"` hash in `install.html#checksum` (get it with `gh release view <tag> -R
      timbermods/LateGamePerformance --json assets -q '.assets[]|.name+" "+.digest'`); `data-release="version"` in the
@@ -147,7 +147,7 @@ When asked to "update the website for the latest release, consistent with the de
      (includes the preview paragraph), `faq.html#how-much`. Rewrite each for the new build, then bump the attribute.
    - Status: `index.html#status` Tested / Not yet lists, the hero status note, `#coop` "Played in multiplayer" item,
      `faq.html#co-op-tested`, all matching README's "What to expect" and "Tested".
-   - Test counts (523 / 131 today): `index.html` `.proofs` and the `#status` list.
+   - Test counts (543 / 154 today): `index.html` `.proofs` and the `#status` list.
    - Startup line (12 features today): the tower `<ol>` in `index.html#coop`, the full `Simulation features:` line in
      `install.html#verify` and the `troubleshooting.html#log` table. If features
      change, update the count everywhere: site.js's comment, DESIGN.md (tower), PRODUCT.md, the surface brief.

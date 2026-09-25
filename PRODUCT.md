@@ -60,13 +60,13 @@ any difference").
 
 ## Operating Context
 
-- **Current release:** **0.4.30**, the Latest release (made Latest 2026-09-23). It is 0.4.29 plus terrain searches kept
-  per start tile (up to 32, capped at 32 MB) for the ~100 ms need-pick hitches, a compiled search loop, and acceptance
-  of Timber Together 1.4.0-beta12's `ColonyStamp.Save`; 0.4.29 is 0.4.28 without the walking replacement (PathFollow).
-  **0.4.31 is a preview** (a GitHub pre-release, not played yet): lumberjack searches with no grown marked tree in
-  reach stop at the first tree found (`GrownTrees`, exact), and the Diagnostics timers split walker paths into their
-  parts and time EventBus posts by event type. The site mentions it only in `index.html#status`. Previews live on the
-  same Releases page marked **Pre-release**.
+- **Current release:** **0.4.31**, the Latest release (made Latest 2026-09-25, not played yet). It is 0.4.30 plus
+  lumberjack searches that stop at the first tree found when no grown marked tree is in reach (`GrownTrees`, exact),
+  and Diagnostics timers that split walker paths into their parts and time EventBus posts by event type. 0.4.30 is
+  0.4.29 plus terrain searches kept per start tile (up to 32, capped at 32 MB) for the ~100 ms need-pick hitches, a
+  compiled search loop, and acceptance of Timber Together 1.4.0-beta12's `ColonyStamp.Save`; 0.4.29 is 0.4.28 without
+  the walking replacement (PathFollow). There is no preview at the moment. Previews live on the same Releases page
+  marked **Pre-release**.
 - **Game:** built against Timberborn **1.1.2.4** (`MinimumGameVersion` 1.1.2.4). If a game update moves a method a
   feature needs, that feature does not start, the game runs its own code, and the startup line says OFF.
 - **Requires:** **Harmony 2.4.1+** and **Mod Settings** (`eMka.ModSettings` 1.1.0.0+), both from the Steam Workshop.
@@ -75,7 +75,7 @@ any difference").
   `manifest.json`, `Scripts\LateGamePerformance.dll`). Stores nothing in saves; uninstall = disable and restart.
 - **Co-op:** every player installs the **same mod version** and runs the **same game version**; nothing else has to
   match, because **nothing that affects the simulation is a setting**. The startup line reads the same on every
-  computer; for 0.4.30 it lists twelve simulation features:
+  computer; for 0.4.31 it lists twelve simulation features:
   `Simulation features: HaulCache on, RouteMaps on, YielderSearch on, TerrainMaps on, PlantWater on, DistrictCounts on,
   WaterMapCopy on, SoilScans on, TerrainSearch on, IdleEntities on, HomeSearch on, Reachability on.`
   Incremental garbage collection, thread counts, timing logs and the verify settings may differ between players. All
@@ -103,7 +103,7 @@ any difference").
   self-hosted, OFL) and `textures/` (three procedural WebP surfaces from `make_textures.py`). Fast, lightweight,
   mobile-friendly, no external fonts or CDNs at runtime.
 - **Site tests and CI: none.** The repo has no `.github/workflows/`, and the C# harness in `tests/`
-  (`dotnet run --project tests -c Release`; 509 checks / 129 patch targets for 0.4.29, 523 / 131 for 0.4.30 (the current release)) checks the
+  (`dotnet run --project tests -c Release`; 509 checks / 129 patch targets for 0.4.29, 523 / 131 for 0.4.30, 543 / 154 for 0.4.31 (the current release)) checks the
   mod against the game's assemblies and never reads `docs/`. The contracts below are therefore unenforced; every site
   change must keep them by hand (and could add a site check like MixedStorage's `tests/test-site.mjs` only if asked):
   1. `docs/release.js` is the shared Timbermods release script, byte-identical to MixedStorage's copy (SHA-1
@@ -115,11 +115,11 @@ any difference").
      `data-release-show="prerelease|stable"`, and appends a note to `data-release-pinned="X"` elements when the Latest
      release is not X. It reads only the release GitHub marks Latest (pre-releases ignored), caches 30 minutes in
      `localStorage` (`tbmods.release.v1.timbermods/LateGamePerformance`), writes only text and `href`.
-  3. The HTML keeps working fallbacks: download links point at `/releases/latest`; the version (`0.4.30`), tag, ZIP
-     name `LateGamePerformance-0.4.30.zip` and SHA-256 `3393e5ab…7a45ccb7` are written in by hand. Current uses:
+  3. The HTML keeps working fallbacks: download links point at `/releases/latest`; the version (`0.4.31`), tag, ZIP
+     name `LateGamePerformance-0.4.31.zip` and SHA-256 `1de66eb6…95e34f9e` are written in by hand. Current uses:
      the index hero and closing Download buttons (`tag`), install step 3 and `#checksum` (`Get-FileHash` line and hash), the
      install and troubleshooting `loading.` log lines, troubleshooting `#crash`.
-  4. Text written for one build carries `data-release-pinned="0.4.30"`: the index hero notice, the index `#status`
+  4. Text written for one build carries `data-release-pinned="0.4.31"`: the index hero notice, the index `#status`
      head, and the FAQ "How much faster" answer. When a new Latest ships, rewrite that text and bump the attribute.
   5. `404.html` loads `style.css` and `favicon.svg` and links by absolute `/LateGamePerformance/` paths, is
      `noindex`, and loads no scripts except the theme snippet.
@@ -138,7 +138,7 @@ any difference").
   release notes. There is no CHANGELOG file: version history lives in the release notes and TECHNICAL.md's "new in"
   markers. Where site and README disagree, flag it.
 - **Site and README agree** as of the Pit Crew redesign (2026-09-23): every copy of the startup line lists the twelve
-  0.4.29 features (unchanged in 0.4.30), player pages carry no version tags or version histories, and the README's played-session wording is
+  0.4.29 features (unchanged in 0.4.30 and 0.4.31), player pages carry no version tags or version histories, and the README's played-session wording is
   consistent. One small wording difference is left on purpose: `install.html` says "It is a young mod, so try it on a
   copy of your save" where the README says "It is still a young mod, so try it on a copy of a save first".
 - **Standing rules:** player pages describe the mod **as it is now**; version history belongs in the release notes and
@@ -153,11 +153,11 @@ any difference").
   line; "turned itself off"; worker threads; main thread; **preview** (a GitHub pre-release) vs **latest release**.
   Feature names in logs are exact identifiers (HaulCache, RouteMaps, YielderSearch, …): never paraphrase them in code
   blocks.
-- **Honest status** (0.4.30): played in a ~350-beaver late-game save (0.4.8 noticeably fewer lag spikes, 0.4.14
+- **Honest status** (0.4.31): played in a ~350-beaver late-game save (0.4.8 noticeably fewer lag spikes, 0.4.14
   "working well", 0.4.23 "working amazingly well"); 0.4.28 played in a 362-beaver colony (saves 325–430 ms instead of
   0.8–1.3 s) and again with **Verify every feature**: every verify mode reported 0 differences, the save snapshot at an
   autosave included. 0.4.30 has been played by the owner on a second computer; its logs have not been read, so its
-  effect on the need-pick hitches is unmeasured. Played in multiplayer on two computers (two players only; larger
+  effect on the need-pick hitches is unmeasured. 0.4.31 (the lumberjack early stop) has not been played. Played in multiplayer on two computers (two players only; larger
   groups unreported). **Not yet verified:** the frames that get slower each evening (unexplained); a co-op game with
   verify on for one player and off for another; the main-menu incremental-collection notice; any controlled
   frame-rate benchmark. Say this plainly, with "try it on a copy of a save", without alarm.
@@ -187,7 +187,8 @@ any difference").
   2,000 path lookups vs 51; 420 route maps on a 22,600-tile road network, about 1.8 s one at a time vs about 0.23 s on 7
   workers (harness network is heavier than a real colony's); 9.5 million route-map nodes compared, all identical; 0
   differences from a model of the game's tree search in 4,000 random forests; resumed terrain searches, 1,200 searches
-  all at the game's distance (88% bit for bit, the rest within rounding), half the tiles explored. 0.4.30 only:
+  all at the game's distance (88% bit for bit, the rest within rounding), half the tiles explored; the lumberjack
+  early stop (0.4.31) with 0 differences in another 4,000 forests. 0.4.30 only:
   need-pick pattern 1.38 M tiles vs 3.37 M (59% fewer), 4,817 bit for bit + 463 within float rounding, 0 different.
 - **Real numbers, played:** incremental GC, one 35-minute two-computer multiplayer session: 39 freezes, median 675 ms
   (~30 s total) without, one frame over 50 ms (outside saves) with; two different computers, so hardware counts too;
