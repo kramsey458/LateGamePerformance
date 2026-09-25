@@ -23,6 +23,7 @@ In a big colony the game does the same work again and again, and you feel it as 
 ## What to expect
 
 - **0.4.30 is the latest release** and the recommended download. It has been played on a second computer, but the logs of that session have not been read yet.
+- **0.4.31 is a preview**, not played yet. A lumberjack with no grown tree in reach stops looking sooner, with the same result. The **Diagnostics timers** also time each part of a beaver's path search and every game event.
 - 0.4.28 was played in two sessions in a 362-beaver colony. Saves froze for 325 to 430 ms, against 0.8 to 1.3 s on an earlier build of this mod. The overall tick time did not measurably drop in that short session.
 - With **Verify every feature** ticked in that colony, every verify setting reported 0 differences from the game's own code, the save snapshot included. The hauling list took 0.24 ms per request against the game's 0.94 ms.
 - Earlier builds were played in a late-game save of about 350 beavers: noticeably fewer lag spikes, then "working well" and "working amazingly well".

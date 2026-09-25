@@ -183,6 +183,19 @@ namespace LateGamePerformance
                    grid.z >= box.MinZ && grid.z <= box.MaxZ;
         }
 
+        // Whether MayReach answers from the box. False (no box, or a map cleared since its box was made) means it
+        // answers "maybe" for every tile.
+        internal static bool Trusted(Box box)
+        {
+            return box != null && box.Valid && _isFilled(box.Field);
+        }
+
+        // The tile of a world position, as MayReach reads it (GrownTrees files each tree under it).
+        internal static Vector3Int GridOf(Vector3 worldPosition)
+        {
+            return _worldToGrid(worldPosition);
+        }
+
         // For the tests: a box from explicit bounds and a stand-in map.
         internal static Box BoxForTests(object field, Vector3Int min, Vector3Int max)
         {

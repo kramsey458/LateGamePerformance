@@ -68,6 +68,14 @@ namespace LateGamePerformance
     // still made. This stands down for the session if another mod patches one of the methods the argument rests on
     // (FullStopMethods), and is decided at the first search, when every mod has patched what it patches.
     //
+    // A lumberjack's search with no grown tree in reach stops at the first tree found too (0.4.31). The 0.4.28 session
+    // showed the full-building stop firing 0 times: the flags had room, and the searches walked every candidate only to
+    // find no grown tree in reach. GrownTrees keeps the marked trees that are yielding counted on a grid of the map, and
+    // when none of them lies inside the box of the building's terrain route map, no candidate still to come can be both
+    // yielding and reached, so nothing after the candidate that found something can change the finder's answer ("nothing
+    // to take"). The walk ends there, as for a full building; the first lookup is made as before. See GrownTrees for what
+    // the count rests on and when it stands down.
+    //
     // No garbage per search (0.4.28): the walk is one object kept for all searches (Walk) instead of an iterator, and
     // the delegates it calls are made once and read the search's inventory, access and lifting capacity from fields
     // set for the length of the search, instead of two closures and two delegates made per search. Searches run on the
@@ -89,6 +97,9 @@ namespace LateGamePerformance
             // walked in them.
             public long Stopped;
             public long WalkedInStopped;
+            // The same for a lumberjack's search with no grown marked tree in reach (GrownTrees, 0.4.31).
+            public long NoneGrownStopped;
+            public long WalkedInNoneGrownStopped;
         }
 
         // The rule, free of game types so the tests can check it against a model of the game's search. A plant that
@@ -99,14 +110,16 @@ namespace LateGamePerformance
         // without the mod. One that may be reached is told by mayReach, a pre-filter that only ever says "no" when
         // the game's lookup would say "unreachable" (TerrainReach), so the lookup is skipped for it. stopWhenFound says
         // that the building has room for no good at all (IsFullyReserved), and then the walk ends once something is
-        // found (see the top of the file).
+        // found (see the top of the file). noneGrown says that no plant among the candidates can be both yielding and
+        // reached (GrownTrees), and ends the walk at the same place for that reason.
         internal static IEnumerable<TReached> LazyCandidates<TPlant, TReached>(IEnumerable<TPlant> plants,
             Func<TPlant, bool> exists, Func<TPlant, bool> isYielding, Func<TPlant, bool> isAlive,
             Func<TPlant, TReached> lookUp, Func<TReached, bool> wasReached, Counters counters,
-            Func<TPlant, bool> canBeTaken = null, Func<TPlant, bool> mayReach = null, bool stopWhenFound = false)
+            Func<TPlant, bool> canBeTaken = null, Func<TPlant, bool> mayReach = null, bool stopWhenFound = false,
+            bool noneGrown = false)
         {
             return new Walk<TPlant, TReached>().Start(plants, exists, isYielding, isAlive, lookUp, wasReached, counters,
-                canBeTaken, mayReach, stopWhenFound);
+                canBeTaken, mayReach, stopWhenFound, noneGrown);
         }
 
         // The walk of LazyCandidates, written out as an enumerator so that one object can serve every search (up to
@@ -125,6 +138,7 @@ namespace LateGamePerformance
             private Func<TPlant, bool> _canBeTaken;
             private Func<TPlant, bool> _mayReach;
             private bool _stopWhenFound;
+            private bool _noneGrown;
 
             private IEnumerator<TPlant> _source;
             private TReached _current;
@@ -137,7 +151,7 @@ namespace LateGamePerformance
             internal Walk<TPlant, TReached> Start(IEnumerable<TPlant> plants, Func<TPlant, bool> exists,
                 Func<TPlant, bool> isYielding, Func<TPlant, bool> isAlive, Func<TPlant, TReached> lookUp,
                 Func<TReached, bool> wasReached, Counters counters, Func<TPlant, bool> canBeTaken,
-                Func<TPlant, bool> mayReach, bool stopWhenFound)
+                Func<TPlant, bool> mayReach, bool stopWhenFound, bool noneGrown = false)
             {
                 _plants = plants;
                 _exists = exists;
@@ -149,6 +163,7 @@ namespace LateGamePerformance
                 _canBeTaken = canBeTaken;
                 _mayReach = mayReach;
                 _stopWhenFound = stopWhenFound;
+                _noneGrown = noneGrown;
                 _source = null;
                 _current = default;
                 _handedOut = false;
@@ -175,7 +190,7 @@ namespace LateGamePerformance
                     return this;
                 }
                 Walk<TPlant, TReached> again = new Walk<TPlant, TReached>().Start(_plants, _exists, _isYielding, _isAlive,
-                    _lookUp, _wasReached, _counters, _canBeTaken, _mayReach, _stopWhenFound);
+                    _lookUp, _wasReached, _counters, _canBeTaken, _mayReach, _stopWhenFound, _noneGrown);
                 again._handedOut = true;
                 return again;
             }
@@ -195,12 +210,21 @@ namespace LateGamePerformance
                 {
                     return false;
                 }
-                if (_foundSomething && _stopWhenFound)
+                if (_foundSomething && (_stopWhenFound || _noneGrown))
                 {
-                    // The building has room for nothing and the candidate that found something went to the finder on
-                    // the previous call: the answer is "nothing to take", whatever else is on the list.
-                    _counters.Stopped++;
-                    _counters.WalkedInStopped += _walked;
+                    // The building has room for nothing, or no plant still to come can be yielding and reached, and the
+                    // candidate that found something went to the finder on the previous call: the answer is "nothing to
+                    // take", whatever else is on the list.
+                    if (_stopWhenFound)
+                    {
+                        _counters.Stopped++;
+                        _counters.WalkedInStopped += _walked;
+                    }
+                    else
+                    {
+                        _counters.NoneGrownStopped++;
+                        _counters.WalkedInNoneGrownStopped += _walked;
+                    }
                     return Finish();
                 }
                 if (_source == null)
@@ -432,17 +456,19 @@ namespace LateGamePerformance
                 "out ({4:0}%), of which {11} dead plants and {12} plants outside the route map's reach; {5:0.0} ms in total " +
                 "({6:0.000} ms each); outcomes: {8} found work, {9} found nothing the building has room for or the worker " +
                 "can take, {10} found nothing in range; {13} searches stopped at the first plant found because the " +
-                "building had no room left ({14} candidates walked in them){15}{7}",
+                "building had no room left ({14} candidates walked in them); {16} lumberjack searches stopped at the " +
+                "first tree found because no grown marked tree was in reach ({17} candidates walked in them){15}{7}",
                 _searches, Totals.Candidates, Totals.Lookups, skipped,
                 Totals.Candidates > 0 ? 100.0 * skipped / Totals.Candidates : 0,
                 _stopwatchTicks * 1000.0 / Stopwatch.Frequency,
                 _searches > 0 ? _stopwatchTicks * 1000.0 / Stopwatch.Frequency / _searches : 0,
                 _verify ? $"; verify mismatches {_verifyMismatches}" : "", _found, _nothingToTake, _nothingInRange,
                 Totals.DeadSkipped, Totals.OutOfReach, Totals.Stopped, Totals.WalkedInStopped,
-                _fullStopOff != null ? $" (searches of a full building walk every candidate: {_fullStopOff})" : "");
+                _fullStopOff != null ? $" (searches of a full building walk every candidate: {_fullStopOff})" : "",
+                Totals.NoneGrownStopped, Totals.WalkedInNoneGrownStopped);
             _searches = _stopwatchTicks = _found = _nothingToTake = _nothingInRange = 0;
             Totals.Candidates = Totals.Lookups = Totals.DeadSkipped = Totals.OutOfReach = 0;
-            Totals.Stopped = Totals.WalkedInStopped = 0;
+            Totals.Stopped = Totals.WalkedInStopped = Totals.NoneGrownStopped = Totals.WalkedInNoneGrownStopped = 0;
             return line;
         }
 
@@ -569,9 +595,15 @@ namespace LateGamePerformance
                 RoomForGood.Clear();
                 Func<Yielder, bool> mayReach = ReachFilter(start);
                 bool noRoom = HasNoRoom(receivingInventory);
+                // Only with the box as the pre-filter: a building with no access (NoReach) or no box leaves it out.
+                bool noneGrown = !noRoom && mayReach == InReach && GrownTrees.NoneGrownIn(_reachBox);
+                if (_verify && mayReach == InReach)
+                {
+                    GrownTrees.Check(_reachBox);
+                }
                 YielderSearchResult result = finder.FindLivingYielder(receivingInventory, liftingCapacity,
                     SharedWalk.Start(yielders, ExistsCall, IsYieldingCall, IsAliveCall, LookUpCall, WasReachedCall, Totals,
-                        CanBeTakenCall, mayReach, noRoom));
+                        CanBeTakenCall, mayReach, noRoom, noneGrown));
                 _searches++;
                 _stopwatchTicks += Stopwatch.GetTimestamp() - started;
                 if (result.HasYielder) _found++;

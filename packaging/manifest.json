@@ -1,6 +1,6 @@
 {
   "Name": "Late Game Performance",
-  "Version": "0.4.30",
+  "Version": "0.4.31",
   "Id": "kyler.lategameperformance",
   "MinimumGameVersion": "1.1.2.4",
   "Description": "Fewer lag spikes in large colonies. Removes work the game repeats over and over in big late-game colonies, and every change gives the game's own result: hauling job lists are cached, route maps are rebuilt on worker threads after road changes, tree searches skip checks that cannot change the answer, more of each tick and each save runs off the main thread, and the game no longer tries to catch up a long frame all at once. Optional incremental garbage collection shortens memory clean-up freezes. Built for BeaverBuddies co-op: every player installs the same version of the mod and runs the same game version, and no setting changes the simulation.",
